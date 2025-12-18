@@ -1,0 +1,17 @@
+# Hub Gateway Requirements
+# AI Assistant Hub - Main Gateway Service
+
+# Core Framework
+Flask>=3.0.0
+flask-cors>=4.0.0
+
+# System Monitoring
+psutil>=5.9.0
+
+# Environment Management
+python-dotenv>=1.0.0
+
+# Additional Dependencies (from project root)
+# These should be installed from the main requirements.txt
+# - config.model_config
+# - config.logging_config

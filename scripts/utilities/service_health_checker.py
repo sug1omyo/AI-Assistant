@@ -1,6 +1,8 @@
 """
-AI-Powered Service Health Checker
+AI-Powered Service Health Checker (Enhanced with Hub Gateway Features)
 Uses Gemini 2.0 Flash (or Grok as fallback) to verify dependencies and fix issues
+Enhanced with system monitoring, metrics tracking, and smart diagnostics
+Version: 2.1.0
 """
 
 import os
@@ -9,9 +11,18 @@ import json
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
+from datetime import datetime
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+# System monitoring (from Hub Gateway)
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+    print("[WARNING] psutil not installed. System metrics disabled.")
 
 try:
     from google import genai
@@ -26,18 +37,24 @@ try:
 except ImportError:
     HAS_OPENAI = False
 
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
+# Fix dotenv import error
+try:
+    from dotenv import load_dotenv
+    HAS_DOTENV = True
+    # Load environment variables
+    load_dotenv()
+except ImportError:
+    HAS_DOTENV = False
+    print("[WARNING] python-dotenv not installed. Environment variables from .env won't be loaded.")
 
 class ServiceHealthChecker:
-    """AI-powered health checker for service dependencies"""
+    """AI-powered health checker for service dependencies with system monitoring"""
     
     def __init__(self, service_name: str, service_path: str):
         self.service_name = service_name
         self.service_path = Path(service_path)
         self.requirements_path = self.service_path / "requirements.txt"
+        self.start_time = datetime.now()
         
         # Detect venv path (different services use different names)
         possible_venv_names = ["venv", "venv_chatbot", "lora", ".venv"]
@@ -56,6 +73,57 @@ class ServiceHealthChecker:
         self.ai_client = None
         self.ai_type = None
         self._init_ai_client()
+    
+    def get_system_metrics(self) -> Dict[str, any]:
+        """Get system metrics like Hub Gateway (Enhanced Feature)"""
+        if not HAS_PSUTIL:
+            return {
+                'available': False,
+                'message': 'psutil not installed'
+            }
+        
+        try:
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+            
+            return {
+                'available': True,
+                'cpu_percent': round(cpu_percent, 2),
+                'memory': {
+                    'total_gb': round(memory.total / 1024 / 1024 / 1024, 2),
+                    'available_gb': round(memory.available / 1024 / 1024 / 1024, 2),
+                    'percent_used': round(memory.percent, 2)
+                },
+                'disk': {
+                    'total_gb': round(disk.total / 1024 / 1024 / 1024, 2),
+                    'free_gb': round(disk.free / 1024 / 1024 / 1024, 2),
+                    'percent_used': round(disk.percent, 2)
+                },
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            return {
+                'available': False,
+                'error': str(e)
+            }
+    
+    def print_system_status(self):
+        """Print system status like Hub Gateway"""
+        metrics = self.get_system_metrics()
+        
+        if not metrics['available']:
+            return
+        
+        print("\n" + "=" * 60)
+        print("📊 SYSTEM METRICS (Enhanced Hub Gateway Feature)")
+        print("=" * 60)
+        print(f"🖥️  CPU Usage:     {metrics['cpu_percent']}%")
+        print(f"💾 RAM Available:  {metrics['memory']['available_gb']} GB / {metrics['memory']['total_gb']} GB")
+        print(f"📈 RAM Usage:      {metrics['memory']['percent_used']}%")
+        print(f"💿 Disk Free:      {metrics['disk']['free_gb']} GB / {metrics['disk']['total_gb']} GB")
+        print(f"📊 Disk Usage:     {metrics['disk']['percent_used']}%")
+        print("=" * 60 + "\n")
     
     def _init_ai_client(self):
         """Initialize AI client (Gemini or Grok fallback)"""
@@ -327,10 +395,13 @@ Return ONLY valid JSON, no markdown."""
         return True
     
     def full_health_check(self, test_command: Optional[str] = None) -> bool:
-        """Run complete health check with auto-fix"""
+        """Run complete health check with auto-fix (Enhanced with Hub Gateway features)"""
         print(f"\n{'='*80}")
-        print(f"SERVICE HEALTH CHECK: {self.service_name}")
+        print(f"🔍 SERVICE HEALTH CHECK: {self.service_name} (Enhanced v2.1.0)")
         print(f"{'='*80}")
+        
+        # Show system metrics first (Hub Gateway feature)
+        self.print_system_status()
         
         # Step 1: Check dependencies
         deps_ok, missing = self.check_dependencies()

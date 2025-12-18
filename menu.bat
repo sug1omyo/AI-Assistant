@@ -40,11 +40,15 @@ echo   C. Check Status
 echo.
 echo   [UTILITIES]
 echo   T. Run Tests
-echo   H. Health Check ALL (AI-Powered)
+echo   H. Health Check ALL (Basic)
+echo   I. Health Check Enhanced (Hub Tech v2.1)
 echo   L. Activate venv
 echo   K. Clean Logs
-echo   P. Setup All Services
+echo   P. Setup All Services (Enhanced v2.1)
+echo   E. Setup Enhanced (Hub Gateway Tech)
 echo   V. Setup venv for all
+echo   M. Setup SD Models (Auto-download)
+echo   N. Check SD Models
 echo.
 echo   [EXIT]
 echo   Q. Quit
@@ -70,10 +74,14 @@ if /i "%choice%"=="C" start "Check Status" cmd /k "scripts\archive\check-status.
 
 if /i "%choice%"=="T" start "Run Tests" cmd /k "scripts\test-all.bat" & goto MENU
 if /i "%choice%"=="H" start "Health Check" cmd /k "scripts\health-check-all.bat" & goto MENU
+if /i "%choice%"=="I" start "Enhanced Health Check" cmd /k "scripts\health-check-enhanced.bat" & goto MENU
 if /i "%choice%"=="L" call .venv\Scripts\activate.bat & exit /b
 if /i "%choice%"=="K" start "Clean Logs" cmd /k "scripts\archive\clean-logs.bat" & goto MENU
 if /i "%choice%"=="P" start "Setup All Services" cmd /k "scripts\setup-all.bat" & goto MENU
+if /i "%choice%"=="E" start "Enhanced Setup" cmd /k "scripts\setup-enhanced.bat" & goto MENU
 if /i "%choice%"=="V" start "Setup venv" cmd /k "scripts\setup-venv-all.bat" & goto MENU
+if /i "%choice%"=="M" start "Setup SD Models" cmd /k "scripts\setup-sd-models.bat" & goto MENU
+if /i "%choice%"=="N" start "Check SD Models" cmd /k "scripts\check-sd-models.bat" & goto MENU
 
 if /i "%choice%"=="Q" exit
 

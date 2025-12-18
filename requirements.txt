@@ -31,7 +31,7 @@
 #   pip install torch torchvision torchaudio
 # ============================================================================
 setuptools<81.0.0
-torch==2.6.0
+torch==2.1.2
 torchvision==0.16.2
 torchaudio==2.1.2
 numpy>=1.20.0,<2.0.0
@@ -101,7 +101,7 @@ pydub>=0.25.1
 # IMAGE & DOCUMENT PROCESSING
 # ============================================================================
 Pillow>=10.3.0
-opencv-python>=4.8.1.78  # Security fix: GHSA-qr4w-53vh-m672 (HIGH severity)
+opencv-python<=4.6.0.66  # Compatible with paddleocr 2.7.3 (security note: consider upgrading paddleocr for latest opencv)
 paddleocr==2.7.3
 paddlepaddle==2.6.2
 PyMuPDF==1.23.8
