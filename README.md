@@ -9,7 +9,6 @@
 
 <div>
 
-    <!-- Badges Row 1 -->
 <p>
 <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
 <img src="https://img.shields.io/badge/Flask-3.0-000000?style=for-the-badge&logo=flask&logoColor=white"/>
