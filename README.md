@@ -6,6 +6,11 @@
 <!-- Typing Animation -->
 <a href="https://git.io/typing-svg"><img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=22&duration=3000&pause=1000&color=6366F1&center=true&vCenter=true&multiline=true&repeat=true&width=600&height=80&lines=%F0%9F%A4%96+Multi-Model+AI+Chat;%F0%9F%8E%A8+Image+Generation+%7C+%F0%9F%8E%99%EF%B8%8F+Speech+Recognition;%F0%9F%93%84+Document+OCR+%7C+%F0%9F%93%8A+Text+to+SQL" alt="Typing SVG" /></a>
 
+
+
+
+
+
 <!-- Badges Row 1 -->
 <p>
 <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
