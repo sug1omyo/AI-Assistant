@@ -4,8 +4,7 @@
 <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=6,11,20&height=180&section=header&text=AI-Assistant&fontSize=42&fontColor=fff&animation=twinkling&fontAlignY=32&desc=Nền%20Tảng%20Tích%20Hợp%20Đa%20Dịch%20Vụ%20AI&descAlignY=52&descSize=18"/>
 
 <!-- Typing Animation -->
-<a href="https://git.io/typing-svg"><img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=22&duration=3000&pause=1000&color=6366F1&center=true&vCenter=true&multiline=true&repeat=true&width=600&height=80&lines=%F0%9F%A4%96+Multi-Model+AI+Chat;%F0%9F%8E%A8+Image+Generation+%7C+%F0%9F%8E%99%EF%B8%8F+Speech+Recognition;%F0%9F%93%84+Document+OCR+%7C+%F0%9F%93%8A+Text+to+SQL" alt="Typing SVG" />
-</a>
+<a href="https://git.io/typing-svg"><img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=20&duration=3000&pause=1000&color=6366F1&center=true&vCenter=true&width=435&lines=Multi-Model+AI+Chat+%F0%9F%A4%96;Image+Generation+%F0%9F%8E%A8;Speech+Recognition+%F0%9F%8E%99%EF%B8%8F;Document+OCR+%F0%9F%93%84;Text+to+SQL+%F0%9F%93%8A" alt="Typing SVG" /></a>
 
 <div>
 
