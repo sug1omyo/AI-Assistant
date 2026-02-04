@@ -260,3 +260,9 @@ ComfyUI/temp/
 ComfyUI/custom_nodes/
 ComfyUI/__pycache__/
 ComfyUI/*.log
+
+# ============================================
+# ARCHIVED SERVICES (in worktree backup)
+# ============================================
+services/edit-image/
+services/stable-diffusion/
