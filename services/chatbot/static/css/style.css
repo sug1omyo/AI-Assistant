@@ -4465,7 +4465,7 @@ body.dark-mode .history-version button:hover {
    ============================================================================ */
 .thinking-mode-container {
     position: relative;
-    z-index: 100;
+    z-index: 1000;
 }
 
 #thinkingModeBtn {
@@ -4474,27 +4474,44 @@ body.dark-mode .history-version button:hover {
 }
 
 #thinkingModeDropdown {
-    min-width: 280px;
+    min-width: 320px !important;
+    max-width: 360px;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
+    max-height: 600px;
+    overflow-y: auto;
+    z-index: 9999 !important;
+    position: absolute !important;
 }
 
 .thinking-mode-option {
     border-left: 3px solid transparent;
     transition: all 0.15s ease;
     color: #333;
+    display: flex !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    min-height: 60px;
 }
 
 .thinking-mode-option .font-medium {
     color: #333;
+    font-size: 14px;
+    font-weight: 600;
 }
 
 .thinking-mode-option .text-xs {
     color: #666;
+    font-size: 12px;
+    line-height: 1.4;
+    margin-top: 2px;
 }
 
 .thinking-mode-header {
     color: #666;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .thinking-mode-option:hover {
@@ -4509,46 +4526,64 @@ body.dark-mode .history-version button:hover {
 
 /* Dark mode */
 body.dark-mode #thinkingModeBtn {
-    background: linear-gradient(135deg, #3a3c52 0%, #35374a 100%);
-    border-color: rgba(120, 120, 150, 0.4);
-    color: #f5f5fa;
+    background: linear-gradient(135deg, #4a4c68 0%, #45475f 100%);
+    border-color: rgba(140, 140, 170, 0.6);
+    color: #ffffff;
+}
+
+body.dark-mode #thinkingModeBtn #thinkingModeLabel {
+    color: #ffffff !important;
 }
 
 body.dark-mode #thinkingModeDropdown {
-    background: linear-gradient(135deg, rgba(45, 47, 65, 0.98) 0%, rgba(40, 42, 60, 0.98) 100%);
-    border-color: rgba(120, 120, 150, 0.4);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    background: linear-gradient(135deg, rgba(55, 57, 75, 0.98) 0%, rgba(50, 52, 70, 0.98) 100%);
+    border-color: rgba(140, 140, 170, 0.5);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
 }
 
 body.dark-mode .thinking-mode-option {
-    color: #f5f5fa;
+    color: #ffffff;
 }
 
 body.dark-mode .thinking-mode-option .font-medium,
 body.dark-mode .thinking-mode-option div.font-medium {
-    color: #f5f5fa !important;
+    color: #ffffff !important;
+    font-weight: 600;
 }
 
 body.dark-mode .thinking-mode-option .text-xs,
 body.dark-mode .thinking-mode-option div.text-xs {
-    color: #b0b0c0 !important;
+    color: #d0d0e0 !important;
+    opacity: 0.9;
 }
 
 body.dark-mode .thinking-mode-header {
-    color: #a0a0b5 !important;
+    color: #b0b0d0 !important;
+}
+
+body.dark-mode .thinking-mode-option .text-xs,
+body.dark-mode .thinking-mode-option div.text-xs {
+    color: #d0d0e0 !important;
+    opacity: 0.9;
+}
+
+body.dark-mode .thinking-mode-header {
+    color: #b0b0d0 !important;
 }
 
 body.dark-mode #thinkingModeDropdown .text-gray-500,
 body.dark-mode #thinkingModeDropdown .text-gray-400 {
-    color: #a0a0b5 !important;
+    color: #c0c0d5 !important;
 }
 
 body.dark-mode .thinking-mode-option:hover {
-    background: rgba(102, 126, 234, 0.2);
+    background: rgba(102, 126, 234, 0.25);
+    border-left-color: #8b7ee8;
 }
 
 body.dark-mode .thinking-mode-option.active {
-    background: rgba(102, 126, 234, 0.25);
+    background: rgba(102, 126, 234, 0.3);
+    border-left-color: #667eea;
 }
 
 /* ============================================================================
