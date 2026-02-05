@@ -1138,7 +1138,11 @@
             // Toggle dropdown
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
+                const isHidden = dropdown.classList.contains('hidden');
                 dropdown.classList.toggle('hidden');
+                console.log('Thinking Mode Dropdown toggled:', !isHidden ? 'closed' : 'opened');
+                console.log('Dropdown classes:', dropdown.className);
+                console.log('Options count:', options.length);
             });
             
             // Close on outside click

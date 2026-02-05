@@ -1333,6 +1333,8 @@ body.dark-mode .github-badge:hover {
     border-bottom: 1px solid #e5e5e5;
     transition: background 0.3s ease;
     flex-shrink: 0;
+    position: relative;
+    overflow: visible !important;
 }
 
 body.dark-mode .controls {
@@ -1351,6 +1353,8 @@ body.eye-care-mode .controls {
     gap: 15px;
     flex-wrap: wrap;
     align-items: center;
+    position: relative;
+    overflow: visible !important;
 }
 
 .control-group label {
@@ -4478,10 +4482,24 @@ body.dark-mode .history-version button:hover {
     max-width: 360px;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    max-height: 600px;
-    overflow-y: auto;
+    max-height: none !important;
+    height: auto !important;
+    overflow-y: visible !important;
     z-index: 9999 !important;
     position: absolute !important;
+    display: block !important;
+}
+
+#thinkingModeDropdown.hidden {
+    display: none !important;
+}
+
+#thinkingModeDropdown:not(.hidden) {
+    display: block !important;
+}
+
+#thinkingModeDropdown .p-2 {
+    padding: 0.5rem;
 }
 
 .thinking-mode-option {
