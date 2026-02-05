@@ -23,6 +23,7 @@ def send_message():
         - model: str (optional) - AI model to use (default: grok)
         - context: str (optional) - Conversation context type
         - deep_thinking: bool (optional) - Enable deep analysis
+        - thinking_mode: str (optional) - Thinking mode (instant/thinking/deep/auto)
         - language: str (optional) - Response language (vi/en)
         - conversation_id: str (optional) - Existing conversation ID
     
@@ -30,6 +31,8 @@ def send_message():
         - response: str - AI response
         - conversation_id: str - Conversation ID
         - model_used: str - Model that was used
+        - thinking_mode: str - Thinking mode used
+        - thinking_process: str (optional) - Thinking trace for deep mode
         - tokens: dict - Token usage info
     """
     try:
@@ -38,11 +41,20 @@ def send_message():
         if not data or 'message' not in data:
             return jsonify({'error': 'Message is required'}), 400
         
+        # Get thinking mode - support both old and new parameter names
+        thinking_mode = data.get('thinking_mode', 'instant')
+        deep_thinking = data.get('deep_thinking', False)
+        
+        # If deep_thinking is true but no thinking_mode specified, use 'thinking'
+        if deep_thinking and thinking_mode == 'instant':
+            thinking_mode = 'thinking'
+        
         result = controller.process_message(
             message=data['message'],
             model=data.get('model', 'grok'),
             context=data.get('context', 'casual'),
-            deep_thinking=data.get('deep_thinking', False),
+            deep_thinking=deep_thinking,
+            thinking_mode=thinking_mode,
             language=data.get('language', 'vi'),
             conversation_id=data.get('conversation_id'),
             user_id=session.get('user_id', 'anonymous')

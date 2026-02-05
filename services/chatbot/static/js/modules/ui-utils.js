@@ -363,10 +363,23 @@ export class UIUtils {
      * Get form values
      */
     getFormValues() {
+        // Get thinking mode from the new selector
+        const thinkingMode = window.getThinkingMode ? window.getThinkingMode() : 'instant';
+        let deepThinking = false;
+        
+        // Determine if deep thinking should be enabled based on mode
+        if (thinkingMode === 'thinking' || thinkingMode === 'deep') {
+            deepThinking = true;
+        } else if (thinkingMode === 'auto') {
+            // Auto mode: let coordinatedReasoning decide later
+            deepThinking = 'auto';
+        }
+        
         return {
             model: this.elements.modelSelect?.value || 'grok',
             context: this.elements.contextSelect?.value || 'casual',
-            deepThinking: this.elements.deepThinkingCheck?.checked || false,
+            deepThinking: deepThinking,
+            thinkingMode: thinkingMode,
             message: this.elements.messageInput?.value || ''
         };
     }

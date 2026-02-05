@@ -4448,3 +4448,194 @@ body.dark-mode .history-version button:hover {
         border: 1px solid #ddd;
     }
 }
+
+/* ============================================================================
+   THINKING MODE SELECTOR (ChatGPT style dropdown)
+   ============================================================================ */
+.thinking-mode-container {
+    position: relative;
+    z-index: 100;
+}
+
+#thinkingModeBtn {
+    min-width: 140px;
+    justify-content: space-between;
+}
+
+#thinkingModeDropdown {
+    min-width: 280px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.thinking-mode-option {
+    border-left: 3px solid transparent;
+    transition: all 0.15s ease;
+}
+
+.thinking-mode-option:hover {
+    border-left-color: rgba(102, 126, 234, 0.5);
+}
+
+.thinking-mode-option.active,
+.thinking-mode-option:has(.bg-primary\/10) {
+    border-left-color: #667eea;
+    background: rgba(102, 126, 234, 0.1);
+}
+
+/* Dark mode */
+body.dark-mode #thinkingModeBtn {
+    background: rgba(30, 30, 45, 0.8);
+    border-color: rgba(100, 100, 120, 0.5);
+}
+
+body.dark-mode #thinkingModeDropdown {
+    background: rgba(30, 30, 45, 0.98);
+    border-color: rgba(100, 100, 120, 0.5);
+}
+
+body.dark-mode .thinking-mode-option:hover {
+    background: rgba(102, 126, 234, 0.15);
+}
+
+/* ============================================================================
+   TOOLS MENU (+) Button & Dropdown
+   ============================================================================ */
+.tools-menu-container {
+    position: relative;
+    z-index: 100;
+}
+
+#toolsMenuBtn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+}
+
+#toolsMenuBtn svg {
+    transition: transform 0.2s ease;
+}
+
+#toolsMenuDropdown {
+    min-width: 280px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.tool-menu-item {
+    border-left: 3px solid transparent;
+    transition: all 0.15s ease;
+}
+
+.tool-menu-item:hover {
+    border-left-color: rgba(102, 126, 234, 0.5);
+}
+
+.tool-menu-item.active {
+    border-left-color: #667eea;
+    background: rgba(102, 126, 234, 0.15);
+}
+
+/* Dark mode */
+body.dark-mode #toolsMenuDropdown {
+    background: rgba(30, 30, 45, 0.98);
+    border-color: rgba(100, 100, 120, 0.5);
+}
+
+body.dark-mode .tool-menu-item:hover {
+    background: rgba(102, 126, 234, 0.15);
+}
+
+/* Active tools display badges */
+#activeToolsDisplay {
+    max-width: 300px;
+    flex-wrap: wrap;
+}
+
+#activeToolsDisplay span {
+    animation: fadeIn 0.2s ease;
+}
+
+/* ============================================================================
+   BRANCH CONVERSATION INDICATOR
+   ============================================================================ */
+.branch-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 12px;
+    margin-left: 8px;
+}
+
+.branch-indicator::before {
+    content: '🌿';
+}
+
+/* Branch chat item in sidebar */
+.chat-item.branch {
+    border-left: 3px solid #10b981;
+}
+
+.chat-item.branch .chat-item-title::before {
+    content: '🌿 ';
+}
+
+/* ============================================================================
+   COORDINATED REASONING VISUAL INDICATOR
+   ============================================================================ */
+.coordinated-reasoning-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(236, 72, 153, 0.1));
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 12px;
+    margin-bottom: 12px;
+    animation: pulse 2s infinite;
+}
+
+.coordinated-reasoning-indicator .rounds {
+    display: flex;
+    gap: 6px;
+}
+
+.coordinated-reasoning-indicator .round-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(139, 92, 246, 0.3);
+    transition: all 0.3s ease;
+}
+
+.coordinated-reasoning-indicator .round-dot.active {
+    background: #8b5cf6;
+    box-shadow: 0 0 8px rgba(139, 92, 246, 0.5);
+}
+
+.coordinated-reasoning-indicator .round-dot.complete {
+    background: #10b981;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* Deep thinking mode specific styles */
+.thinking-deep .thinking-section {
+    border-color: rgba(139, 92, 246, 0.5);
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(236, 72, 153, 0.05));
+}
+
+.thinking-deep .thinking-header {
+    color: #8b5cf6;
+}
+

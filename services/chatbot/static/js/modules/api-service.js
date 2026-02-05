@@ -11,11 +11,17 @@ export class APIService {
     /**
      * Send chat message to backend
      */
-    async sendMessage(message, model, context, tools = [], deepThinking = false, history = [], files = [], memories = [], abortSignal = null, customPrompt = '', agentConfig = null) {
+    async sendMessage(message, model, context, tools = [], deepThinking = false, history = [], files = [], memories = [], abortSignal = null, customPrompt = '', agentConfig = null, thinkingMode = null) {
         let response;
         
         // Get current language from localStorage
         const language = localStorage.getItem('chatbot_language') || 'vi';
+        
+        // Get thinking mode from global function if not provided
+        if (!thinkingMode && window.getThinkingMode) {
+            thinkingMode = window.getThinkingMode();
+        }
+        thinkingMode = thinkingMode || 'instant';
         
         const fetchOptions = {
             method: 'POST',
@@ -30,6 +36,7 @@ export class APIService {
             formData.append('context', context);
             formData.append('tools', JSON.stringify(tools));
             formData.append('deep_thinking', deepThinking);
+            formData.append('thinking_mode', thinkingMode);  // Add thinking mode
             formData.append('history', JSON.stringify(history));
             formData.append('memory_ids', JSON.stringify(memories));
             formData.append('language', language);  // Add language
@@ -65,6 +72,7 @@ export class APIService {
                 context: context,
                 tools: tools,
                 deep_thinking: deepThinking,
+                thinking_mode: thinkingMode,  // Add thinking mode
                 history: history,
                 memory_ids: memories,
                 mcp_selected_files: mcpFiles,

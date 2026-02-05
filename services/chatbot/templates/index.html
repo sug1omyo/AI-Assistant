@@ -206,9 +206,62 @@
                     </select>
                 </label>
                 
-                <div class="checkbox-container flex items-center gap-2 bg-white/50 dark:bg-dark-surface/50 px-3 py-2 rounded-lg" id="deepThinkingContainer">
-                    <input type="checkbox" id="deepThinkingCheck" class="w-4 h-4 text-primary rounded focus:ring-primary/50">
-                    <label for="deepThinkingCheck" data-lang-key="controls.deepThinking" class="text-sm cursor-pointer">🧠 Deep Thinking</label>
+                <!-- Thinking Mode Selector (ChatGPT style) -->
+                <div class="thinking-mode-container relative" id="thinkingModeContainer">
+                    <button type="button" id="thinkingModeBtn" class="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/50 dark:bg-dark-surface/50 hover:bg-white/70 dark:hover:bg-dark-surface/70 transition-all duration-200 border border-gray-200/50 dark:border-gray-600/50">
+                        <span id="thinkingModeIcon">⚡</span>
+                        <span id="thinkingModeLabel" class="text-sm font-medium">Instant</span>
+                        <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </button>
+                    <!-- Dropdown Menu -->
+                    <div id="thinkingModeDropdown" class="absolute top-full left-0 mt-2 w-64 bg-white dark:bg-dark-surface rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 hidden animate-fade-in">
+                        <div class="p-2">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 px-3 py-2 font-semibold uppercase tracking-wide">Thinking Mode</div>
+                            
+                            <!-- Auto Mode -->
+                            <button type="button" class="thinking-mode-option w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" data-mode="auto" data-icon="🤖" data-label="Auto">
+                                <span class="text-xl">🤖</span>
+                                <div class="text-left">
+                                    <div class="font-medium text-gray-800 dark:text-gray-200">Auto</div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">Tự quyết định thời gian suy nghĩ</div>
+                                </div>
+                            </button>
+                            
+                            <!-- Instant Mode -->
+                            <button type="button" class="thinking-mode-option w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all bg-primary/10 border-l-2 border-primary" data-mode="instant" data-icon="⚡" data-label="Instant">
+                                <span class="text-xl">⚡</span>
+                                <div class="text-left">
+                                    <div class="font-medium text-gray-800 dark:text-gray-200">Instant</div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">Trả lời tức thời, không suy nghĩ sâu</div>
+                                </div>
+                            </button>
+                            
+                            <div class="border-t border-gray-200 dark:border-gray-700 my-2"></div>
+                            
+                            <!-- Thinking Medium -->
+                            <button type="button" class="thinking-mode-option w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" data-mode="thinking" data-icon="🧠" data-label="Suy nghĩ">
+                                <span class="text-xl">🧠</span>
+                                <div class="text-left">
+                                    <div class="font-medium text-gray-800 dark:text-gray-200">Suy nghĩ</div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">Phân tích kỹ lưỡng, suy luận từng bước</div>
+                                </div>
+                            </button>
+                            
+                            <!-- Thinking Deep -->
+                            <button type="button" class="thinking-mode-option w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" data-mode="deep" data-icon="🚀" data-label="Suy nghĩ sâu">
+                                <span class="text-xl">🚀</span>
+                                <div class="text-left">
+                                    <div class="font-medium text-gray-800 dark:text-gray-200">Suy nghĩ sâu</div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">Coordinated Reasoning - đa vòng lặp</div>
+                                </div>
+                                <span class="ml-auto text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 py-0.5 rounded-full">Pro</span>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Hidden input for form value -->
+                    <input type="hidden" id="thinkingModeValue" value="instant">
                 </div>
                 
                 <button class="download-btn btn-secondary hover:shadow-glow-sm" id="downloadBtn" title="Download chat history" data-lang-key="controls.download" data-lang-key-title="tooltip.download">
@@ -359,28 +412,92 @@
         </div>
         
         <div class="input-container glass-dark backdrop-blur-md border-t border-gray-200/20 dark:border-gray-700/50">
-            <div class="input-tools flex flex-wrap gap-2 mb-3">
-                <button class="tool-btn btn-secondary text-sm px-3 py-1.5 rounded-lg hover:shadow-glow-sm transition-all duration-200" id="configAgentBtn" title="Config Agent - Advanced AI Settings">
-                    ⚡ Config Agent
-                </button>
-                <button class="tool-btn btn-secondary text-sm px-3 py-1.5 rounded-lg hover:shadow-glow-sm transition-all duration-200" id="googleSearchBtn" title="Google Search" data-lang-key="tools.googleSearch" data-lang-key-title="tooltip.googleSearch">
-                    🔍 Google Search
-                </button>
-                <button class="tool-btn btn-secondary text-sm px-3 py-1.5 rounded-lg hover:shadow-glow-sm transition-all duration-200" id="githubBtn" title="Connect GitHub" data-lang-key-title="tooltip.github">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-                    </svg>
-                    <span data-lang-key="tools.github">GitHub</span>
-                </button>
-                <button class="tool-btn btn-secondary text-sm px-3 py-1.5 rounded-lg hover:shadow-glow-sm transition-all duration-200" id="imageGenToolBtn" title="Generate from text (Text2Img)" data-lang-key="tools.text2img" data-lang-key-title="tooltip.text2img">
-                    🎨 Text2Img
-                </button>
-                <button class="tool-btn btn-secondary text-sm px-3 py-1.5 rounded-lg hover:shadow-glow-sm transition-all duration-200" id="img2imgToolBtn" title="Generate from image (Img2Img)" data-lang-key="tools.img2img" data-lang-key-title="tooltip.img2img">
+            <div class="input-tools flex flex-wrap items-center gap-2 mb-3">
+                <!-- Tools Menu (+) Button -->
+                <div class="tools-menu-container relative">
+                    <button type="button" id="toolsMenuBtn" class="flex items-center justify-center w-9 h-9 rounded-lg bg-gradient-to-r from-primary to-secondary text-white hover:shadow-glow transition-all duration-200 hover:scale-105" title="Thêm công cụ">
+                        <svg class="w-5 h-5 transition-transform duration-200" id="toolsMenuIcon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                    </button>
+                    <!-- Tools Dropdown Menu -->
+                    <div id="toolsMenuDropdown" class="absolute bottom-full left-0 mb-2 w-72 bg-white dark:bg-dark-surface rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 hidden animate-fade-in">
+                        <div class="p-2">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 px-3 py-2 font-semibold uppercase tracking-wide">Công cụ</div>
+                            
+                            <!-- Config Agent -->
+                            <button type="button" class="tool-menu-item w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" id="configAgentBtn" title="Config Agent - Advanced AI Settings">
+                                <span class="text-lg">⚡</span>
+                                <div class="text-left flex-1">
+                                    <div class="font-medium text-gray-800 dark:text-gray-200 text-sm">Config Agent</div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">Cấu hình AI nâng cao</div>
+                                </div>
+                            </button>
+                            
+                            <!-- Google Search -->
+                            <button type="button" class="tool-menu-item w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" id="googleSearchBtn" title="Google Search">
+                                <span class="text-lg">🔍</span>
+                                <div class="text-left flex-1">
+                                    <div class="font-medium text-gray-800 dark:text-gray-200 text-sm">Tìm kiếm trên mạng</div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">Google Search</div>
+                                </div>
+                            </button>
+                            
+                            <!-- GitHub -->
+                            <button type="button" class="tool-menu-item w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" id="githubBtn" title="Connect GitHub">
+                                <span class="text-lg">
+                                    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+                                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                                    </svg>
+                                </span>
+                                <div class="text-left flex-1">
+                                    <div class="font-medium text-gray-800 dark:text-gray-200 text-sm">GitHub</div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">Kết nối repository</div>
+                                </div>
+                            </button>
+                            
+                            <!-- Text2Img -->
+                            <button type="button" class="tool-menu-item w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" id="imageGenToolBtn" title="Generate from text">
+                                <span class="text-lg">🎨</span>
+                                <div class="text-left flex-1">
+                                    <div class="font-medium text-gray-800 dark:text-gray-200 text-sm">Tạo hình ảnh</div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">Text to Image</div>
+                                </div>
+                            </button>
+                            
+                            <!-- Upload Files -->
+                            <button type="button" class="tool-menu-item w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" id="uploadFilesBtn" title="Upload files">
+                                <span class="text-lg">📎</span>
+                                <div class="text-left flex-1">
+                                    <div class="font-medium text-gray-800 dark:text-gray-200 text-sm">Thêm ảnh và tệp</div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">txt, pdf, doc, code, images</div>
+                                </div>
+                            </button>
+                            
+                            <div class="border-t border-gray-200 dark:border-gray-700 my-2"></div>
+                            
+                            <!-- Branch Conversation -->
+                            <button type="button" class="tool-menu-item w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" id="branchConversationBtn" title="Tạo nhánh chat mới">
+                                <span class="text-lg">🌿</span>
+                                <div class="text-left flex-1">
+                                    <div class="font-medium text-gray-800 dark:text-gray-200 text-sm">Tạo nhánh trong đoạn chat mới</div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">Branch từ tin nhắn hiện tại</div>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Active Tools Display (shown when tools are selected) -->
+                <div id="activeToolsDisplay" class="flex flex-wrap gap-1 hidden">
+                    <!-- Active tool badges will appear here -->
+                </div>
+                
+                <!-- Img2Img Button - KEPT OUTSIDE as requested -->
+                <button class="tool-btn btn-secondary text-sm px-3 py-1.5 rounded-lg hover:shadow-glow-sm transition-all duration-200 flex items-center gap-1" id="img2imgToolBtn" title="Generate from image (Img2Img)" data-lang-key="tools.img2img" data-lang-key-title="tooltip.img2img">
                     🖼️ Img2Img
                 </button>
-                <button class="tool-btn btn-secondary text-sm px-3 py-1.5 rounded-lg hover:shadow-glow-sm transition-all duration-200" id="uploadFilesBtn" title="Upload files (txt, pdf, doc, code)" data-lang-key="tools.uploadFiles" data-lang-key-title="tooltip.uploadFiles">
-                    📎 Upload Files
-                </button>
+                
                 <input type="file" id="fileInput" accept=".txt,.pdf,.doc,.docx,.json,.py,.js,.html,.css,.xlsx,.csv,image/*" multiple style="display: none;">
             </div>
             <div class="file-list" id="fileList">
@@ -1001,13 +1118,383 @@
     <script type="module" src="{{ url_for('static', filename='js/main.js') }}"></script>
     <script src="{{ url_for('static', filename='js/mcp.js') }}"></script>
     
-    <!-- Temporary test script -->
+    <!-- Thinking Mode, Tools Menu & Branch Conversation Scripts -->
     <script>
-        console.log('=== INLINE TEST SCRIPT LOADED ===');
+        console.log('=== INLINE SCRIPTS LOADED ===');
+        
+        // ============================================================================
+        // THINKING MODE SELECTOR (ChatGPT style)
+        // ============================================================================
+        let currentThinkingMode = localStorage.getItem('thinkingMode') || 'instant';
+        
+        function initThinkingMode() {
+            const btn = document.getElementById('thinkingModeBtn');
+            const dropdown = document.getElementById('thinkingModeDropdown');
+            const options = document.querySelectorAll('.thinking-mode-option');
+            const hiddenInput = document.getElementById('thinkingModeValue');
+            
+            if (!btn || !dropdown) return;
+            
+            // Toggle dropdown
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                dropdown.classList.toggle('hidden');
+            });
+            
+            // Close on outside click
+            document.addEventListener('click', () => {
+                dropdown.classList.add('hidden');
+            });
+            
+            // Option selection
+            options.forEach(option => {
+                option.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const mode = option.dataset.mode;
+                    const icon = option.dataset.icon;
+                    const label = option.dataset.label;
+                    
+                    selectThinkingMode(mode, icon, label);
+                    dropdown.classList.add('hidden');
+                });
+            });
+            
+            // Restore saved mode
+            const savedOption = document.querySelector(`.thinking-mode-option[data-mode="${currentThinkingMode}"]`);
+            if (savedOption) {
+                selectThinkingMode(
+                    currentThinkingMode,
+                    savedOption.dataset.icon,
+                    savedOption.dataset.label
+                );
+            }
+        }
+        
+        function selectThinkingMode(mode, icon, label) {
+            currentThinkingMode = mode;
+            localStorage.setItem('thinkingMode', mode);
+            
+            // Update button display
+            document.getElementById('thinkingModeIcon').textContent = icon;
+            document.getElementById('thinkingModeLabel').textContent = label;
+            document.getElementById('thinkingModeValue').value = mode;
+            
+            // Update active state
+            document.querySelectorAll('.thinking-mode-option').forEach(opt => {
+                opt.classList.remove('bg-primary/10', 'border-l-2', 'border-primary');
+                if (opt.dataset.mode === mode) {
+                    opt.classList.add('bg-primary/10', 'border-l-2', 'border-primary');
+                }
+            });
+            
+            console.log('[Thinking Mode] Selected:', mode);
+        }
+        
+        // Expose for API
+        window.getThinkingMode = function() {
+            return currentThinkingMode;
+        };
+        
+        window.isDeepThinking = function() {
+            return currentThinkingMode === 'thinking' || currentThinkingMode === 'deep';
+        };
+        
+        // ============================================================================
+        // TOOLS MENU (+) 
+        // ============================================================================
+        let activeTools = new Set();
+        
+        function initToolsMenu() {
+            const btn = document.getElementById('toolsMenuBtn');
+            const dropdown = document.getElementById('toolsMenuDropdown');
+            const icon = document.getElementById('toolsMenuIcon');
+            
+            if (!btn || !dropdown) return;
+            
+            // Toggle dropdown
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isOpen = !dropdown.classList.contains('hidden');
+                dropdown.classList.toggle('hidden');
+                
+                // Rotate icon
+                if (isOpen) {
+                    icon.style.transform = 'rotate(0deg)';
+                } else {
+                    icon.style.transform = 'rotate(45deg)';
+                }
+            });
+            
+            // Close on outside click
+            document.addEventListener('click', () => {
+                dropdown.classList.add('hidden');
+                icon.style.transform = 'rotate(0deg)';
+            });
+            
+            // Prevent dropdown from closing when clicking inside
+            dropdown.addEventListener('click', (e) => {
+                e.stopPropagation();
+            });
+            
+            // Setup tool item clicks
+            setupToolItemClicks();
+        }
+        
+        function setupToolItemClicks() {
+            // Config Agent - opens modal
+            const configAgentBtn = document.getElementById('configAgentBtn');
+            if (configAgentBtn) {
+                configAgentBtn.addEventListener('click', () => {
+                    closeToolsMenu();
+                    openConfigAgentModal();
+                });
+            }
+            
+            // Google Search - toggle tool
+            const googleSearchBtn = document.getElementById('googleSearchBtn');
+            if (googleSearchBtn) {
+                googleSearchBtn.addEventListener('click', () => {
+                    toggleToolActive('google-search', googleSearchBtn);
+                });
+            }
+            
+            // GitHub - toggle tool
+            const githubBtn = document.getElementById('githubBtn');
+            if (githubBtn) {
+                githubBtn.addEventListener('click', () => {
+                    toggleToolActive('github', githubBtn);
+                });
+            }
+            
+            // Text2Img - toggle tool
+            const imageGenToolBtn = document.getElementById('imageGenToolBtn');
+            if (imageGenToolBtn) {
+                imageGenToolBtn.addEventListener('click', () => {
+                    toggleToolActive('image-generation', imageGenToolBtn);
+                });
+            }
+            
+            // Upload Files
+            const uploadFilesBtn = document.getElementById('uploadFilesBtn');
+            const fileInput = document.getElementById('fileInput');
+            if (uploadFilesBtn && fileInput) {
+                uploadFilesBtn.addEventListener('click', () => {
+                    closeToolsMenu();
+                    fileInput.click();
+                });
+            }
+            
+            // Branch Conversation
+            const branchBtn = document.getElementById('branchConversationBtn');
+            if (branchBtn) {
+                branchBtn.addEventListener('click', () => {
+                    closeToolsMenu();
+                    createBranchConversation();
+                });
+            }
+        }
+        
+        function toggleToolActive(toolName, btn) {
+            if (activeTools.has(toolName)) {
+                activeTools.delete(toolName);
+                btn.classList.remove('bg-primary/20', 'border-l-2', 'border-primary');
+            } else {
+                activeTools.add(toolName);
+                btn.classList.add('bg-primary/20', 'border-l-2', 'border-primary');
+            }
+            updateActiveToolsDisplay();
+            console.log('[Tools] Active tools:', Array.from(activeTools));
+        }
+        
+        function updateActiveToolsDisplay() {
+            const display = document.getElementById('activeToolsDisplay');
+            if (!display) return;
+            
+            display.innerHTML = '';
+            
+            if (activeTools.size === 0) {
+                display.classList.add('hidden');
+                return;
+            }
+            
+            display.classList.remove('hidden');
+            
+            const toolIcons = {
+                'google-search': '🔍',
+                'github': '📦',
+                'image-generation': '🎨'
+            };
+            
+            activeTools.forEach(tool => {
+                const badge = document.createElement('span');
+                badge.className = 'inline-flex items-center gap-1 px-2 py-1 rounded-full bg-primary/20 text-xs font-medium text-primary border border-primary/30';
+                badge.innerHTML = `${toolIcons[tool] || '🔧'} ${tool} <button class="ml-1 hover:text-red-500" onclick="removeTool('${tool}')">&times;</button>`;
+                display.appendChild(badge);
+            });
+        }
+        
+        window.removeTool = function(toolName) {
+            activeTools.delete(toolName);
+            updateActiveToolsDisplay();
+            
+            // Update button state in menu
+            const btnMap = {
+                'google-search': 'googleSearchBtn',
+                'github': 'githubBtn',
+                'image-generation': 'imageGenToolBtn'
+            };
+            const btn = document.getElementById(btnMap[toolName]);
+            if (btn) {
+                btn.classList.remove('bg-primary/20', 'border-l-2', 'border-primary');
+            }
+        };
+        
+        window.getActiveTools = function() {
+            return Array.from(activeTools);
+        };
+        
+        function closeToolsMenu() {
+            const dropdown = document.getElementById('toolsMenuDropdown');
+            const icon = document.getElementById('toolsMenuIcon');
+            if (dropdown) dropdown.classList.add('hidden');
+            if (icon) icon.style.transform = 'rotate(0deg)';
+        }
+        
+        // ============================================================================
+        // BRANCH CONVERSATION
+        // ============================================================================
+        function createBranchConversation() {
+            if (!window.chatManager) {
+                console.error('[Branch] chatManager not found');
+                alert('Không thể tạo nhánh: Chat manager không khả dụng');
+                return;
+            }
+            
+            const currentSession = window.chatManager.getCurrentSession();
+            if (!currentSession) {
+                alert('Không có cuộc hội thoại nào đang mở');
+                return;
+            }
+            
+            // Get messages up to current point
+            const messages = currentSession.messages || [];
+            if (messages.length === 0) {
+                alert('Không có tin nhắn nào để tạo nhánh');
+                return;
+            }
+            
+            // Create new session with copied messages
+            const branchId = 'branch_' + Date.now();
+            const parentTitle = currentSession.title || 'Chat';
+            const branchTitle = `🌿 Nhánh: ${parentTitle.substring(0, 20)}...`;
+            
+            // Create branch session
+            const branchSession = {
+                id: branchId,
+                title: branchTitle,
+                messages: [...messages], // Copy all messages
+                parentId: currentSession.id,
+                branchPoint: messages.length,
+                createdAt: Date.now(),
+                attachedFiles: currentSession.attachedFiles ? [...currentSession.attachedFiles] : []
+            };
+            
+            // Add to sessions
+            window.chatManager.chatSessions[branchId] = branchSession;
+            window.chatManager.saveSessions();
+            
+            // Switch to branch
+            window.chatManager.currentChatId = branchId;
+            
+            // Trigger UI update
+            window.dispatchEvent(new Event('chatListNeedsUpdate'));
+            
+            // Reload chat
+            if (window.chatApp) {
+                window.chatApp.loadCurrentChat();
+            }
+            
+            // Show notification
+            const chatContainer = document.getElementById('chatContainer');
+            if (chatContainer && window.chatApp && window.chatApp.messageRenderer) {
+                const timestamp = new Date().toLocaleTimeString('vi-VN');
+                window.chatApp.messageRenderer.addMessage(
+                    chatContainer,
+                    `🌿 **Đã tạo nhánh mới từ cuộc hội thoại "${parentTitle}"**\n\nBạn có thể tiếp tục chat theo hướng mới từ đây.`,
+                    false, 'System', 'info', timestamp, null, false
+                );
+            }
+            
+            console.log('[Branch] Created branch:', branchId, 'from:', currentSession.id);
+        }
+        
+        // ============================================================================
+        // COORDINATED REASONING (StepFun-inspired)
+        // ============================================================================
+        window.coordinatedReasoning = {
+            maxRounds: 3,
+            currentRound: 0,
+            trajectories: [],
+            
+            // Check if should use coordinated reasoning
+            shouldUseDeepReasoning: function() {
+                const mode = window.getThinkingMode ? window.getThinkingMode() : 'instant';
+                return mode === 'deep';
+            },
+            
+            // Estimate complexity of question
+            estimateComplexity: function(message) {
+                const complexIndicators = [
+                    /giải thích|explain|why|tại sao|như thế nào|how/i,
+                    /so sánh|compare|difference|khác nhau/i,
+                    /phân tích|analyze|analysis/i,
+                    /code|programming|bug|error|lỗi/i,
+                    /math|toán|calculate|tính/i,
+                    /step by step|từng bước/i
+                ];
+                
+                let complexity = 0;
+                complexIndicators.forEach(pattern => {
+                    if (pattern.test(message)) complexity++;
+                });
+                
+                // Length also indicates complexity
+                if (message.length > 200) complexity++;
+                if (message.length > 500) complexity++;
+                
+                return complexity;
+            },
+            
+            // Auto-decide thinking mode
+            autoDecideMode: function(message) {
+                const mode = window.getThinkingMode ? window.getThinkingMode() : 'instant';
+                
+                if (mode !== 'auto') {
+                    return mode === 'thinking' || mode === 'deep';
+                }
+                
+                // Auto mode: decide based on complexity
+                const complexity = this.estimateComplexity(message);
+                console.log('[Auto Mode] Complexity score:', complexity);
+                
+                if (complexity >= 3) {
+                    console.log('[Auto Mode] Using deep thinking');
+                    return true;
+                }
+                
+                return false;
+            }
+        };
         
         // Wait for DOM to be ready
         document.addEventListener('DOMContentLoaded', function() {
             console.log('=== DOM READY ===');
+            
+            // Initialize Thinking Mode
+            initThinkingMode();
+            
+            // Initialize Tools Menu
+            initToolsMenu();
             
             const fileInput = document.getElementById('fileInput');
             console.log('File input element:', fileInput);
@@ -1017,7 +1504,6 @@
                 fileInput.onchange = function(e) {
                     console.log('=== ONCHANGE FIRED (INLINE) ===');
                     console.log('Files:', e.target.files);
-                    alert('File selected: ' + (e.target.files.length > 0 ? e.target.files[0].name : 'none'));
                 };
                 console.log('Direct onchange setup complete');
             } else {

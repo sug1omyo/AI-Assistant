@@ -469,6 +469,13 @@ class ChatBotApp {
             return;
         }
         
+        // Handle Auto mode - decide if deep thinking is needed
+        let deepThinking = formValues.deepThinking;
+        if (deepThinking === 'auto' && window.coordinatedReasoning) {
+            deepThinking = window.coordinatedReasoning.autoDecideMode(message);
+            console.log('[App] Auto mode decided:', deepThinking ? 'deep thinking' : 'instant');
+        }
+        
         // Auto-include file context if files are attached
         if (sessionFiles.length > 0) {
             const fileContext = this.buildFileContext(sessionFiles);
@@ -476,9 +483,12 @@ class ChatBotApp {
                 message = `${fileContext}\n\n${message || 'Hãy phân tích các file được đính kèm.'}`;
             }
             // Auto-enable deep thinking when files are attached for better analysis
-            formValues.deepThinking = true;
+            deepThinking = true;
             console.log('[App] Auto-enabled Deep Thinking due to attached files');
         }
+        
+        // Get active tools from the new tools menu
+        const activeTools = window.getActiveTools ? window.getActiveTools() : Array.from(this.activeTools);
         
         // Include MCP context if enabled
         const mcpContextStr = this.getMcpContextString ? this.getMcpContextString() : '';
@@ -492,8 +502,9 @@ class ChatBotApp {
         // Generate message ID for versioning
         this.currentMessageId = 'msg_' + Date.now();
         
-        // Show loading
-        this.uiUtils.showLoading();
+        // Show loading with thinking mode indicator
+        const thinkingMode = formValues.thinkingMode || 'instant';
+        this.uiUtils.showLoading(thinkingMode);
         
         // Add user message to chat
         const timestamp = this.uiUtils.formatTimestamp(new Date());
@@ -511,7 +522,7 @@ class ChatBotApp {
         
         // If deep thinking is enabled, add thinking container with loading state
         let thinkingContainer = null;
-        if (formValues.deepThinking) {
+        if (deepThinking) {
             const thinkingSection = this.messageRenderer.createThinkingSection(null, true);
             elements.chatContainer.appendChild(thinkingSection);
             thinkingContainer = thinkingSection;
@@ -541,8 +552,8 @@ class ChatBotApp {
                 message,
                 formValues.model,
                 formValues.context,
-                Array.from(this.activeTools),
-                formValues.deepThinking,
+                activeTools,
+                deepThinking,
                 history,
                 this.fileHandler.getFiles(), // Empty for now, all handled in message
                 selectedMemories,

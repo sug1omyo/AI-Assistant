@@ -12,6 +12,7 @@ from ..services.ai_service import AIService
 from ..services.conversation_service import ConversationService
 from ..services.cache_service import CacheService
 from ..services.learning_service import LearningService
+from ..services.reasoning_service import get_reasoning_service
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ class ChatController:
         self.conversation_service = ConversationService()
         self.cache_service = CacheService()
         self.learning_service = LearningService()
+        self.reasoning_service = get_reasoning_service(self.ai_service)
     
     def process_message(
         self,
@@ -31,6 +33,7 @@ class ChatController:
         model: str = 'grok',
         context: str = 'casual',
         deep_thinking: bool = False,
+        thinking_mode: str = 'instant',
         language: str = 'vi',
         conversation_id: Optional[str] = None,
         user_id: str = 'anonymous',
@@ -46,6 +49,7 @@ class ChatController:
             model: AI model to use
             context: Conversation context type
             deep_thinking: Enable deep analysis mode
+            thinking_mode: Thinking mode (instant/thinking/deep/auto)
             language: Response language
             conversation_id: Existing conversation ID
             user_id: User identifier
@@ -59,6 +63,13 @@ class ChatController:
         start_time = datetime.now()
         
         try:
+            # Handle auto mode
+            if thinking_mode == 'auto':
+                decided_mode = self.reasoning_service.auto_decide_mode(message)
+                logger.info(f"[Auto Mode] Decided: {decided_mode}")
+                thinking_mode = decided_mode
+                deep_thinking = decided_mode in ('thinking', 'deep')
+            
             # Get or create conversation
             if not conversation_id:
                 conv = self.conversation_service.create(
@@ -68,11 +79,11 @@ class ChatController:
                 )
                 conversation_id = str(conv['_id'])
             
-            # Check cache first
+            # Check cache first (only for instant mode)
             cache_key = self._generate_cache_key(message, model, context, language)
             cached_response = self.cache_service.get(cache_key)
             
-            if cached_response and not deep_thinking:
+            if cached_response and thinking_mode == 'instant':
                 logger.info(f"✅ Cache hit for message")
                 return {
                     'response': cached_response,
@@ -92,18 +103,56 @@ class ChatController:
             # Load memories for context
             memories = self._load_relevant_memories(user_id, message)
             
-            # Get AI response
-            response = self.ai_service.chat(
-                message=message,
-                model=model,
-                context=context,
-                deep_thinking=deep_thinking,
-                language=language,
-                history=history,
-                memories=memories,
-                custom_prompt=custom_prompt,
-                images=images
-            )
+            # Use Coordinated Reasoning for deep mode
+            thinking_process = None
+            if thinking_mode == 'deep':
+                logger.info("[Reasoning] Using Coordinated Reasoning mode")
+                try:
+                    reasoning_result = self.reasoning_service.coordinate_reasoning_sync(
+                        message=message,
+                        context=context,
+                        max_rounds=3
+                    )
+                    response_text = reasoning_result.final_answer
+                    thinking_process = reasoning_result.thinking_process
+                    tokens_info = {
+                        'input': 0,
+                        'output': reasoning_result.total_tokens,
+                        'reasoning_rounds': reasoning_result.total_rounds,
+                        'trajectories': reasoning_result.total_trajectories
+                    }
+                    logger.info(f"[Reasoning] Complete: {reasoning_result.total_rounds} rounds, {reasoning_result.reasoning_time:.2f}s")
+                except Exception as e:
+                    logger.error(f"[Reasoning] Failed, falling back to standard: {e}")
+                    # Fallback to standard deep thinking
+                    response = self.ai_service.chat(
+                        message=message,
+                        model=model,
+                        context=context,
+                        deep_thinking=True,
+                        language=language,
+                        history=history,
+                        memories=memories,
+                        custom_prompt=custom_prompt,
+                        images=images
+                    )
+                    response_text = response['text']
+                    tokens_info = response.get('tokens', {})
+            else:
+                # Standard chat
+                response = self.ai_service.chat(
+                    message=message,
+                    model=model,
+                    context=context,
+                    deep_thinking=deep_thinking,
+                    language=language,
+                    history=history,
+                    memories=memories,
+                    custom_prompt=custom_prompt,
+                    images=images
+                )
+                response_text = response['text']
+                tokens_info = response.get('tokens', {})
             
             # Save messages to conversation
             self.conversation_service.add_message(
@@ -116,28 +165,39 @@ class ChatController:
             self.conversation_service.add_message(
                 conversation_id=conversation_id,
                 role='assistant',
-                content=response['text'],
-                metadata={'model': model, 'tokens': response.get('tokens', {})}
+                content=response_text,
+                metadata={
+                    'model': model, 
+                    'tokens': tokens_info,
+                    'thinking_mode': thinking_mode,
+                    'thinking_process': thinking_process
+                }
             )
             
-            # Cache the response
-            if not deep_thinking:
-                self.cache_service.set(cache_key, response['text'], ttl=3600)
+            # Cache the response (only for instant mode)
+            if thinking_mode == 'instant':
+                self.cache_service.set(cache_key, response_text, ttl=3600)
             
             # Extract learning data if quality is high
-            self._maybe_extract_learning(message, response['text'], model)
+            self._maybe_extract_learning(message, response_text, model)
             
             elapsed = (datetime.now() - start_time).total_seconds()
-            logger.info(f"✅ Message processed in {elapsed:.2f}s with {model}")
+            logger.info(f"✅ Message processed in {elapsed:.2f}s with {model} ({thinking_mode} mode)")
             
-            return {
-                'response': response['text'],
+            result = {
+                'response': response_text,
                 'conversation_id': conversation_id,
                 'model_used': model,
+                'thinking_mode': thinking_mode,
                 'cached': False,
-                'tokens': response.get('tokens', {}),
+                'tokens': tokens_info,
                 'elapsed_time': elapsed
             }
+            
+            if thinking_process:
+                result['thinking_process'] = thinking_process
+                
+            return result
             
         except Exception as e:
             logger.error(f"❌ Error processing message: {e}")
