@@ -4482,6 +4482,19 @@ body.dark-mode .history-version button:hover {
 .thinking-mode-option {
     border-left: 3px solid transparent;
     transition: all 0.15s ease;
+    color: #333;
+}
+
+.thinking-mode-option .font-medium {
+    color: #333;
+}
+
+.thinking-mode-option .text-xs {
+    color: #666;
+}
+
+.thinking-mode-header {
+    color: #666;
 }
 
 .thinking-mode-option:hover {
@@ -4508,7 +4521,7 @@ body.dark-mode #thinkingModeDropdown {
 }
 
 body.dark-mode .thinking-mode-option {
-    color: #f0f0f5;
+    color: #f5f5fa;
 }
 
 body.dark-mode .thinking-mode-option .font-medium,
@@ -4519,6 +4532,10 @@ body.dark-mode .thinking-mode-option div.font-medium {
 body.dark-mode .thinking-mode-option .text-xs,
 body.dark-mode .thinking-mode-option div.text-xs {
     color: #b0b0c0 !important;
+}
+
+body.dark-mode .thinking-mode-header {
+    color: #a0a0b5 !important;
 }
 
 body.dark-mode #thinkingModeDropdown .text-gray-500,
