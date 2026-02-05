@@ -4511,6 +4511,21 @@ body.dark-mode .thinking-mode-option {
     color: #f0f0f5;
 }
 
+body.dark-mode .thinking-mode-option .font-medium,
+body.dark-mode .thinking-mode-option div.font-medium {
+    color: #f5f5fa !important;
+}
+
+body.dark-mode .thinking-mode-option .text-xs,
+body.dark-mode .thinking-mode-option div.text-xs {
+    color: #b0b0c0 !important;
+}
+
+body.dark-mode #thinkingModeDropdown .text-gray-500,
+body.dark-mode #thinkingModeDropdown .text-gray-400 {
+    color: #a0a0b5 !important;
+}
+
 body.dark-mode .thinking-mode-option:hover {
     background: rgba(102, 126, 234, 0.2);
 }
@@ -4566,8 +4581,31 @@ body.dark-mode #toolsMenuDropdown {
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
+body.dark-mode .tool-menu-item {
+    color: #f5f5fa;
+}
+
+body.dark-mode .tool-menu-item .font-medium,
+body.dark-mode .tool-menu-item span.font-medium {
+    color: #f5f5fa !important;
+}
+
+body.dark-mode .tool-menu-item .text-xs,
+body.dark-mode .tool-menu-item span.text-xs {
+    color: #b0b0c0 !important;
+}
+
+body.dark-mode #toolsMenuDropdown .text-gray-500,
+body.dark-mode #toolsMenuDropdown .text-gray-400 {
+    color: #a0a0b5 !important;
+}
+
 body.dark-mode .tool-menu-item:hover {
-    background: rgba(102, 126, 234, 0.15);
+    background: rgba(102, 126, 234, 0.2);
+}
+
+body.dark-mode .tool-menu-item.active {
+    background: rgba(102, 126, 234, 0.25);
 }
 
 /* Active tools display badges */
