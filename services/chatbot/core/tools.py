@@ -115,7 +115,8 @@ def github_search_tool(query):
             'per_page': 5
         }
         
-        logger.info(f"[GITHUB SEARCH] Query: {query.replace('\n', ' ').replace('\r', '')}")
+        cleaned_query = query.replace('\n', ' ').replace('\r', '')
+        logger.info(f"[GITHUB SEARCH] Query: {cleaned_query}")
         response = requests.get(url, headers=headers, params=params, timeout=10)
         
         if response.status_code == 200:

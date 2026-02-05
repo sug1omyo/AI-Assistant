@@ -134,10 +134,14 @@ except ImportError as e:
 LOCALMODELS_AVAILABLE = False
 model_loader = None
 
-try:
-    from src.utils.local_model_loader import model_loader as _model_loader
-    model_loader = _model_loader
-    LOCALMODELS_AVAILABLE = True
-    logger.info("✅ Local model loader imported")
-except Exception as e:
-    logger.warning(f"⚠️ Local models not available: {e}")
+# Only load local models if USE_API_ONLY is not set
+if not os.getenv('USE_API_ONLY'):
+    try:
+        from src.utils.local_model_loader import model_loader as _model_loader
+        model_loader = _model_loader
+        LOCALMODELS_AVAILABLE = True
+        logger.info("✅ Local model loader imported")
+    except Exception as e:
+        logger.warning(f"⚠️ Local models not available: {e}")
+else:
+    logger.info("ℹ️ Local models disabled (USE_API_ONLY=true)")
