@@ -174,6 +174,65 @@
                     <h1 style="position: relative;" data-lang-key="app.title">🤖 AI ChatBot Assistant</h1>
                     <p data-lang-key="app.subtitle">AI assistant for chat, psychology support, life solutions and programming help</p>
                 </div>
+                
+                <!-- Thinking Mode Selector - Moved to header -->
+                <div class="thinking-mode-container" id="thinkingModeContainer" style="margin: 0 20px;">
+                    <button type="button" id="thinkingModeBtn" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-white/90 dark:bg-dark-surface/90 hover:bg-white dark:hover:bg-dark-surface transition-all duration-200 border border-gray-300 dark:border-gray-600 shadow-sm hover:shadow-md">
+                        <span id="thinkingModeIcon" class="text-xl">⚡</span>
+                        <span id="thinkingModeLabel" class="text-sm font-semibold">Instant</span>
+                        <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </button>
+                    <!-- Dropdown Menu -->
+                    <div id="thinkingModeDropdown" class="absolute top-full left-0 mt-2 w-80 bg-white dark:bg-dark-surface rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-[9999] hidden animate-fade-in">
+                        <div class="p-2">
+                            <div class="text-xs px-3 py-2 font-semibold uppercase tracking-wide thinking-mode-header">Thinking Mode</div>
+                            
+                            <!-- Auto Mode -->
+                            <button type="button" class="thinking-mode-option w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" data-mode="auto" data-icon="🤖" data-label="Auto">
+                                <span class="text-2xl">🤖</span>
+                                <div class="text-left flex-1">
+                                    <div class="font-semibold text-base">Auto</div>
+                                    <div class="text-xs mt-1">Tự quyết định thời gian suy nghĩ</div>
+                                </div>
+                            </button>
+                            
+                            <!-- Instant Mode -->
+                            <button type="button" class="thinking-mode-option w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" data-mode="instant" data-icon="⚡" data-label="Instant">
+                                <span class="text-2xl">⚡</span>
+                                <div class="text-left flex-1">
+                                    <div class="font-semibold text-base">Instant</div>
+                                    <div class="text-xs mt-1">Trả lời tức thời, không suy nghĩ sâu</div>
+                                </div>
+                            </button>
+                            
+                            <div class="border-t border-gray-200 dark:border-gray-700 my-2"></div>
+                            
+                            <!-- Thinking Medium -->
+                            <button type="button" class="thinking-mode-option w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" data-mode="thinking" data-icon="🧠" data-label="Suy nghĩ">
+                                <span class="text-2xl">🧠</span>
+                                <div class="text-left flex-1">
+                                    <div class="font-semibold text-base">Suy nghĩ</div>
+                                    <div class="text-xs mt-1">Phân tích kỹ lưỡng, suy luận từng bước</div>
+                                </div>
+                            </button>
+                            
+                            <!-- Thinking Deep -->
+                            <button type="button" class="thinking-mode-option w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" data-mode="deep" data-icon="🚀" data-label="Suy nghĩ sâu">
+                                <span class="text-2xl">🚀</span>
+                                <div class="text-left flex-1">
+                                    <div class="font-semibold text-base">Suy nghĩ sâu</div>
+                                    <div class="text-xs mt-1">Coordinated Reasoning - đa vòng lặp</div>
+                                </div>
+                                <span class="ml-2 text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 py-0.5 rounded-full font-medium">Pro</span>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Hidden input for form value -->
+                    <input type="hidden" id="thinkingModeValue" value="instant">
+                </div>
+                
                 <div style="display: flex; gap: 10px; align-items: center;">
                     <a href="https://github.com/SkastVnT/AI-Assistant" target="_blank" rel="noopener noreferrer" class="github-badge">
                         <svg height="24" width="24" viewBox="0 0 16 16" fill="currentColor">
@@ -205,64 +264,6 @@
                         <option value="programming" data-lang-key="controls.mode.programming">💻 Programming Help</option>
                     </select>
                 </label>
-                
-                <!-- Thinking Mode Selector (ChatGPT style) -->
-                <div class="thinking-mode-container relative" id="thinkingModeContainer">
-                    <button type="button" id="thinkingModeBtn" class="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/50 dark:bg-dark-surface/50 hover:bg-white/70 dark:hover:bg-dark-surface/70 transition-all duration-200 border border-gray-200/50 dark:border-gray-600/50">
-                        <span id="thinkingModeIcon">⚡</span>
-                        <span id="thinkingModeLabel" class="text-sm font-medium">Instant</span>
-                        <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-                        </svg>
-                    </button>
-                    <!-- Dropdown Menu -->
-                    <div id="thinkingModeDropdown" class="absolute top-full left-0 mt-2 w-64 bg-white dark:bg-dark-surface rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 hidden animate-fade-in">
-                        <div class="p-2">
-                            <div class="text-xs px-3 py-2 font-semibold uppercase tracking-wide thinking-mode-header">Thinking Mode</div>
-                            
-                            <!-- Auto Mode -->
-                            <button type="button" class="thinking-mode-option w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" data-mode="auto" data-icon="🤖" data-label="Auto">
-                                <span class="text-xl">🤖</span>
-                                <div class="text-left">
-                                    <div class="font-medium">Auto</div>
-                                    <div class="text-xs">Tự quyết định thời gian suy nghĩ</div>
-                                </div>
-                            </button>
-                            
-                            <!-- Instant Mode -->
-                            <button type="button" class="thinking-mode-option w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all bg-primary/10 border-l-2 border-primary" data-mode="instant" data-icon="⚡" data-label="Instant">
-                                <span class="text-xl">⚡</span>
-                                <div class="text-left">
-                                    <div class="font-medium">Instant</div>
-                                    <div class="text-xs">Trả lời tức thời, không suy nghĩ sâu</div>
-                                </div>
-                            </button>
-                            
-                            <div class="border-t border-gray-200 dark:border-gray-700 my-2"></div>
-                            
-                            <!-- Thinking Medium -->
-                            <button type="button" class="thinking-mode-option w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" data-mode="thinking" data-icon="🧠" data-label="Suy nghĩ">
-                                <span class="text-xl">🧠</span>
-                                <div class="text-left">
-                                    <div class="font-medium">Suy nghĩ</div>
-                                    <div class="text-xs">Phân tích kỹ lưỡng, suy luận từng bước</div>
-                                </div>
-                            </button>
-                            
-                            <!-- Thinking Deep -->
-                            <button type="button" class="thinking-mode-option w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" data-mode="deep" data-icon="🚀" data-label="Suy nghĩ sâu">
-                                <span class="text-xl">🚀</span>
-                                <div class="text-left">
-                                    <div class="font-medium">Suy nghĩ sâu</div>
-                                    <div class="text-xs">Coordinated Reasoning - đa vòng lặp</div>
-                                </div>
-                                <span class="ml-auto text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 py-0.5 rounded-full">Pro</span>
-                            </button>
-                        </div>
-                    </div>
-                    <!-- Hidden input for form value -->
-                    <input type="hidden" id="thinkingModeValue" value="instant">
-                </div>
                 
                 <button class="download-btn btn-secondary hover:shadow-glow-sm" id="downloadBtn" title="Download chat history" data-lang-key="controls.download" data-lang-key-title="tooltip.download">
                     📥 Download
