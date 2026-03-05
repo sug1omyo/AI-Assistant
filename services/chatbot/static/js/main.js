@@ -10,7 +10,9 @@ import { MessageRenderer } from './modules/message-renderer.js';
 import { FileHandler } from './modules/file-handler.js';
 import { MemoryManager } from './modules/memory-manager.js';
 import { ImageGeneration } from './modules/image-gen.js';
+import { ImageGenV2 } from './modules/image-gen-v2.js';
 import { ExportHandler } from './modules/export-handler.js';
+import { SplitViewManager } from './modules/split-view.js';
 import { initLanguage } from './language-switcher.js';
 
 class ChatBotApp {
@@ -23,18 +25,22 @@ class ChatBotApp {
         this.fileHandler = new FileHandler();
         this.memoryManager = new MemoryManager(this.apiService);
         this.imageGen = new ImageGeneration(this.apiService);
+        this.imageGenV2 = new ImageGenV2(this.apiService);
         this.exportHandler = new ExportHandler();
         
         // Expose chatManager and chatApp globally
         window.chatManager = this.chatManager;
         window.chatApp = this;
         
-        // State
-        this.activeTools = new Set();
+        // State — auto-enable all image tools on startup
+        this.activeTools = new Set(['image-generation', 'img2img']);
         this.conversationActive = false;
         this.currentAbortController = null;
         this.messageHistory = {}; // Store message versions: { messageId: [version1, version2, ...] }
         this.currentMessageId = null;
+        
+        // Split view (initialized after DOM ready)
+        this.splitViewManager = null;
     }
 
     /**
@@ -241,7 +247,9 @@ class ChatBotApp {
             this.chatManager.chatSessions,
             this.chatManager.currentChatId,
             (chatId) => this.handleSwitchChat(chatId),
-            (chatId) => this.handleDeleteChat(chatId)
+            (chatId) => this.handleDeleteChat(chatId),
+            (fromId, toId, position) => this.handleReorderChat(fromId, toId, position),
+            (chatId) => this.handleTogglePin(chatId)
         );
         
         // Check local models
@@ -263,8 +271,26 @@ class ChatBotApp {
             this.chatManager.chatSessions,
             this.chatManager.currentChatId,
             (chatId) => this.handleSwitchChat(chatId),
-            (chatId) => this.handleDeleteChat(chatId)
+            (chatId) => this.handleDeleteChat(chatId),
+            (fromId, toId, position) => this.handleReorderChat(fromId, toId, position),
+            (chatId) => this.handleTogglePin(chatId)
         );
+    }
+
+    /**
+     * Handle drag & drop reorder
+     */
+    handleReorderChat(fromId, toId, position) {
+        this.chatManager.reorderChats(fromId, toId, position);
+        this.renderChatList();
+    }
+
+    /**
+     * Handle pin/unpin chat
+     */
+    handleTogglePin(chatId) {
+        this.chatManager.togglePin(chatId);
+        this.renderChatList();
     }
 
     /**
@@ -286,7 +312,13 @@ class ChatBotApp {
         elements.clearBtn.addEventListener('click', () => this.clearChat());
         
         // New chat
-        elements.newChatBtn.addEventListener('click', () => this.newChat());
+        elements.newChatBtn.addEventListener('click', () => {
+            this.newChat();
+            // Close sidebar on mobile
+            if (window.innerWidth <= 768) {
+                this.uiUtils.closeSidebar();
+            }
+        });
         
         // Stop generation button
         const stopBtn = document.getElementById('stopGenerationBtn');
@@ -299,11 +331,35 @@ class ChatBotApp {
             this.uiUtils.toggleDarkMode();
         });
         
+        // Split View toggle
+        this.splitViewManager = new SplitViewManager(this.chatManager, this.uiUtils);
+        const splitViewBtn = document.getElementById('splitViewBtn');
+        if (splitViewBtn) {
+            splitViewBtn.addEventListener('click', () => {
+                this.splitViewManager.toggle();
+            });
+        }
+        
         // Eye Care mode toggle
         const eyeCareBtn = document.getElementById('eyeCareBtn');
         if (eyeCareBtn) {
             eyeCareBtn.addEventListener('click', () => {
                 this.uiUtils.toggleEyeCareMode();
+            });
+        }
+
+        // ── More menu (topbar overflow) ──
+        const moreMenuBtn = document.getElementById('moreMenuBtn');
+        const moreMenuDropdown = document.getElementById('moreMenuDropdown');
+        if (moreMenuBtn && moreMenuDropdown) {
+            moreMenuBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                moreMenuDropdown.classList.toggle('hidden');
+            });
+            document.addEventListener('click', (e) => {
+                if (!moreMenuDropdown.contains(e.target) && e.target !== moreMenuBtn) {
+                    moreMenuDropdown.classList.add('hidden');
+                }
             });
         }
         
@@ -328,37 +384,20 @@ class ChatBotApp {
         // MCP Tab switching
         this.setupMcpTabs();
         
-        // Tool buttons
-        if (elements.googleSearchBtn) {
-            elements.googleSearchBtn.addEventListener('click', () => {
-                this.toggleTool('google-search', elements.googleSearchBtn);
-            });
-        }
-        
-        if (elements.githubBtn) {
-            elements.githubBtn.addEventListener('click', () => {
-                this.toggleTool('github', elements.githubBtn);
-            });
-        }
-        
-        if (elements.imageGenToolBtn) {
-            elements.imageGenToolBtn.addEventListener('click', () => {
-                this.toggleTool('image-generation', elements.imageGenToolBtn);
-            });
-        }
-        
-        // Image generation button
+        // Image generation button (ComfyUI legacy)
         if (elements.imageGenBtn) {
             elements.imageGenBtn.addEventListener('click', () => this.openImageGenModal());
         }
-        
-        // Img2Img tool button
-        if (elements.img2imgToolBtn) {
-            elements.img2imgToolBtn.addEventListener('click', async () => {
-                await this.openImageGenModal();
-                setTimeout(() => this.imageGen.switchTab('img2img'), 100);
+
+        // Image Generation V2 button (multi-provider)
+        const igv2Btn = document.getElementById('imageGenV2Btn');
+        if (igv2Btn) {
+            igv2Btn.addEventListener('click', () => {
+                this.imageGenV2.openModal();
             });
         }
+        // Expose V2 globally for onclick handlers
+        window.imageGenV2 = this.imageGenV2;
         
         // Upload files button
         const uploadFilesBtn = document.getElementById('uploadFilesBtn');
@@ -402,6 +441,10 @@ class ChatBotApp {
         
         // Load messages
         if (session.messages.length > 0) {
+            // Hide welcome screen
+            const welcomeScreen = document.getElementById('welcomeScreen');
+            if (welcomeScreen) welcomeScreen.style.display = 'none';
+
             elements.chatContainer.innerHTML = session.messages.join('');
             
             // Restore message version history from session
@@ -436,6 +479,12 @@ class ChatBotApp {
             setTimeout(makeClickable, 600);
         } else {
             this.uiUtils.clearChat();
+            // Show welcome screen
+            const welcomeScreen = document.getElementById('welcomeScreen');
+            if (welcomeScreen) {
+                welcomeScreen.style.display = '';
+                elements.chatContainer.appendChild(welcomeScreen);
+            }
         }
         
         // Load attached files for this session
@@ -468,6 +517,54 @@ class ChatBotApp {
         if (!message && sessionFiles.length === 0) {
             return;
         }
+
+        // ── Image Generation V2 Auto-Detect ──────────────────
+        // If message looks like an image request, generate inline via multi-provider
+        if (message && ImageGenV2.isImageRequest(message)) {
+            console.log('[App] Image generation intent detected, routing to V2');
+            const timestamp = this.uiUtils.formatTimestamp(new Date());
+            this.messageRenderer.addMessage(
+                elements.chatContainer, message, true,
+                formValues.model, formValues.context, timestamp
+            );
+            this.uiUtils.clearInput();
+
+            // Show generating indicator
+            this.messageRenderer.addMessage(
+                elements.chatContainer,
+                '🎨 Đang tạo ảnh với AI...',
+                false, formValues.model, formValues.context,
+                this.uiUtils.formatTimestamp(new Date())
+            );
+
+            const conversationId = this.chatManager.getCurrentSession()?.id || '';
+            const result = await this.imageGenV2.generateFromChat(message, conversationId);
+
+            if (result.success) {
+                let imgSrc = '';
+                if (result.images?.length > 0 && result.images[0].url) imgSrc = result.images[0].url;
+                else if (result.images_url?.length > 0) imgSrc = result.images_url[0];
+
+                const meta = `🎨 **${result.provider}** / ${result.model} | ${Math.round(result.latency_ms)}ms | $${result.cost_usd}`;
+                const enhanced = result.prompt_used ? `\n📝 ${result.prompt_used.substring(0, 150)}` : '';
+                this.messageRenderer.addMessage(
+                    elements.chatContainer,
+                    `<div class="igv2-chat-image"><img src="${imgSrc}" alt="Generated" style="max-width:100%;border-radius:12px;cursor:pointer;" onclick="window.open('${imgSrc}','_blank')"><div class="igv2-chat-meta">${meta}${enhanced}</div></div>`,
+                    false, formValues.model, formValues.context,
+                    this.uiUtils.formatTimestamp(new Date())
+                );
+            } else {
+                this.messageRenderer.addMessage(
+                    elements.chatContainer,
+                    `❌ Không thể tạo ảnh: ${result.error}`,
+                    false, formValues.model, formValues.context,
+                    this.uiUtils.formatTimestamp(new Date())
+                );
+            }
+            elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+            return;  // Don't send to chat API
+        }
+        // ── End Image Gen V2 Auto-Detect ─────────────────────
         
         // Handle Auto mode - decide if deep thinking is needed
         let deepThinking = formValues.deepThinking;
@@ -520,6 +617,29 @@ class ChatBotApp {
             customPromptUsed
         );
         
+        // If image-generation tool is active, show inline loading placeholder
+        let imageLoadingPlaceholder = null;
+        const hasImageTool = activeTools.includes('image-generation');
+        if (hasImageTool) {
+            const placeholder = document.createElement('div');
+            placeholder.className = 'message assistant';
+            placeholder.innerHTML = `
+                <div class="message__avatar">🤖</div>
+                <div class="message__body">
+                    <div class="message-content">
+                        <div class="image-gen-loading" id="imageGenLoadingPlaceholder">
+                            <div class="loading-spinner"></div>
+                            <div class="loading-text">🎨 Đang tạo ảnh...</div>
+                            <div class="loading-progress" style="font-size:11px;color:var(--text-tertiary);">Analyzing prompt → Selecting provider → Generating</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            elements.chatContainer.appendChild(placeholder);
+            imageLoadingPlaceholder = placeholder;
+            elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+        }
+        
         // If deep thinking is enabled, add thinking container with loading state
         let thinkingContainer = null;
         if (deepThinking) {
@@ -565,6 +685,44 @@ class ChatBotApp {
             // Add response to chat with version support
             const responseTimestamp = this.uiUtils.formatTimestamp(new Date());
             const responseContent = data.error ? `❌ **Lỗi:** ${data.error}` : data.response;
+            
+            // If image loading placeholder exists, replace it with the actual response
+            const isImageResponse = responseContent && (responseContent.includes('Image Generated') || responseContent.includes('generated-preview') || responseContent.includes('Image Generation Failed'));
+            if (imageLoadingPlaceholder && isImageResponse) {
+                // Replace the loading placeholder with the actual image result
+                const resultDiv = document.createElement('div');
+                resultDiv.className = 'message assistant';
+                resultDiv.dataset.timestamp = responseTimestamp;
+                resultDiv.dataset.model = data.model || formValues.model || '';
+                const avatarDiv = document.createElement('div');
+                avatarDiv.className = 'message__avatar';
+                avatarDiv.textContent = '🤖';
+                resultDiv.appendChild(avatarDiv);
+                const bodyDiv = document.createElement('div');
+                bodyDiv.className = 'message__body';
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'message-content';
+                const textDiv = document.createElement('div');
+                textDiv.className = 'message-text image-gen-result';
+                if (typeof marked !== 'undefined') {
+                    textDiv.innerHTML = marked.parse(responseContent);
+                } else {
+                    textDiv.innerHTML = responseContent;
+                }
+                contentDiv.appendChild(textDiv);
+                bodyDiv.appendChild(contentDiv);
+                // Add action buttons 
+                this.messageRenderer.addMessageButtons(contentDiv, responseContent, false, resultDiv);
+                resultDiv.appendChild(bodyDiv);
+                
+                imageLoadingPlaceholder.replaceWith(resultDiv);
+                // Refresh Lucide icons
+                if (window.lucide) lucide.createIcons({ nodes: [resultDiv] });
+                elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+                // Skip normal addMessage flow for image responses
+            } else {
+                // Remove image loading placeholder if response is not image-related
+                if (imageLoadingPlaceholder) imageLoadingPlaceholder.remove();
             
             // If deep thinking was enabled and we have thinking_process
             if (formValues.deepThinking && data.thinking_process && thinkingContainer) {
@@ -647,11 +805,15 @@ class ChatBotApp {
             setTimeout(makeClickable, 100);
             setTimeout(makeClickable, 500);  // Retry after 500ms for slower rendering
             
+            } // end else (non-image response path)
+            
         } catch (error) {
             // Remove thinking container if error
             if (thinkingContainer) {
                 thinkingContainer.remove();
             }
+            // Remove image loading placeholder on error
+            if (imageLoadingPlaceholder) imageLoadingPlaceholder.remove();
             
             // Check if it was aborted by user
             if (error.name === 'AbortError') {
@@ -907,7 +1069,9 @@ class ChatBotApp {
             this.chatManager.chatSessions,
             this.chatManager.currentChatId,
             (chatId) => this.handleSwitchChat(chatId),
-            (chatId) => this.handleDeleteChat(chatId)
+            (chatId) => this.handleDeleteChat(chatId),
+            (fromId, toId, position) => this.handleReorderChat(fromId, toId, position),
+            (chatId) => this.handleTogglePin(chatId)
         );
     }
 
@@ -920,6 +1084,12 @@ class ChatBotApp {
         }
         
         this.uiUtils.clearChat();
+        // Show welcome screen again
+        const welcomeScreen = document.getElementById('welcomeScreen');
+        if (welcomeScreen) {
+            welcomeScreen.style.display = '';
+            this.uiUtils.elements.chatContainer.appendChild(welcomeScreen);
+        }
         this.chatManager.updateCurrentSession([]);
         
         // Also clear files for this session
@@ -937,6 +1107,12 @@ class ChatBotApp {
         this.saveCurrentSession();
         this.chatManager.newChat();
         this.uiUtils.clearChat();
+        // Show welcome screen
+        const welcomeScreen = document.getElementById('welcomeScreen');
+        if (welcomeScreen) {
+            welcomeScreen.style.display = '';
+            this.uiUtils.elements.chatContainer.appendChild(welcomeScreen);
+        }
         
         // Clear files when creating new chat
         this.fileHandler.clearSessionFiles();
@@ -1209,7 +1385,7 @@ class ChatBotApp {
      * Setup MCP Tab switching and functionality
      */
     setupMcpTabs() {
-        const tabs = document.querySelectorAll('.mcp-tab');
+        const tabs = document.querySelectorAll('#mcpTabFolder, #mcpTabUrl, #mcpTabUpload');
         const folderSource = document.getElementById('mcpFolderSource');
         const urlSource = document.getElementById('mcpUrlSource');
         const uploadSource = document.getElementById('mcpUploadSource');
@@ -1875,7 +2051,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (!modal) return;
         
-        modal.classList.add('active');
+        modal.classList.add('active', 'open');
         grid.innerHTML = '<div style="text-align: center; padding: 50px; color: #999;">⏳ Đang tải ảnh...</div>';
         
         try {
@@ -1938,7 +2114,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     window.closeGallery = () => {
         const modal = document.getElementById('galleryModal');
-        if (modal) modal.classList.remove('active');
+        if (modal) modal.classList.remove('active', 'open');
     };
     
     window.refreshGallery = async () => {
@@ -2006,7 +2182,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (galleryBtn) {
         galleryBtn.addEventListener('click', openGallery);
     }
-    
+
+    // History modal close
+    window.closeHistoryModal = () => {
+        const modal = document.getElementById('historyModal');
+        if (modal) modal.classList.remove('active', 'open');
+    };
+
     // Expose app for debugging
     window.chatApp = app;
     console.log('[App] ChatBot app exposed to window.chatApp');

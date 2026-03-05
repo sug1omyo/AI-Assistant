@@ -856,6 +856,115 @@ class ChatbotAgent:
             logger.error(f"Local model error ({model}): {e}")
             return f"âŒ Lá»—i local model: {str(e)}"
     
+    def chat_with_step_flash(self, message, context='casual', deep_thinking=False, history=None, memories=None, language='vi', custom_prompt=None):
+        """Chat with Step-3.5-Flash via OpenRouter (FREE — 196B MoE, 11B active)"""
+        try:
+            openrouter_key = os.getenv('OPENROUTER_API_KEY')
+            if not openrouter_key:
+                return "❌ OPENROUTER_API_KEY chưa được cấu hình. Lấy FREE key tại: https://openrouter.ai/keys"
+            
+            client = openai.OpenAI(
+                api_key=openrouter_key,
+                base_url='https://openrouter.ai/api/v1'
+            )
+            
+            system_prompt = self._build_system_prompt(context, deep_thinking, memories, language, custom_prompt)
+            messages = self._build_messages(system_prompt, message, history)
+            
+            temperature = 0.5 if deep_thinking else 0.7
+            max_tokens = 4000 if deep_thinking else 2000
+            
+            logger.info(f"[STEP-FLASH] Sending request via OpenRouter (FREE)")
+            response = client.chat.completions.create(
+                model='stepfun/step-3.5-flash:free',
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                extra_headers={
+                    'HTTP-Referer': 'https://ai-assistant.local',
+                    'X-Title': 'AI Assistant'
+                }
+            )
+            
+            result = response.choices[0].message.content
+            logger.info(f"[STEP-FLASH] Response received: {len(result)} chars")
+            return result
+            
+        except Exception as e:
+            logger.error(f"[STEP-FLASH] Error: {e}")
+            return f"❌ Step-3.5-Flash error: {str(e)}"
+    
+    def chat_with_stepfun(self, message, context='casual', deep_thinking=False, history=None, memories=None, language='vi', custom_prompt=None):
+        """Chat with StepFun direct API (requires balance)"""
+        try:
+            stepfun_key = os.getenv('STEPFUN_API_KEY')
+            if not stepfun_key:
+                return "❌ STEPFUN_API_KEY chưa được cấu hình."
+            
+            client = openai.OpenAI(
+                api_key=stepfun_key,
+                base_url='https://api.stepfun.com/v1'
+            )
+            
+            system_prompt = self._build_system_prompt(context, deep_thinking, memories, language, custom_prompt)
+            messages = self._build_messages(system_prompt, message, history)
+            
+            temperature = 0.5 if deep_thinking else 0.7
+            max_tokens = 4000 if deep_thinking else 2000
+            
+            logger.info(f"[STEPFUN] Sending request to Step-2-16K")
+            response = client.chat.completions.create(
+                model='step-2-16k',
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+            
+            result = response.choices[0].message.content
+            logger.info(f"[STEPFUN] Response received: {len(result)} chars")
+            return result
+            
+        except Exception as e:
+            logger.error(f"[STEPFUN] Error: {e}")
+            logger.info("[STEPFUN] Falling back to Step-3.5-Flash via OpenRouter...")
+            return self.chat_with_step_flash(message, context, deep_thinking, history, memories, language, custom_prompt)
+    
+    def _build_system_prompt(self, context, deep_thinking, memories, language, custom_prompt):
+        """Build system prompt with context, memories, and deep thinking"""
+        if custom_prompt and custom_prompt.strip():
+            system_prompt = custom_prompt
+        else:
+            prompts = get_system_prompts(language)
+            system_prompt = prompts.get(context, prompts.get('casual', ''))
+        
+        if deep_thinking:
+            system_prompt += "\n\nIMPORTANT: Think step-by-step with detailed reasoning. Analyze thoroughly."
+        
+        if memories:
+            system_prompt += "\n\n=== KNOWLEDGE BASE ===\n"
+            for mem in memories:
+                system_prompt += f"\n📚 {mem.get('title', 'Memory')}:\n{mem.get('content', '')}\n"
+            system_prompt += "\n=== END KNOWLEDGE BASE ===\n"
+        
+        return system_prompt
+    
+    def _build_messages(self, system_prompt, message, history=None):
+        """Build message list for API call"""
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        hist_to_use = history if history else self.conversation_history[-10:]
+        
+        for hist in hist_to_use:
+            if 'role' in hist and 'content' in hist:
+                messages.append({"role": hist['role'], "content": hist['content']})
+            elif 'user' in hist:
+                messages.append({"role": "user", "content": hist['user']})
+                if 'assistant' in hist:
+                    messages.append({"role": "assistant", "content": hist['assistant']})
+        
+        messages.append({"role": "user", "content": message})
+        return messages
+    
     def chat(self, message, model='grok', context='casual', deep_thinking=False, history=None, memories=None, language='vi', custom_prompt=None, extra_params=None):
         """Main chat method with MongoDB integration"""
         # Save user message to MongoDB
@@ -892,6 +1001,10 @@ class ChatbotAgent:
             result = self.chat_with_bloomvn(message, context, deep_thinking, language)
         elif model in ['bloomvn-local', 'qwen1.5-local', 'qwen2.5-local']:
             result = self.chat_with_local_model(message, model, context, deep_thinking, language)
+        elif model == 'step-flash':
+            result = self.chat_with_step_flash(message, context, deep_thinking, history, memories, language, custom_prompt)
+        elif model == 'stepfun':
+            result = self.chat_with_stepfun(message, context, deep_thinking, history, memories, language, custom_prompt)
         else:
             result = f"Model '{model}' không được hỗ trợ" if language == 'vi' else f"Model '{model}' is not supported"
         
@@ -1133,16 +1246,9 @@ def is_mobile_device():
 
 @app.route('/')
 def index():
-    """Home page - Auto-detect mobile/desktop and serve appropriate UI"""
+    """Home page - Responsive UI (works on both mobile and desktop)"""
     if 'session_id' not in session:
         session['session_id'] = str(uuid.uuid4())
-    
-    # Check for force desktop/mobile mode via query param
-    force_mode = request.args.get('mode', None)
-    
-    # Auto-detect mobile or use forced mode
-    if force_mode == 'mobile' or (force_mode != 'desktop' and is_mobile_device()):
-        return render_template('mobile.html')
     
     # Load Firebase config from environment variables
     firebase_config = json.dumps({
@@ -1167,10 +1273,8 @@ def index_new():
 
 @app.route('/mobile')
 def index_mobile():
-    """Force mobile UI"""
-    if 'session_id' not in session:
-        session['session_id'] = str(uuid.uuid4())
-    return render_template('mobile.html')
+    """Mobile UI - redirects to responsive index"""
+    return redirect('/')
 
 
 @app.route('/desktop')
@@ -1343,190 +1447,543 @@ def chat():
                 tool_results.append(f"## ðŸ™ GitHub Search Results\n\n{github_result}")
             
             if 'image-generation' in tools:
-                logger.info(f"[TOOLS] AI-powered image generation with Stable Diffusion")
-                
-                # Step 1: Use OpenAI to create detailed Stable Diffusion prompt
-                prompt_request = f"""You are an expert Stable Diffusion prompt engineer for Animagine XL (anime art model).
+                # ── Auto-detect if user actually wants to generate/edit an image ──
+                _img_keywords_vi = ['vẽ', 'tạo ảnh', 'tạo hình', 'sinh ảnh', 'gen ảnh', 'tạo một', 'vẽ cho',
+                                    'chỉnh ảnh', 'sửa ảnh', 'thêm vào ảnh', 'xóa trong ảnh', 'edit ảnh',
+                                    'tạo logo', 'thiết kế', 'minh họa', 'vẽ tranh', 'ảnh anime',
+                                    'hình ảnh', 'bức ảnh', 'bức tranh', 'ảnh nền', 'avatar', 'icon']
+                _img_keywords_en = ['draw', 'paint', 'generate image', 'create image', 'make image',
+                                    'generate a', 'create a picture', 'gen image', 'image of',
+                                    'edit image', 'modify image', 'img2img', 'inpaint',
+                                    'design', 'illustrate', 'render', 'visualize',
+                                    'photo of', 'picture of', 'artwork', 'wallpaper',
+                                    'logo', 'portrait', 'landscape painting']
+                _msg_lower = message.lower()
+                _wants_image = any(kw in _msg_lower for kw in _img_keywords_vi + _img_keywords_en)
 
-TASK: Convert the user's description into a high-quality anime-style SD prompt.
+                if not _wants_image:
+                    # User has image-gen tool active but this message isn't about images
+                    # — skip image generation, let normal chat handle it
+                    logger.info("[TOOLS] image-generation active but message not image-related, skipping")
+                else:
+                    logger.info(f"[TOOLS] 🎨 Multi-provider image generation (V2) triggered")
+                    try:
+                        from core.image_gen import ImageGenerationRouter, ImageStorage
+                        _ig_router = ImageGenerationRouter()
+                        _ig_storage = ImageStorage()
+                        _ig_providers = _ig_router.get_available_providers()
+                        _active_provs = [p['name'] for p in _ig_providers if p['available']]
+                        logger.info(f"[TOOLS] Available providers: {_active_provs}")
 
-CRITICAL RULES:
-1. OUTPUT MUST BE IN ENGLISH - even if user input is in another language
-2. Use comma-separated tags format: "tag1, tag2, tag3, quality boosters"
-3. For scenery/nature (sky, landscape, etc.): describe scene details, NO people
-4. Always include quality boosters at the end: masterpiece, best quality, highly detailed, 8k, amazing lighting
-
-EXAMPLE OUTPUTS:
-- Input: "bầu trời đầy sao" → "night sky, starry sky, stars, milky way, galaxy, cosmic, deep blue sky, beautiful stars, sparkling, astronomy, space, masterpiece, best quality, highly detailed, 8k"
-- Input: "anime girl" → "1girl, solo, anime style, beautiful face, detailed eyes, masterpiece, best quality, highly detailed"
-- Input: "forest" → "forest, trees, nature, green leaves, sunlight through trees, peaceful, scenic, landscape, masterpiece, best quality, highly detailed, 8k"
-
-USER REQUEST: "{message}"
-
-Return ONLY this JSON format:
-{{
-    "prompt": "english tags separated by commas, quality boosters at end",
-    "negative_prompt": "low quality, worst quality, bad anatomy, blurry, watermark, signature, text",
-    "explanation": "brief explanation",
-    "has_people": false
-}}"""
-
-                try:
-                    # Use OpenAI for better prompt generation
-                    import openai
-                    openai_api_key = os.getenv('OPENAI_API_KEY')
-                    generated_prompt = None
-                    generated_neg = None
-                    explanation = ""
-                    has_people = False
-                    
-                    if openai_api_key:
-                        try:
-                            client = openai.OpenAI(api_key=openai_api_key)
-                            completion = client.chat.completions.create(
-                                model="gpt-4o-mini",
-                                messages=[
-                                    {"role": "system", "content": "You are a Stable Diffusion prompt expert. Always output English tags. Output only valid JSON."},
-                                    {"role": "user", "content": prompt_request}
-                                ],
-                                max_tokens=500,
-                                temperature=0.7
-                            )
-                            response_text = completion.choices[0].message.content
-                            logger.info(f"[TOOLS] OpenAI response: {response_text[:200]}...")
-                        except Exception as openai_err:
-                            logger.error(f"[TOOLS] OpenAI API error: {openai_err}")
-                            response_text = None
-                    else:
-                        response_text = None
-                        logger.warning("[TOOLS] No OpenAI API key, using fallback")
-                    
-                    # If OpenAI failed, use simple translation fallback
-                    if not response_text:
-                        # Simple fallback - create basic prompt from message
-                        logger.info("[TOOLS] Using fallback prompt generation")
-                        generated_prompt = f"{message}, anime style, masterpiece, best quality, highly detailed, 8k, beautiful, amazing lighting"
-                        generated_neg = "low quality, worst quality, bad anatomy, blurry, watermark, signature, text"
-                        explanation = "Fallback prompt - OpenAI unavailable"
-                        has_people = any(word in message.lower() for word in ['girl', 'boy', 'person', 'character', 'portrait', 'cô gái', 'chàng trai', 'người'])
-                    else:
-                        # Parse JSON response from OpenAI
-                        import re
-                        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                        if json_match:
-                            prompt_data = json.loads(json_match.group())
-                            generated_prompt = prompt_data.get('prompt', '')
-                            generated_neg = prompt_data.get('negative_prompt', '')
-                            explanation = prompt_data.get('explanation', '')
-                            has_people = prompt_data.get('has_people', False)
-                        else:
-                            # Could not parse JSON, use response as prompt
-                            generated_prompt = f"{message}, anime style, masterpiece, best quality, highly detailed, 8k"
-                            generated_neg = "low quality, worst quality, bad anatomy, blurry"
-                            explanation = "Could not parse AI response"
-                    
-                    if generated_prompt:
-                        nsfw_filters = "nsfw, r18, nude, naked, explicit, sexual, porn, hentai, erotic, underwear, panties, bra, lingerie, bikini, swimsuit, revealing clothes, cleavage, suggestive, lewd, ecchi, seductive, provocative, inappropriate content, adult content, xxx"
-                        if "nsfw" not in generated_neg.lower():
-                            generated_neg = f"{generated_neg}, {nsfw_filters}" if generated_neg else nsfw_filters
-                        
-                        # Add "humans" filter if NOT about people (negative = things to AVOID)
-                        if not has_people:
-                            avoid_people = "humans, people, person, persons, character, characters, figure, figures, man, men, woman, women, girl, girls, boy, boys, human figure"
-                            if "human" not in generated_neg.lower():
-                                generated_neg = f"{generated_neg}, {avoid_people}"
-                            logger.info(f"[TOOLS] Added 'humans' to negative - avoid people in scenery/object image")
-                        else:
-                            # For people images, add extra clothing safety
-                            clothing_safety = "fully clothed, modest clothing, appropriate attire, safe for work, family friendly"
-                            if clothing_safety not in generated_prompt.lower():
-                                generated_prompt = f"{generated_prompt}, {clothing_safety}"
-                            logger.info(f"[TOOLS] Added clothing safety for people image")
-                        
-                        logger.info(f"[TOOLS] Generated prompt: {generated_prompt[:100]}...")
-                        
-                        # Step 2: Generate image with ComfyUI
-                        from src.utils.comfyui_client import ComfyUIClient
-                        
-                        comfyui_client = ComfyUIClient()
-                        logger.info(f"[TOOLS] Generating image with ComfyUI...")
-                        image_bytes = comfyui_client.generate_image(
-                            prompt=generated_prompt,
-                            negative_prompt=generated_neg,
-                            width=512,
-                            height=512,
-                            steps=20,
-                            cfg_scale=7.0,
-                            seed=-1
+                        # Generate via V2 router (auto-selects best provider)
+                        result = _ig_router.generate(
+                            prompt=message,
+                            quality='auto',
+                            width=1024,
+                            height=1024,
+                            enhance_prompt=True,
                         )
-                        
-                        if image_bytes:
-                            # Convert bytes to base64
-                            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-                            logger.info(f"[TOOLS] Image generated: {len(image_bytes)} bytes")
-                            
-                            # Upload to ImgBB and save to MongoDB/Firebase
-                            cloud_url = None
-                            try:
-                                from core.image_storage import store_generated_image
-                                storage_result = store_generated_image(
-                                    image_base64=image_base64,
-                                    prompt=generated_prompt,
-                                    negative_prompt=generated_neg,
-                                    metadata={
-                                        'original_message': message,
-                                        'model': 'animagine-xl-3.1',
-                                        'size': '512x512',
-                                        'steps': 20,
-                                        'cfg_scale': 7.0
-                                    }
-                                )
-                                if storage_result.get('success'):
-                                    cloud_url = storage_result.get('imgbb_url')
-                                    logger.info(f"[TOOLS] Image uploaded to cloud: {cloud_url}")
-                            except Exception as e:
-                                logger.warning(f"[TOOLS] Cloud upload failed: {e}")
-                            
-                            # Build result message
-                            cloud_link = f"\n\n☁️ **Cloud URL:** [{cloud_url}]({cloud_url})" if cloud_url else ""
-                            
+
+                        if result.success and (result.images_b64 or result.images_url):
+                            provider_used = result.provider or 'unknown'
+                            model_used = result.model or ''
+                            enhanced_prompt = result.prompt_used or message
+                            cost = result.cost_usd
+
+                            # Determine image source — prefer b64 for inline, fall back to URL
+                            image_html = ""
+                            cloud_urls = []
+
+                            for img_b64 in result.images_b64:
+                                image_html += f'<img src="data:image/png;base64,{img_b64}" alt="Generated Image" style="max-width: 100%; border-radius: 8px; margin: 10px 0; cursor: pointer;" class="generated-preview">\n'
+                                # Try to store
+                                try:
+                                    store_result = _ig_storage.save(
+                                        image_b64=img_b64,
+                                        prompt=enhanced_prompt,
+                                        provider=provider_used,
+                                        metadata={'original_message': message, 'model': model_used, 'cost': cost}
+                                    )
+                                    url = store_result.get('url')
+                                    if url:
+                                        cloud_urls.append(url)
+                                except Exception as _store_err:
+                                    logger.warning(f"[TOOLS] Image storage failed: {_store_err}")
+
+                            for img_url in result.images_url:
+                                image_html += f'<img src="{img_url}" alt="Generated Image" style="max-width: 100%; border-radius: 8px; margin: 10px 0; cursor: pointer;" class="generated-preview">\n'
+                                cloud_urls.append(img_url)
+                                # Try to store URL
+                                try:
+                                    _ig_storage.save(
+                                        image_url=img_url,
+                                        prompt=enhanced_prompt,
+                                        provider=provider_used,
+                                        metadata={'original_message': message, 'model': model_used, 'cost': cost}
+                                    )
+                                except Exception:
+                                    pass
+
+                            cloud_link = ""
+                            if cloud_urls:
+                                cloud_link = "\n\n☁️ **URLs:** " + " | ".join(f"[Open]({u})" for u in cloud_urls[:3])
+
                             result_msg = f"""## 🎨 Image Generated Successfully!
 
 **Original description:** {message}
 
-**Generated Prompt:**
+**Enhanced Prompt:**
 ```
-{generated_prompt}
-```
-
-**Negative Prompt:**
-```
-{generated_neg}
+{enhanced_prompt}
 ```
 
-**Explanation:** {explanation}
+**Generated Image:**
+{image_html}
+{cloud_link}
+---
+🎯 **Info:**
+- Provider: {provider_used} {('(' + model_used + ')') if model_used else ''}
+- Size: 1024×1024
+- Cost: ${cost:.4f}
+- Active providers: {', '.join(_active_provs)}"""
+                            tool_results.append(result_msg)
+                        else:
+                            _error = result.error or 'Unknown error'
+                            logger.warning(f"[TOOLS] V2 generation failed: {_error}")
+                            # Fallback to ComfyUI directly
+                            try:
+                                from src.utils.comfyui_client import ComfyUIClient
+                                comfyui_client = ComfyUIClient()
+                                image_bytes = comfyui_client.generate_image(
+                                    prompt=message,
+                                    negative_prompt="low quality, worst quality, blurry, watermark",
+                                    width=512, height=512, steps=20, cfg_scale=7.0, seed=-1
+                                )
+                                if image_bytes:
+                                    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                                    result_msg = f"""## 🎨 Image Generated (ComfyUI Fallback)
+
+**Prompt:** {message}
 
 **Generated Image:**
 <img src="data:image/png;base64,{image_base64}" alt="Generated Image" style="max-width: 100%; border-radius: 8px; margin: 10px 0; cursor: pointer;" class="generated-preview">
-{cloud_link}
+
 ---
-🎯 **Parameters:**
-- Size: 512x512
-- Steps: 20 | CFG: 7.0
-- Backend: ComfyUI"""
-                            
-                            tool_results.append(result_msg)
-                        else:
-                            # No image generated
-                            tool_results.append(f"## 🎨 Image Generation\n\n⚠️ ComfyUI did not return an image.\n\nPrompt created:\n```\n{generated_prompt}\n```\n\nNegative:\n```\n{generated_neg}\n```\n\nPlease check if ComfyUI is running on port 8189.")
-                    else:
-                        tool_results.append(f"## 🎨 Image Generation\n\nCould not auto-generate prompt. Response: {response_text}\n\nPlease use the Image Generator panel manually.")
-                        
+🎯 Backend: ComfyUI (local) | V2 error: {_error}"""
+                                    tool_results.append(result_msg)
+                                else:
+                                    tool_results.append(f"## 🎨 Image Generation Failed\n\n❌ V2: {_error}\n❌ ComfyUI: No image returned\n\nAvailable providers: {', '.join(_active_provs) if _active_provs else 'None'}\n\nPlease add API keys (FAL_API_KEY, REPLICATE_API_TOKEN, BFL_API_KEY, TOGETHER_API_KEY, OPENAI_API_KEY, STEPFUN_API_KEY) to .env")
+                            except Exception as _comfy_err:
+                                tool_results.append(f"## 🎨 Image Generation Failed\n\n❌ V2: {_error}\n❌ ComfyUI: {str(_comfy_err)}\n\nPlease check your API keys or start ComfyUI.")
+
+                    except Exception as e:
+                        logger.error(f"[TOOLS] Error in image generation: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        tool_results.append(f"## 🎨 Image Generation\n\nError: {str(e)}\n\nPlease check your image generation API keys in .env")
+        
+            # ── Deep Research Tool ──
+            if 'deep-research' in tools:
+                logger.info(f"[TOOLS] 🔬 Deep Research triggered for: {message[:80]}")
+                try:
+                    # Step 1: Web search for latest information
+                    search_result = google_search_tool(message)
+                    
+                    # Step 2: Multi-model analysis
+                    research_analyses = []
+                    research_models = [
+                        ('grok', 'Grok-3'),
+                        ('deepseek-reasoner', 'DeepSeek R1'),
+                        ('openai', 'GPT-4o-mini'),
+                    ]
+                    
+                    research_prompt = f"""Based on the following web search results, provide a comprehensive analysis of the topic.
+
+SEARCH RESULTS:
+{search_result[:8000]}
+
+USER QUESTION: {message}
+
+Provide:
+1. Key findings & facts
+2. Multiple perspectives
+3. Critical analysis
+4. Conclusion with confidence level"""
+
+                    for _model_id, _model_name in research_models:
+                        try:
+                            _research_bot = get_chatbot(session.get('session_id'))
+                            _analysis = _research_bot.ask(
+                                research_prompt,
+                                context=context,
+                                model=_model_id,
+                                history=[],
+                                deep_thinking=True,
+                            )
+                            _resp_text = _analysis.get('response', '') if isinstance(_analysis, dict) else str(_analysis)
+                            if _resp_text:
+                                research_analyses.append(f"### 🤖 {_model_name} Analysis\n\n{_resp_text[:3000]}")
+                        except Exception as _model_err:
+                            logger.warning(f"[DEEP RESEARCH] {_model_name} failed: {_model_err}")
+                            research_analyses.append(f"### ⚠️ {_model_name}\n\nAnalysis unavailable: {str(_model_err)[:100]}")
+
+                    # Step 3: Synthesize
+                    analyses_text = "\n\n---\n\n".join(research_analyses) if research_analyses else "No analyses available"
+                    
+                    result_msg = f"""## 🔬 Deep Research Report
+
+**Query:** {message}
+
+---
+
+### 📡 Web Search Results
+{search_result[:4000]}
+
+---
+
+### 🧠 Multi-Model Analysis
+
+{analyses_text}
+
+---
+
+### 📊 Research Summary
+- Sources consulted: Web search + {len(research_analyses)} AI models
+- Models: {', '.join(m[1] for m in research_models)}
+- Approach: Search → Analyze → Cross-reference → Synthesize"""
+
+                    tool_results.append(result_msg)
                 except Exception as e:
-                    logger.error(f"[TOOLS] Error in image generation: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    tool_results.append(f"## 🎨 Image Generation\n\nError: {str(e)}\n\nPlease check:\n1. Is ComfyUI running on port 8189?\n2. Check logs for details.")
+                    logger.error(f"[TOOLS] Deep Research error: {e}")
+                    tool_results.append(f"## 🔬 Deep Research\n\nError: {str(e)}")
+
+            # ── Code Interpreter ──────────────────────────────────────────
+            if 'code-interpreter' in tools:
+                logger.info(f"[TOOLS] Code Interpreter for: {message[:80]}")
+                try:
+                    import subprocess, tempfile, re as _re
+                    # Extract code blocks from message
+                    code_blocks = _re.findall(r'```(?:python|py|javascript|js)?\s*\n(.*?)```', message, _re.DOTALL)
+                    if not code_blocks:
+                        # Try to detect inline code or treat entire message as instruction
+                        code_blocks = _re.findall(r'`([^`]+)`', message)
+                    
+                    if code_blocks:
+                        results_parts = []
+                        for i, code in enumerate(code_blocks):
+                            code = code.strip()
+                            # Detect language
+                            is_js = any(kw in code for kw in ['console.log', 'const ', 'let ', 'var ', 'function ', '=>', 'document.'])
+                            
+                            if is_js:
+                                # Run JavaScript with Node.js
+                                with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False, encoding='utf-8') as f:
+                                    f.write(code)
+                                    f.flush()
+                                    try:
+                                        proc = subprocess.run(['node', f.name], capture_output=True, text=True, timeout=30, cwd=tempfile.gettempdir())
+                                        stdout = proc.stdout[:3000] if proc.stdout else ''
+                                        stderr = proc.stderr[:1000] if proc.stderr else ''
+                                        results_parts.append(f"**Block {i+1} (JavaScript):**\n```\n{stdout}\n```" + (f"\n⚠️ Stderr:\n```\n{stderr}\n```" if stderr else ''))
+                                    finally:
+                                        os.unlink(f.name)
+                            else:
+                                # Run Python
+                                with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
+                                    f.write(code)
+                                    f.flush()
+                                    try:
+                                        proc = subprocess.run([sys.executable, f.name], capture_output=True, text=True, timeout=30, cwd=tempfile.gettempdir())
+                                        stdout = proc.stdout[:3000] if proc.stdout else ''
+                                        stderr = proc.stderr[:1000] if proc.stderr else ''
+                                        results_parts.append(f"**Block {i+1} (Python):**\n```\n{stdout}\n```" + (f"\n⚠️ Stderr:\n```\n{stderr}\n```" if stderr else ''))
+                                    finally:
+                                        os.unlink(f.name)
+                        
+                        tool_results.append(f"## 💻 Code Interpreter\n\n" + "\n\n".join(results_parts))
+                    else:
+                        # No code detected — ask AI to write & run code for the task
+                        _code_prompt = f"Write a Python script to accomplish this task. Output ONLY the Python code, no explanations:\n\n{message}"
+                        _code_resp = chatbot.chat(_code_prompt, model, context='', deep_thinking=False, history=[], language=language)
+                        _code_text = _code_resp.get('response', '') if isinstance(_code_resp, dict) else str(_code_resp)
+                        _extracted = _re.findall(r'```(?:python|py)?\s*\n(.*?)```', _code_text, _re.DOTALL)
+                        if _extracted:
+                            _script = _extracted[0].strip()
+                            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
+                                f.write(_script)
+                                f.flush()
+                                try:
+                                    proc = subprocess.run([sys.executable, f.name], capture_output=True, text=True, timeout=30, cwd=tempfile.gettempdir())
+                                    stdout = proc.stdout[:3000] if proc.stdout else ''
+                                    stderr = proc.stderr[:1000] if proc.stderr else ''
+                                    tool_results.append(f"## 💻 Code Interpreter\n\n**Generated Code:**\n```python\n{_script[:2000]}\n```\n\n**Output:**\n```\n{stdout}\n```" + (f"\n⚠️ Stderr:\n```\n{stderr}\n```" if stderr else ''))
+                                finally:
+                                    os.unlink(f.name)
+                        else:
+                            tool_results.append(f"## 💻 Code Interpreter\n\n{_code_text}")
+                except Exception as e:
+                    logger.error(f"[TOOLS] Code Interpreter error: {e}")
+                    tool_results.append(f"## 💻 Code Interpreter\n\n❌ Error: {str(e)}")
+
+            # ── PDF Analyzer ──────────────────────────────────────────────
+            if 'pdf-analyzer' in tools:
+                logger.info(f"[TOOLS] PDF Analyzer for: {message[:80]}")
+                try:
+                    import re as _re
+                    # Check if user attached a PDF (base64 or URL) in history, or search for local PDFs
+                    pdf_text = ""
+                    pdf_source = ""
+                    
+                    # Try to find PDF URL in message
+                    url_match = _re.search(r'https?://\S+\.pdf', message, _re.IGNORECASE)
+                    if url_match:
+                        pdf_url = url_match.group(0)
+                        pdf_source = pdf_url
+                        import httpx
+                        resp = httpx.get(pdf_url, timeout=30, follow_redirects=True)
+                        if resp.status_code == 200:
+                            import io
+                            try:
+                                import PyPDF2
+                                reader = PyPDF2.PdfReader(io.BytesIO(resp.content))
+                                pages = []
+                                for i, page in enumerate(reader.pages):
+                                    text = page.extract_text() or ''
+                                    if text.strip():
+                                        pages.append(f"**Page {i+1}:**\n{text[:2000]}")
+                                pdf_text = "\n\n---\n\n".join(pages[:50])
+                            except ImportError:
+                                try:
+                                    import pdfplumber
+                                    with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
+                                        pages = []
+                                        for i, page in enumerate(pdf.pages):
+                                            text = page.extract_text() or ''
+                                            if text.strip():
+                                                pages.append(f"**Page {i+1}:**\n{text[:2000]}")
+                                        pdf_text = "\n\n---\n\n".join(pages[:50])
+                                except ImportError:
+                                    pdf_text = "⚠️ No PDF parser available. Install: `pip install PyPDF2` or `pip install pdfplumber`"
+                    
+                    # Check for local PDF in uploads
+                    if not pdf_text:
+                        upload_dir = Path(__file__).parent / 'uploads'
+                        if upload_dir.exists():
+                            pdf_files = list(upload_dir.glob('**/*.pdf'))
+                            if pdf_files:
+                                latest_pdf = max(pdf_files, key=lambda f: f.stat().st_mtime)
+                                pdf_source = latest_pdf.name
+                                try:
+                                    import PyPDF2
+                                    with open(latest_pdf, 'rb') as f:
+                                        reader = PyPDF2.PdfReader(f)
+                                        pages = []
+                                        for i, page in enumerate(reader.pages):
+                                            text = page.extract_text() or ''
+                                            if text.strip():
+                                                pages.append(f"**Page {i+1}:**\n{text[:2000]}")
+                                        pdf_text = "\n\n---\n\n".join(pages[:50])
+                                except ImportError:
+                                    try:
+                                        import pdfplumber
+                                        with pdfplumber.open(str(latest_pdf)) as pdf:
+                                            pages = []
+                                            for i, page in enumerate(pdf.pages):
+                                                text = page.extract_text() or ''
+                                                if text.strip():
+                                                    pages.append(f"**Page {i+1}:**\n{text[:2000]}")
+                                            pdf_text = "\n\n---\n\n".join(pages[:50])
+                                    except ImportError:
+                                        pdf_text = "⚠️ No PDF parser available. Install: `pip install PyPDF2` or `pip install pdfplumber`"
+                    
+                    if pdf_text and '⚠️' not in pdf_text:
+                        # Ask AI to analyze the extracted text
+                        _analysis_prompt = f"Analyze this PDF document and answer the user's question.\n\nUser question: {message}\n\nPDF Source: {pdf_source}\n\nExtracted text:\n{pdf_text[:8000]}"
+                        _analysis = chatbot.chat(_analysis_prompt, model, context='', deep_thinking=True, history=[], language=language)
+                        _analysis_text = _analysis.get('response', '') if isinstance(_analysis, dict) else str(_analysis)
+                        tool_results.append(f"## 📄 PDF Analysis\n\n**Source:** {pdf_source}\n\n{_analysis_text}")
+                    elif pdf_text:
+                        tool_results.append(f"## 📄 PDF Analyzer\n\n{pdf_text}")
+                    else:
+                        tool_results.append(f"## 📄 PDF Analyzer\n\nKhông tìm thấy file PDF. Hãy:\n- Gửi URL file PDF trong tin nhắn\n- Hoặc upload file PDF trước khi sử dụng tool này")
+                except Exception as e:
+                    logger.error(f"[TOOLS] PDF Analyzer error: {e}")
+                    tool_results.append(f"## 📄 PDF Analyzer\n\n❌ Error: {str(e)}")
+
+            # ── Real-time Translation ─────────────────────────────────────
+            if 'translator' in tools:
+                logger.info(f"[TOOLS] Translation for: {message[:80]}")
+                try:
+                    _trans_prompt = f"""You are a professional translator. Analyze the following text and:
+1. Auto-detect the source language
+2. Translate it to the most appropriate target language (if Vietnamese → English, if English → Vietnamese, if other → both Vietnamese and English)
+3. Provide pronunciation guide if applicable
+4. Note any idioms, cultural context, or nuances
+
+Text to translate:
+{message}
+
+Respond in this format:
+**Detected Language:** [language]
+**Translation(s):**
+[translations with target language labels]
+**Pronunciation:** [if applicable]
+**Notes:** [cultural context, idioms, nuances]"""
+                    
+                    _trans_resp = chatbot.chat(_trans_prompt, model, context='', deep_thinking=False, history=[], language=language)
+                    _trans_text = _trans_resp.get('response', '') if isinstance(_trans_resp, dict) else str(_trans_resp)
+                    tool_results.append(f"## 🌐 Translation\n\n{_trans_text}")
+                except Exception as e:
+                    logger.error(f"[TOOLS] Translation error: {e}")
+                    tool_results.append(f"## 🌐 Translation\n\n❌ Error: {str(e)}")
+
+            # ── Web Scraper ───────────────────────────────────────────────
+            if 'web-scraper' in tools:
+                logger.info(f"[TOOLS] Web Scraper for: {message[:80]}")
+                try:
+                    import re as _re
+                    url_match = _re.search(r'https?://[^\s<>"\']+', message)
+                    if url_match:
+                        target_url = url_match.group(0).rstrip('.,;:!?)')
+                        import httpx
+                        from bs4 import BeautifulSoup
+                        
+                        headers = {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                        }
+                        resp = httpx.get(target_url, timeout=30, follow_redirects=True, headers=headers)
+                        soup = BeautifulSoup(resp.text, 'html.parser')
+                        
+                        # Remove scripts, styles
+                        for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'aside']):
+                            tag.decompose()
+                        
+                        # Extract title
+                        title = soup.title.string.strip() if soup.title and soup.title.string else 'No title'
+                        
+                        # Extract meta description
+                        meta_desc = ''
+                        meta_tag = soup.find('meta', attrs={'name': 'description'})
+                        if meta_tag and meta_tag.get('content'):
+                            meta_desc = meta_tag['content']
+                        
+                        # Extract main text
+                        main_text = soup.get_text(separator='\n', strip=True)[:6000]
+                        
+                        # Extract links
+                        links = []
+                        for a in soup.find_all('a', href=True)[:20]:
+                            href = a['href']
+                            text = a.get_text(strip=True)[:80]
+                            if text and href.startswith('http'):
+                                links.append(f"- [{text}]({href})")
+                        
+                        # Extract images
+                        images = []
+                        for img in soup.find_all('img', src=True)[:10]:
+                            src = img['src']
+                            alt = img.get('alt', '')[:60]
+                            if src.startswith('http'):
+                                images.append(f"- ![{alt}]({src})")
+                        
+                        # Extract tables
+                        tables_text = ""
+                        for table in soup.find_all('table')[:3]:
+                            rows = table.find_all('tr')
+                            if rows:
+                                table_data = []
+                                for row in rows[:20]:
+                                    cells = [c.get_text(strip=True)[:50] for c in row.find_all(['td', 'th'])]
+                                    table_data.append(' | '.join(cells))
+                                tables_text += "\n".join(table_data) + "\n\n"
+                        
+                        result = f"""## 🌍 Web Scraper
+
+**URL:** {target_url}
+**Title:** {title}
+**Description:** {meta_desc[:200]}
+
+### 📝 Content
+{main_text[:5000]}
+"""
+                        if tables_text:
+                            result += f"\n### 📊 Tables\n{tables_text[:2000]}"
+                        if links:
+                            result += f"\n### 🔗 Links ({len(links)})\n" + "\n".join(links[:15])
+                        if images:
+                            result += f"\n### 🖼️ Images ({len(images)})\n" + "\n".join(images[:8])
+                        
+                        tool_results.append(result)
+                    else:
+                        tool_results.append("## 🌍 Web Scraper\n\nKhông tìm thấy URL trong tin nhắn. Hãy gửi URL cần scrape, ví dụ: `https://example.com`")
+                except Exception as e:
+                    logger.error(f"[TOOLS] Web Scraper error: {e}")
+                    tool_results.append(f"## 🌍 Web Scraper\n\n❌ Error: {str(e)}")
+
+            # ── Memory Manager ────────────────────────────────────────────
+            if 'memory-manager' in tools:
+                logger.info(f"[TOOLS] Memory Manager for: {message[:80]}")
+                try:
+                    user_prefs_file = MEMORY_DIR / '_user_preferences.json'
+                    
+                    # Load existing preferences
+                    prefs = {}
+                    if user_prefs_file.exists():
+                        with open(user_prefs_file, 'r', encoding='utf-8') as f:
+                            prefs = json.load(f)
+                    
+                    # Ask AI to extract preferences/facts from message
+                    _mem_prompt = f"""Analyze this message and extract any user preferences, facts, or important information to remember.
+Current stored preferences: {json.dumps(prefs, ensure_ascii=False)[:2000]}
+
+User message: {message}
+
+Respond in JSON format:
+{{
+    "new_facts": ["fact1", "fact2"],
+    "preferences": {{"key": "value"}},
+    "summary": "Brief summary of what was learned",
+    "relevant_memories": ["any relevant stored info for this context"]
+}}"""
+                    
+                    _mem_resp = chatbot.chat(_mem_prompt, model, context='', deep_thinking=False, history=[], language=language)
+                    _mem_text = _mem_resp.get('response', '') if isinstance(_mem_resp, dict) else str(_mem_resp)
+                    
+                    # Try to parse AI response as JSON
+                    import re as _re
+                    _json_match = _re.search(r'\{.*\}', _mem_text, _re.DOTALL)
+                    if _json_match:
+                        try:
+                            mem_data = json.loads(_json_match.group(0))
+                            # Update preferences
+                            if mem_data.get('preferences'):
+                                prefs.update(mem_data['preferences'])
+                            if mem_data.get('new_facts'):
+                                if 'facts' not in prefs:
+                                    prefs['facts'] = []
+                                prefs['facts'].extend(mem_data['new_facts'])
+                                prefs['facts'] = prefs['facts'][-100:]  # Keep last 100 facts
+                            prefs['last_updated'] = datetime.now().isoformat()
+                            
+                            # Save updated preferences
+                            with open(user_prefs_file, 'w', encoding='utf-8') as f:
+                                json.dump(prefs, f, ensure_ascii=False, indent=2)
+                            
+                            summary = mem_data.get('summary', 'Preferences updated')
+                            relevant = mem_data.get('relevant_memories', [])
+                            facts_count = len(prefs.get('facts', []))
+                            
+                            result = f"## 🧠 Memory Manager\n\n**Status:** Updated successfully\n**Summary:** {summary}\n**Total facts stored:** {facts_count}"
+                            if relevant:
+                                result += f"\n\n**Relevant memories:**\n" + "\n".join(f"- {r}" for r in relevant[:5])
+                            tool_results.append(result)
+                        except json.JSONDecodeError:
+                            tool_results.append(f"## 🧠 Memory Manager\n\n{_mem_text}")
+                    else:
+                        tool_results.append(f"## 🧠 Memory Manager\n\n{_mem_text}")
+                except Exception as e:
+                    logger.error(f"[TOOLS] Memory Manager error: {e}")
+                    tool_results.append(f"## 🧠 Memory Manager\n\n❌ Error: {str(e)}")
         
         # If tools were used, return tool results
         if tool_results:
@@ -4320,6 +4777,214 @@ try:
     logger.info("✅ Registered stable_diffusion blueprint")
 except ImportError as e:
     logger.warning(f"⚠️ Could not register stable_diffusion blueprint: {e}")
+
+try:
+    from routes.image_gen import image_gen_bp
+    app.register_blueprint(image_gen_bp)
+    logger.info("✅ Registered image_gen blueprint (multi-provider)")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not register image_gen blueprint: {e}")
+
+try:
+    from routes.models import models_bp
+    app.register_blueprint(models_bp)
+    logger.info("✅ Registered models blueprint (health/status)")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not register models blueprint: {e}")
+
+try:
+    from routes.stream import stream_bp
+    app.register_blueprint(stream_bp)
+    logger.info("✅ Registered stream blueprint (SSE)")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not register stream blueprint: {e}")
+
+try:
+    from routes.async_routes import async_bp
+    app.register_blueprint(async_bp)
+    logger.info("✅ Registered async blueprint (async chat)")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not register async blueprint: {e}")
+
+
+# ════════════════════════════════════════════════════════════
+# ═══ External API v1 — Stateless API for extensions/.exe ═══
+# ════════════════════════════════════════════════════════════
+
+EXTERNAL_API_KEY = os.getenv('EXTERNAL_API_KEY', 'ai-assistant-ext-key-2024')
+
+def require_api_key(f):
+    """Decorator to require X-API-Key header for external API"""
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        api_key = request.headers.get('X-API-Key', '')
+        if not api_key or api_key != EXTERNAL_API_KEY:
+            return jsonify({'error': 'Invalid or missing API key', 'code': 'UNAUTHORIZED'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
+@app.route('/api/v1/chat', methods=['POST'])
+@require_api_key
+def external_chat():
+    """
+    Stateless chat endpoint for external apps (browser extension, .exe client).
+    
+    Headers:
+        X-API-Key: <your-api-key>
+    
+    Body (JSON):
+        {
+            "message": "Hello",
+            "model": "grok",              // optional
+            "context": "casual",           // optional
+            "history": [],                 // optional conversation history
+            "page_context": "",            // optional — injected page text from extension
+            "tools": ["image-generation"], // optional
+            "language": "vi"               // optional
+        }
+    
+    Returns: { "response": "...", "model": "...", "tokens": 0 }
+    """
+    try:
+        data = request.get_json(force=True)
+        if not data or not data.get('message'):
+            return jsonify({'error': 'Missing "message" field'}), 400
+        
+        message = data['message']
+        model = data.get('model', 'grok')
+        context_type = data.get('context', 'casual')
+        history = data.get('history', [])
+        page_context = data.get('page_context', '')
+        tools = data.get('tools', [])
+        language = data.get('language', 'vi')
+        
+        # If page_context provided, prepend it to the message
+        if page_context:
+            message = f"[Page Context]\n{page_context[:8000]}\n\n[User Question]\n{message}"
+        
+        # Build minimal context for the AI
+        conversation_history = []
+        for h in history[-20:]:  # Last 20 messages max
+            role = h.get('role', 'user')
+            content = h.get('content', '')
+            conversation_history.append({'role': role, 'content': content})
+        
+        conversation_history.append({'role': 'user', 'content': message})
+        
+        # Use the same AI routing logic as the main chat
+        # Import the process function dynamically
+        from core.ai_router import route_to_model
+        
+        response_text = route_to_model(
+            message=message,
+            model=model,
+            context=context_type,
+            history=conversation_history,
+            language=language
+        )
+        
+        return jsonify({
+            'response': response_text,
+            'model': model,
+            'tokens': len(response_text.split()),
+            'status': 'success'
+        })
+        
+    except ImportError:
+        # Fallback: use the chat endpoint logic directly
+        logger.warning("[ExtAPI] ai_router not available, using fallback")
+        return jsonify({
+            'error': 'AI router not available. Use the main /chat endpoint instead.',
+            'fallback_url': '/chat'
+        }), 503
+    except Exception as e:
+        logger.error(f"[ExtAPI] Error: {e}")
+        return jsonify({'error': str(e), 'status': 'error'}), 500
+
+
+@app.route('/api/v1/context', methods=['POST'])
+@require_api_key
+def inject_context():
+    """
+    Inject page context into the AI's memory for the current session.
+    Used by browser extension to send page content before asking questions.
+    
+    Body: { "url": "https://...", "title": "Page Title", "content": "page text...", "selection": "selected text" }
+    """
+    try:
+        data = request.get_json(force=True)
+        
+        # Store in session for use in subsequent chat calls
+        if 'ext_context' not in session:
+            session['ext_context'] = []
+        
+        context_entry = {
+            'url': data.get('url', ''),
+            'title': data.get('title', ''),
+            'content': (data.get('content', '') or data.get('selection', ''))[:10000],
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        session['ext_context'].append(context_entry)
+        # Keep only last 5 contexts
+        session['ext_context'] = session['ext_context'][-5:]
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Context from "{context_entry["title"]}" stored',
+            'contexts_count': len(session['ext_context'])
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/v1/providers', methods=['GET'])
+@require_api_key
+def list_providers():
+    """List available AI models and image generation providers."""
+    try:
+        models = [
+            {'id': 'grok', 'name': 'Grok-3', 'provider': 'xAI', 'tier': 'premium'},
+            {'id': 'deepseek-reasoner', 'name': 'DeepSeek R1', 'provider': 'DeepSeek', 'tier': 'premium'},
+            {'id': 'openai', 'name': 'GPT-4o-mini', 'provider': 'OpenAI', 'tier': 'standard'},
+            {'id': 'deepseek', 'name': 'DeepSeek Chat', 'provider': 'DeepSeek', 'tier': 'standard'},
+            {'id': 'gemini', 'name': 'Gemini 2.0 Flash', 'provider': 'Google', 'tier': 'free'},
+            {'id': 'qwen', 'name': 'Qwen Turbo', 'provider': 'Alibaba', 'tier': 'other'},
+        ]
+        
+        # Try to get image gen providers
+        image_providers = []
+        try:
+            from core.image_gen.router import ImageGenerationRouter
+            router = ImageGenerationRouter()
+            for p in router.providers:
+                image_providers.append({
+                    'name': p.__class__.__name__,
+                    'priority': getattr(p, 'priority', 0),
+                    'available': getattr(p, 'available', True)
+                })
+        except:
+            pass
+        
+        return jsonify({
+            'chat_models': models,
+            'image_providers': image_providers,
+            'status': 'success'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/v1/health', methods=['GET'])
+def external_health():
+    """Public health check for external clients."""
+    return jsonify({
+        'status': 'online',
+        'version': '2.0',
+        'endpoints': ['/api/v1/chat', '/api/v1/context', '/api/v1/providers', '/api/v1/health']
+    })
 
 
 # Main entry point
