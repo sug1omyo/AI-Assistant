@@ -44,7 +44,7 @@ export class ImageGeneration {
     }
 
     /**
-     * Close image generation modal
+     * Close image generation modal with animation
      */
     closeModal() {
         const modal = document.getElementById('imageGenModal');
@@ -148,6 +148,13 @@ export class ImageGeneration {
             this.populateLoraList();
         } catch (error) {
             console.error('Failed to load LoRAs:', error);
+            try {
+                await new Promise(r => setTimeout(r, 2000));
+                this.loras = await this.apiService.loadLoras();
+                this.populateLoraList();
+            } catch (retryErr) {
+                console.error('LoRA retry also failed:', retryErr);
+            }
         }
     }
 
@@ -160,6 +167,14 @@ export class ImageGeneration {
             this.populateVaeSelect();
         } catch (error) {
             console.error('Failed to load VAEs:', error);
+            // Retry once after a short delay (tunnel may be slow)
+            try {
+                await new Promise(r => setTimeout(r, 2000));
+                this.vaes = await this.apiService.loadVaes();
+                this.populateVaeSelect();
+            } catch (retryErr) {
+                console.error('VAE retry also failed:', retryErr);
+            }
         }
     }
 
@@ -169,10 +184,13 @@ export class ImageGeneration {
     populateModelSelect() {
         const selects = document.querySelectorAll('#modelCheckpoint, #img2imgModelSelect');
         selects.forEach(select => {
-            if (select && this.sdModels.length > 0) {
-                select.innerHTML = this.sdModels.map(model => 
+            if (!select) return;
+            if (this.sdModels.length > 0) {
+                select.innerHTML = this.sdModels.map(model =>
                     `<option value="${model}">${model}</option>`
                 ).join('');
+            } else {
+                select.innerHTML = '<option value="">⚠️ No models found — place .safetensors in ComfyUI/models/checkpoints/</option>';
             }
         });
     }
@@ -181,7 +199,7 @@ export class ImageGeneration {
      * Populate sampler select dropdown
      */
     populateSamplerSelect() {
-        const selects = document.querySelectorAll('#samplerSelect, #img2imgSamplerSelect');
+        const selects = document.querySelectorAll('#samplerSelect, #img2imgSampler');
         selects.forEach(select => {
             if (select && this.samplers.length > 0) {
                 select.innerHTML = this.samplers.map(sampler => 
@@ -192,18 +210,28 @@ export class ImageGeneration {
     }
 
     /**
+     * Normalize a lora or vae item to its name string
+     */
+    _itemName(item) {
+        if (typeof item === 'object' && item !== null) return item.name || item.alias || String(item);
+        return String(item);
+    }
+
+    /**
      * Populate LoRA list
      */
     populateLoraList() {
         const containers = document.querySelectorAll('#loraList, #img2imgLoraList');
         containers.forEach(container => {
             if (container && this.loras.length > 0) {
-                container.innerHTML = this.loras.map(lora => `
+                container.innerHTML = this.loras.map(lora => {
+                    const name = this._itemName(lora);
+                    return `
                     <div class="lora-item">
-                        <input type="checkbox" id="lora-${lora}" value="${lora}">
-                        <label for="lora-${lora}">${lora}</label>
-                    </div>
-                `).join('');
+                        <input type="checkbox" id="lora-${name}" value="${name}">
+                        <label for="lora-${name}">${name}</label>
+                    </div>`;
+                }).join('');
                 
                 // Auto-select recommended LoRAs
                 this.autoSelectRecommendedLoras(container);
@@ -258,8 +286,11 @@ export class ImageGeneration {
         const selects = document.querySelectorAll('#vaeSelect, #img2imgVaeSelect');
         selects.forEach(select => {
             if (select && this.vaes.length > 0) {
-                select.innerHTML = '<option value="">Default</option>' + 
-                    this.vaes.map(vae => `<option value="${vae}">${vae}</option>`).join('');
+                select.innerHTML = '<option value="">Default</option>' +
+                    this.vaes.map(vae => {
+                        const name = this._itemName(vae);
+                        return `<option value="${name}">${name}</option>`;
+                    }).join('');
                 
                 // Auto-select recommended VAE
                 this.autoSelectRecommendedVae(select);
@@ -300,20 +331,151 @@ export class ImageGeneration {
     }
 
     /**
-     * Get selected LoRAs
+     * Auto-pick best Model, LoRA, VAE for Img2Img based on extracted tags/prompt
      */
-    getSelectedLoras(containerId = 'loraList') {
+    autoPickBestOptions() {
+        // ── Best Model ──
+        const modelSelect = document.getElementById('img2imgModelSelect');
+        if (modelSelect && modelSelect.options.length > 1) {
+            // Preference order for anime/illustration
+            const modelPriority = [
+                /abyssorangemix3/i,
+                /anythingv5/i,
+                /anything/i,
+                /orangemix/i,
+                /aom3/i,
+                /illustri/i,
+                /soushiki/i,
+            ];
+            let picked = false;
+            for (const pattern of modelPriority) {
+                for (let i = 0; i < modelSelect.options.length; i++) {
+                    if (pattern.test(modelSelect.options[i].value)) {
+                        modelSelect.selectedIndex = i;
+                        console.log(`[Auto-Pick] Model: ${modelSelect.options[i].value}`);
+                        picked = true;
+                        break;
+                    }
+                }
+                if (picked) break;
+            }
+        }
+
+        // ── Best VAE ──
+        const vaeSelect = document.getElementById('img2imgVaeSelect');
+        if (vaeSelect && vaeSelect.options.length > 1) {
+            const vaePriority = [
+                /kl-f8-anime/i,
+                /orangemix\.vae/i,
+                /anime.*vae/i,
+                /vae.*ft.*mse/i,
+            ];
+            let picked = false;
+            for (const pattern of vaePriority) {
+                for (let i = 0; i < vaeSelect.options.length; i++) {
+                    if (pattern.test(vaeSelect.options[i].value)) {
+                        vaeSelect.selectedIndex = i;
+                        console.log(`[Auto-Pick] VAE: ${vaeSelect.options[i].value}`);
+                        picked = true;
+                        break;
+                    }
+                }
+                if (picked) break;
+            }
+        }
+
+        // ── Best LoRA ──
+        const loraContainer = document.getElementById('img2imgLoraSelectionContainer');
+        if (loraContainer && this.loras.length > 0) {
+            // Quality/detail LoRAs to auto-add
+            const loraTargets = [
+                /^add_detail/i,
+                /^more_details/i,
+                /^add-detail/i,
+            ];
+            // Remove existing lora rows (except the Add button)
+            loraContainer.querySelectorAll('.lora-row').forEach(r => r.remove());
+
+            const matched = [];
+            for (const pattern of loraTargets) {
+                const found = this.loras.find(l => pattern.test(this._itemName(l)));
+                if (found) matched.push(this._itemName(found));
+                if (matched.length >= 2) break;
+            }
+            // If no quality LoRA found, skip — don't force
+            for (const loraName of matched) {
+                // Trigger addImg2imgLoraSelection and set value
+                if (window.addImg2imgLoraSelection) {
+                    window.addImg2imgLoraSelection();
+                    // Get the last added row's select
+                    const rows = loraContainer.querySelectorAll('.lora-row');
+                    const lastRow = rows[rows.length - 1];
+                    if (lastRow) {
+                        const sel = lastRow.querySelector('.lora-select');
+                        if (sel) {
+                            sel.value = loraName;
+                            console.log(`[Auto-Pick] LoRA: ${loraName}`);
+                        }
+                        const weightInput = lastRow.querySelector('.lora-weight');
+                        if (weightInput) weightInput.value = '0.7';
+                    }
+                }
+            }
+        }
+
+        // ── Optimal params ──
+        const stepsInput = document.getElementById('img2imgSteps');
+        if (stepsInput) stepsInput.value = '28';
+        const cfgInput = document.getElementById('img2imgCfgScale');
+        if (cfgInput) cfgInput.value = '7';
+        const denoisingInput = document.getElementById('denoisingStrength');
+        if (denoisingInput) denoisingInput.value = '0.6';
+        const samplerSelect = document.getElementById('img2imgSampler');
+        if (samplerSelect) {
+            // Prefer euler_ancestral or dpmpp_2m
+            const samplerPriority = [/euler_ancestral/i, /dpmpp_2m/i, /euler/i];
+            for (const pattern of samplerPriority) {
+                for (let i = 0; i < samplerSelect.options.length; i++) {
+                    if (pattern.test(samplerSelect.options[i].value)) {
+                        samplerSelect.selectedIndex = i;
+                        console.log(`[Auto-Pick] Sampler: ${samplerSelect.options[i].value}`);
+                        break;
+                    }
+                }
+                if (samplerSelect.value.match(samplerPriority[0])) break;
+            }
+        }
+
+        console.log('[Auto-Pick] Best options applied');
+    }
+
+    /**
+     * Get selected LoRAs from dynamic rows (loraSelectionContainer) or checkbox list (loraList)
+     */
+    getSelectedLoras(containerId = 'loraSelectionContainer') {
         const container = document.getElementById(containerId);
         if (!container) return [];
-        
+
         const selectedLoras = [];
-        container.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
-            selectedLoras.push({
-                name: checkbox.value,
-                weight: 1.0 // Default weight
-            });
+
+        // Dynamic rows: each row has a .lora-select and optional .lora-weight
+        container.querySelectorAll('.lora-select').forEach(sel => {
+            if (sel.value) {
+                const weightEl = sel.closest('div')?.querySelector('.lora-weight');
+                selectedLoras.push({
+                    name: sel.value,
+                    weight: weightEl ? parseFloat(weightEl.value) || 1.0 : 1.0
+                });
+            }
         });
-        
+
+        // Fallback: checkbox list (legacy loraList)
+        if (selectedLoras.length === 0) {
+            container.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
+                selectedLoras.push({ name: checkbox.value, weight: 1.0 });
+            });
+        }
+
         return selectedLoras;
     }
 
@@ -334,7 +496,7 @@ export class ImageGeneration {
                     sampler_name: document.getElementById('sampler')?.value || 'DPM++ 2M Karras',
                     seed: -1,
                     batch_size: 1,
-                    lora_models: this.getSelectedLoras('loraList'),
+                    lora_models: this.getSelectedLoras('loraSelectionContainer'),
                     vae: document.getElementById('vaeSelect')?.value || ''
                 };
             }
@@ -370,14 +532,15 @@ export class ImageGeneration {
                     image: this.sourceImageBase64.split(',')[1], // Remove data:image/... prefix
                     prompt: document.getElementById('img2imgPrompt')?.value || '',
                     negative_prompt: document.getElementById('img2imgNegativePrompt')?.value || '',
+                    model: document.getElementById('img2imgModelSelect')?.value || document.getElementById('modelCheckpoint')?.value || '',
                     steps: parseInt(document.getElementById('img2imgSteps')?.value) || 30,
                     cfg_scale: parseFloat(document.getElementById('img2imgCfgScale')?.value) || 7.0,
                     width: parseInt(document.getElementById('img2imgWidth')?.value) || 512,
                     height: parseInt(document.getElementById('img2imgHeight')?.value) || 512,
                     denoising_strength: parseFloat(document.getElementById('denoisingStrength')?.value) || 0.75,
-                    sampler_name: document.getElementById('img2imgSampler')?.value || 'DPM++ 2M Karras',
+                    sampler_name: document.getElementById('img2imgSampler')?.value || 'euler',
                     seed: parseInt(document.getElementById('img2imgSeed')?.value) || -1,
-                    lora_models: this.getSelectedLoras('img2imgLoraList'),
+                    lora_models: this.getSelectedLoras('img2imgLoraSelectionContainer'),
                     vae: document.getElementById('img2imgVaeSelect')?.value || ''
                 };
             }
@@ -443,7 +606,7 @@ export class ImageGeneration {
                 width: document.getElementById('img2imgWidth')?.value || document.getElementById('imageWidth')?.value || 'N/A',
                 height: document.getElementById('img2imgHeight')?.value || document.getElementById('imageHeight')?.value || 'N/A',
                 denoising_strength: document.getElementById('denoisingStrength')?.value || 'N/A',
-                lora_models: this.getSelectedLoras('loraList').concat(this.getSelectedLoras('img2imgLoraList')).map(l => l.name).join(', ') || 'None',
+                lora_models: this.getSelectedLoras('loraSelectionContainer').concat(this.getSelectedLoras('img2imgLoraSelectionContainer')).map(l => l.name).join(', ') || 'None',
                 vae: document.getElementById('img2imgVaeSelect')?.value || document.getElementById('vaeSelect')?.value || 'Auto',
                 seed: document.getElementById('img2imgSeed')?.value || document.getElementById('imageSeed')?.value || '-1'
             };
@@ -788,7 +951,7 @@ Prompt:`;
                 cfg_scale: document.getElementById('img2imgCfgScale')?.value || document.getElementById('cfgScale')?.value || 'N/A',
                 size: `${document.getElementById('img2imgWidth')?.value || document.getElementById('imageWidth')?.value}x${document.getElementById('img2imgHeight')?.value || document.getElementById('imageHeight')?.value}`,
                 denoising_strength: document.getElementById('denoisingStrength')?.value || 'N/A',
-                lora_models: this.getSelectedLoras('loraList').concat(this.getSelectedLoras('img2imgLoraList')).map(l => l.name).join(', ') || 'None',
+                lora_models: this.getSelectedLoras('loraSelectionContainer').concat(this.getSelectedLoras('img2imgLoraSelectionContainer')).map(l => l.name).join(', ') || 'None',
                 vae: document.getElementById('img2imgVaeSelect')?.value || document.getElementById('vaeSelect')?.value || 'Auto',
                 seed: document.getElementById('img2imgSeed')?.value || document.getElementById('imageSeed')?.value || '-1'
             };
@@ -916,14 +1079,53 @@ Prompt:`;
     /**
      * Lora management
      */
-    addLoraSelection() {
-        // Implementation for adding Lora selection
-        console.log('[Image Gen] Add Lora selection');
+    _buildLoraRow(id, containerId) {
+        const loraOptions = this.loras.length > 0
+            ? this.loras.map(lora => {
+                const name = this._itemName(lora);
+                return `<option value="${name}">${name}</option>`;
+              }).join('')
+            : '<option value="">No LoRAs found</option>';
+        const row = document.createElement('div');
+        row.id = `loraSelection_${id}`;
+        row.className = 'lora-row';
+        row.innerHTML = `
+            <select class="form-select lora-select">${loraOptions}</select>
+            <input type="number" class="form-input lora-weight" value="1.0" min="0" max="2" step="0.1"
+                   title="Weight">
+            <button type="button" class="btn btn--sm btn--ghost lora-remove-btn"
+                    onclick="removeLoraSelection(${id})">✕</button>`;
+        return row;
     }
-    
+
+    addLoraSelection() {
+        const container = document.getElementById('loraSelectionContainer');
+        if (!container) return;
+        const addBtn = document.getElementById('addLoraBtn');
+        const row = this._buildLoraRow(Date.now(), 'loraSelectionContainer');
+        addBtn ? container.insertBefore(row, addBtn) : container.appendChild(row);
+    }
+
     addImg2imgLoraSelection() {
-        // Implementation for adding Img2Img Lora selection
-        console.log('[Image Gen] Add Img2Img Lora selection');
+        const container = document.getElementById('img2imgLoraSelectionContainer');
+        if (!container) return;
+        const id = Date.now();
+        const loraOptions = this.loras.length > 0
+            ? this.loras.map(lora => {
+                const name = this._itemName(lora);
+                return `<option value="${name}">${name}</option>`;
+              }).join('')
+            : '<option value="">No LoRAs found</option>';
+        const row = document.createElement('div');
+        row.id = `img2imgLoraSelection_${id}`;
+        row.className = 'lora-row';
+        row.innerHTML = `
+            <select class="form-select lora-select">${loraOptions}</select>
+            <input type="number" class="form-input lora-weight" value="1.0" min="0" max="2" step="0.1"
+                   title="Weight">
+            <button type="button" class="btn btn--sm btn--ghost lora-remove-btn"
+                    onclick="removeImg2imgLoraSelection(${id})">✕</button>`;
+        container.appendChild(row);
     }
     
     removeLoraSelection(id) {

@@ -1730,17 +1730,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Expose to window for global access
     window.chatBotApp = app;
     
-    // === IMAGE PREVIEW MODAL: Click overlay to close ===
-    const imagePreviewModal = document.getElementById('imagePreviewModal');
-    if (imagePreviewModal) {
-        imagePreviewModal.addEventListener('click', (e) => {
-            // Close if clicking the modal overlay itself (not the image or controls)
-            if (e.target === imagePreviewModal) {
-                app.messageRenderer.closeImagePreview();
-            }
-        });
-    }
-    
     // === GALLERY MODAL: Click overlay to close ===
     const galleryModal = document.getElementById('galleryModal');
     if (galleryModal) {
@@ -1751,17 +1740,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-    
-    // Expose cleanup function
-    window.manualCleanup = () => {
-        const result = app.chatManager.manualCleanup(5);
-        if (result.success) {
-            app.saveCurrentSession();
-            app.uiUtils.showAlert(result.message);
-        } else {
-            app.uiUtils.showAlert(result.message);
-        }
-    };
     
     // Helper function to display extracted tags for Img2Img
     function displayExtractedTags(tags, categories) {
@@ -1910,45 +1888,41 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const originalText = btn.textContent;
         btn.disabled = true;
-        btn.textContent = '🤖 Đang tạo prompt bằng Grok AI...';
+        btn.textContent = '🤖 Đang tạo prompt & chọn best options...';
         
         try {
             const result = await app.imageGen.generatePromptFromTags();
             
             if (result && result.prompt) {
-                // Fill the generated prompt into img2img prompt textarea
                 const promptTextarea = document.getElementById('img2imgPrompt');
                 const negativeTextarea = document.getElementById('img2imgNegativePrompt');
                 
                 if (promptTextarea) {
                     promptTextarea.value = result.prompt;
-                    
-                    // Smooth scroll to prompt textarea
-                    promptTextarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    
-                    // Highlight the textarea briefly
                     promptTextarea.style.transition = 'all 0.3s';
                     promptTextarea.style.boxShadow = '0 0 20px rgba(102, 126, 234, 0.6)';
-                    setTimeout(() => {
-                        promptTextarea.style.boxShadow = '';
-                    }, 1500);
+                    setTimeout(() => { promptTextarea.style.boxShadow = ''; }, 1500);
                 }
                 
-                // Fill negative prompt with NSFW filtering
                 if (negativeTextarea && result.negative_prompt) {
                     negativeTextarea.value = result.negative_prompt;
-                    
-                    // Brief highlight for negative prompt too
                     negativeTextarea.style.transition = 'all 0.3s';
                     negativeTextarea.style.boxShadow = '0 0 20px rgba(255, 87, 34, 0.6)';
-                    setTimeout(() => {
-                        negativeTextarea.style.boxShadow = '';
-                    }, 1500);
+                    setTimeout(() => { negativeTextarea.style.boxShadow = ''; }, 1500);
                 }
                 
-                const promptPreview = result.prompt ? result.prompt.substring(0, 80) : 'N/A';
-                const negativePreview = result.negative_prompt ? result.negative_prompt.substring(0, 60) : 'N/A';
-                alert(`✅ Đã tạo prompt tự động!\n\n📝 Prompt: ${promptPreview}...\n\n🚫 Negative (có lọc NSFW): ${negativePreview}...`);
+                // Auto-pick best Model, LoRA, VAE, Sampler
+                app.imageGen.autoPickBestOptions();
+                
+                // Scroll to prompt and show summary
+                if (promptTextarea) {
+                    promptTextarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                
+                const modelVal = document.getElementById('img2imgModelSelect')?.value || '—';
+                const vaeVal = document.getElementById('img2imgVaeSelect')?.value || 'Default';
+                const promptPreview = result.prompt.substring(0, 60);
+                alert(`✅ Auto-configured!\n\n📝 Prompt: ${promptPreview}...\n🎨 Model: ${modelVal}\n🔧 VAE: ${vaeVal}\n🎯 LoRA + params đã tự động chọn`);
             }
         } catch (error) {
             console.error('[Auto-Generate Prompt] Error:', error);
@@ -1983,27 +1957,160 @@ document.addEventListener('DOMContentLoaded', () => {
     // Image preview zoom state
     let currentZoom = 1.0;
     
-    // Zoom preview image
     window.zoomPreviewImage = (delta) => {
         const previewImg = document.getElementById('imagePreviewContent');
         if (previewImg) {
             currentZoom = Math.max(0.5, Math.min(5.0, currentZoom + delta));
             previewImg.style.transform = `scale(${currentZoom})`;
-            previewImg.style.cursor = currentZoom > 1 ? 'grab' : 'default';
-            console.log('[Image Preview] Zoom:', currentZoom);
         }
     };
     
-    // Reset preview zoom
     window.resetPreviewZoom = () => {
         const previewImg = document.getElementById('imagePreviewContent');
         if (previewImg) {
             currentZoom = 1.0;
             previewImg.style.transform = 'scale(1)';
-            previewImg.style.cursor = 'default';
-            console.log('[Image Preview] Zoom reset');
         }
     };
+
+    // Pinch-to-zoom on mobile for lightbox
+    (() => {
+        const wrap = document.getElementById('lightboxImageWrap');
+        if (!wrap) return;
+        let startDist = 0;
+        let startZoom = 1;
+        wrap.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                startDist = Math.hypot(
+                    e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY
+                );
+                startZoom = currentZoom;
+            }
+        }, { passive: true });
+        wrap.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 2) {
+                const dist = Math.hypot(
+                    e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY
+                );
+                const scale = dist / startDist;
+                currentZoom = Math.max(0.5, Math.min(5.0, startZoom * scale));
+                const img = document.getElementById('imagePreviewContent');
+                if (img) img.style.transform = `scale(${currentZoom})`;
+            }
+        }, { passive: true });
+        // Double-tap to toggle zoom
+        let lastTap = 0;
+        wrap.addEventListener('touchend', (e) => {
+            if (e.touches.length > 0) return;
+            const now = Date.now();
+            if (now - lastTap < 300) {
+                // Double tap
+                if (currentZoom > 1.1) {
+                    resetPreviewZoom();
+                } else {
+                    zoomPreviewImage(1.5);
+                }
+            }
+            lastTap = now;
+        });
+        // Mouse wheel zoom
+        wrap.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            zoomPreviewImage(e.deltaY < 0 ? 0.2 : -0.2);
+        }, { passive: false });
+
+        // === Swipe-down to close lightbox ===
+        let swipeStartY = 0;
+        let swipeDeltaY = 0;
+        let isSwiping = false;
+        const modal = document.getElementById('imagePreviewModal');
+        const lightboxEl = modal ? modal.querySelector('.lightbox') : null;
+
+        wrap.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1 && currentZoom <= 1.05) {
+                swipeStartY = e.touches[0].clientY;
+                isSwiping = true;
+                swipeDeltaY = 0;
+            }
+        }, { passive: true });
+
+        wrap.addEventListener('touchmove', (e) => {
+            if (!isSwiping || e.touches.length !== 1) return;
+            swipeDeltaY = e.touches[0].clientY - swipeStartY;
+            if (swipeDeltaY > 0 && lightboxEl) {
+                const progress = Math.min(swipeDeltaY / 200, 1);
+                lightboxEl.style.transform = `translateY(${swipeDeltaY}px)`;
+                lightboxEl.style.opacity = 1 - progress * 0.5;
+            }
+        }, { passive: true });
+
+        wrap.addEventListener('touchend', () => {
+            if (!isSwiping) return;
+            isSwiping = false;
+            if (swipeDeltaY > 120) {
+                // Swipe far enough → close
+                if (lightboxEl) {
+                    lightboxEl.style.transition = 'transform 0.2s, opacity 0.2s';
+                    lightboxEl.style.transform = 'translateY(100%)';
+                    lightboxEl.style.opacity = '0';
+                }
+                setTimeout(() => {
+                    closeImagePreview();
+                    if (lightboxEl) {
+                        lightboxEl.style.transition = '';
+                        lightboxEl.style.transform = '';
+                        lightboxEl.style.opacity = '';
+                    }
+                }, 200);
+            } else if (lightboxEl) {
+                // Snap back
+                lightboxEl.style.transition = 'transform 0.2s, opacity 0.2s';
+                lightboxEl.style.transform = '';
+                lightboxEl.style.opacity = '';
+                setTimeout(() => { lightboxEl.style.transition = ''; }, 200);
+            }
+            swipeDeltaY = 0;
+        });
+
+        // === Tap background (outside image) to close ===
+        wrap.addEventListener('click', (e) => {
+            if (e.target === wrap && currentZoom <= 1.05) {
+                closeImagePreview();
+            }
+        });
+    })();
+
+    // === Long-press on gallery items (mobile) to show delete ===
+    (() => {
+        let pressTimer = null;
+        let activeItem = null;
+
+        document.addEventListener('touchstart', (e) => {
+            const item = e.target.closest('.gallery-item');
+            if (!item) return;
+            pressTimer = setTimeout(() => {
+                // Dismiss any previously active item
+                if (activeItem && activeItem !== item) {
+                    activeItem.classList.remove('show-actions');
+                }
+                item.classList.toggle('show-actions');
+                activeItem = item.classList.contains('show-actions') ? item : null;
+            }, 500);
+        }, { passive: true });
+
+        document.addEventListener('touchend', () => { clearTimeout(pressTimer); });
+        document.addEventListener('touchmove', () => { clearTimeout(pressTimer); });
+
+        // Dismiss actions when tapping elsewhere
+        document.addEventListener('click', (e) => {
+            if (activeItem && !e.target.closest('.gallery-item')) {
+                activeItem.classList.remove('show-actions');
+                activeItem = null;
+            }
+        });
+    })();
 
     // Toggle image tag selection
     window.toggleImageTag = (tagName, element) => {
@@ -2061,18 +2168,23 @@ document.addEventListener('DOMContentLoaded', () => {
             
             if (data.success && data.images.length > 0) {
                 const modeText = showAll ? ' (Tất cả)' : ' (Session hiện tại)';
-                stats.textContent = `📊 Tổng số: ${data.total} ảnh${modeText}`;
+                const sourceText = data.source === 'mongodb' ? ' ☁️' : ' 💾';
+                stats.textContent = `📊 Tổng số: ${data.total} ảnh${modeText}${sourceText}`;
                 
                 grid.innerHTML = data.images.map(img => {
                     const metadataStr = JSON.stringify(img.metadata).replace(/"/g, '&quot;');
                     const filename = img.filename || img.path.split('/').pop();
+                    // Prefer cloud URL (ImgBB CDN) for display, fallback to local path
+                    const displayUrl = img.cloud_url || img.path || img.url;
+                    const isCloud = !!img.cloud_url;
                     return `
-                        <div class="gallery-item" data-path="${img.path}" data-filename="${filename}" data-metadata="${metadataStr}">
-                            <img src="${img.path}" alt="${filename}" loading="lazy">
+                        <div class="gallery-item" data-path="${displayUrl}" data-filename="${filename}" data-metadata="${metadataStr}">
+                            <img src="${displayUrl}" alt="${filename}" loading="lazy" onerror="this.src='${img.local_path || img.path}'">
+                            ${isCloud ? '<span class="gallery-cloud-badge" title="Stored in cloud">☁️</span>' : ''}
                             <div class="gallery-item-info">
-                                <div style="font-weight: 600;">📅 ${img.created}</div>
+                                <div style="font-size:10px;opacity:0.7;">📅 ${img.created}</div>
                                 <div class="gallery-item-prompt" title="${img.prompt}">
-                                    💬 ${img.prompt.substring(0, 50)}${img.prompt.length > 50 ? '...' : ''}
+                                    ${img.prompt.substring(0, 60)}${img.prompt.length > 60 ? '…' : ''}
                                 </div>
                             </div>
                             <button class="gallery-delete-btn" onclick="event.stopPropagation(); deleteGalleryImage('${filename}')" title="Xóa ảnh">
@@ -2147,32 +2259,52 @@ document.addEventListener('DOMContentLoaded', () => {
     
     window.viewGalleryImage = (imagePath, metadata) => {
         console.log('[Gallery] Opening image:', imagePath);
-        console.log('[Gallery] Metadata:', metadata);
         
-        // Open image preview
         const modal = document.getElementById('imagePreviewModal');
         const img = document.getElementById('imagePreviewContent');
         const info = document.getElementById('imagePreviewInfo');
         
         if (modal && img) {
+            // Reset zoom
+            if (window.resetPreviewZoom) resetPreviewZoom();
             img.src = imagePath;
-            modal.classList.add('active'); // Use classList instead of style.display
+            // Store path for download
+            img.dataset.downloadUrl = imagePath;
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
             
             if (info && metadata) {
+                const m = metadata;
+                const metaItems = [
+                    m.model && { label: 'Model', value: m.model },
+                    m.sampler && { label: 'Sampler', value: m.sampler },
+                    m.steps && { label: 'Steps', value: m.steps },
+                    m.cfg_scale && { label: 'CFG', value: m.cfg_scale },
+                    (m.width && m.height) && { label: 'Size', value: `${m.width}×${m.height}` },
+                    m.denoising_strength && { label: 'Denoise', value: m.denoising_strength },
+                    m.vae && { label: 'VAE', value: m.vae },
+                    m.seed && { label: 'Seed', value: m.seed },
+                ].filter(Boolean);
+
+                const loraStr = m.lora_models
+                    ? (typeof m.lora_models === 'string' ? m.lora_models : JSON.stringify(m.lora_models))
+                    : '';
+
                 info.innerHTML = `
-                    <div style="margin-top: 10px; font-size: 14px;">
-                        <div style="margin-bottom: 8px;"><strong>💬 Prompt:</strong> ${metadata.prompt || 'N/A'}</div>
-                        <div style="margin-bottom: 8px;"><strong>🚫 Negative:</strong> ${metadata.negative_prompt || 'N/A'}</div>
-                        <div style="margin-bottom: 8px;"><strong>🎨 Model:</strong> ${metadata.model || 'N/A'}</div>
-                        <div style="margin-bottom: 8px;"><strong>📏 Size:</strong> ${metadata.width || 'N/A'}×${metadata.height || 'N/A'}</div>
-                        <div style="margin-bottom: 8px;"><strong>🎲 Steps:</strong> ${metadata.steps || 'N/A'}</div>
-                        <div style="margin-bottom: 8px;"><strong>⚙️ CFG Scale:</strong> ${metadata.cfg_scale || 'N/A'}</div>
-                        <div style="margin-bottom: 8px;"><strong>⚙️ Sampler:</strong> ${metadata.sampler || 'N/A'}</div>
-                        <div style="margin-bottom: 8px;"><strong>🔧 VAE:</strong> ${metadata.vae || 'N/A'}</div>
-                        <div style="margin-bottom: 8px;"><strong>🎨 LoRA:</strong> ${metadata.lora_models || 'None'}</div>
-                        ${metadata.denoising_strength && metadata.denoising_strength !== 'N/A' ? `<div><strong>🔧 Denoising:</strong> ${metadata.denoising_strength}</div>` : ''}
+                    ${m.prompt ? `<div class="lightbox__prompt"><span class="lightbox__meta-label">Prompt</span><br>${m.prompt}</div>` : ''}
+                    ${m.negative_prompt ? `<div class="lightbox__prompt" style="opacity:0.7;font-size:11px;"><span class="lightbox__meta-label">Negative</span><br>${m.negative_prompt}</div>` : ''}
+                    <div class="lightbox__meta-grid">
+                        ${metaItems.map(i => `
+                            <div class="lightbox__meta-item">
+                                <span class="lightbox__meta-label">${i.label}</span>
+                                <span class="lightbox__meta-value">${i.value}</span>
+                            </div>
+                        `).join('')}
+                        ${loraStr ? `<div class="lightbox__meta-item" style="grid-column:1/-1"><span class="lightbox__meta-label">LoRA</span><span class="lightbox__meta-value">${loraStr}</span></div>` : ''}
                     </div>
                 `;
+            } else if (info) {
+                info.innerHTML = '';
             }
         }
     };

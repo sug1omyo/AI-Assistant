@@ -2591,6 +2591,28 @@ def generate_image():
                 logger.error(f"âŒ Error saving to MongoDB: {db_error}")
                 # Continue execution - MongoDB save is optional
         
+        # Save to generated_images collection (Gallery)
+        if MONGODB_ENABLED and save_to_storage and saved_filenames:
+            try:
+                from core.image_storage import save_to_mongodb
+                gallery_session_id = session.get('gallery_session_id', '')
+                for idx, filename in enumerate(saved_filenames):
+                    cloud_url = cloud_urls[idx] if idx < len(cloud_urls) else None
+                    gallery_doc = {
+                        'filename': filename,
+                        'local_path': f"/storage/images/{filename}",
+                        'cloud_url': cloud_url,
+                        'prompt': prompt,
+                        'negative_prompt': params.get('negative_prompt', ''),
+                        'parameters': params,
+                        'session_id': gallery_session_id,
+                        'source': 'text2img',
+                    }
+                    save_to_mongodb(gallery_doc)
+                logger.info(f"[TEXT2IMG] Gallery MongoDB saved {len(saved_filenames)} images")
+            except Exception as gallery_err:
+                logger.warning(f"[TEXT2IMG] Gallery MongoDB save failed: {gallery_err}")
+        
         # Return response in format expected by frontend
         if save_to_storage and saved_filenames:
             # Return filenames + cloud URLs
@@ -2930,7 +2952,7 @@ def img2img():
             'cfg_scale': float(data.get('cfg_scale') or 7.0),
             'sampler_name': data.get('sampler_name') or 'euler',
             'seed': int(data.get('seed') or -1),
-            'restore_faces': data.get('restore_faces', False),
+            'model': data.get('model') or None,
             'lora_models': data.get('lora_models', []),
             'vae': data.get('vae', None)
         }
@@ -2947,7 +2969,7 @@ def img2img():
         # Kiểm tra lỗi
         if 'error' in result:
             logger.error(f"[IMG2IMG] SD Error: {result['error']}")
-            return jsonify({'error': 'Failed to generate image'}), 500
+            return jsonify({'error': result['error']}), 500
         
         # Get base64 images from result
         base64_images = result.get('images', [])
@@ -3084,6 +3106,29 @@ def img2img():
                 logger.error(f"âŒ Error saving to MongoDB: {db_error}")
                 # Continue execution - MongoDB save is optional
         
+        # Save to generated_images collection (Gallery)
+        if MONGODB_ENABLED and save_to_storage and saved_filenames:
+            try:
+                from core.image_storage import save_to_mongodb
+                gallery_session_id = session.get('gallery_session_id', '')
+                for idx, filename in enumerate(saved_filenames):
+                    cloud_url = cloud_urls[idx] if idx < len(cloud_urls) else None
+                    gallery_doc = {
+                        'filename': filename,
+                        'local_path': f"/storage/images/{filename}",
+                        'cloud_url': cloud_url,
+                        'prompt': prompt,
+                        'negative_prompt': params.get('negative_prompt', ''),
+                        'denoising_strength': params.get('denoising_strength', ''),
+                        'parameters': params,
+                        'session_id': gallery_session_id,
+                        'source': 'img2img',
+                    }
+                    save_to_mongodb(gallery_doc)
+                logger.info(f"[IMG2IMG] Gallery MongoDB saved {len(saved_filenames)} images")
+            except Exception as gallery_err:
+                logger.warning(f"[IMG2IMG] Gallery MongoDB save failed: {gallery_err}")
+        
         # Return response in format expected by frontend
         if save_to_storage and saved_filenames:
             return jsonify({
@@ -3108,7 +3153,7 @@ def img2img():
         import traceback
         error_msg = f"Exception: {str(e)}\nTraceback: {traceback.format_exc()}"
         logger.error(f"[IMG2IMG] {error_msg}")
-        return jsonify({'error': 'Failed to process img2img request'}), 500
+        return jsonify({'error': f'Img2Img failed: {str(e)}'}), 500
 
 
 @app.route('/api/share-image-imgbb', methods=['POST'])
@@ -3255,6 +3300,62 @@ def save_generated_image():
                     logger.info(f"[Save Image] â˜ï¸ ImgBB: {cloud_url}")
             except Exception as cloud_error:
                 logger.warning(f"[Save Image] âš ï¸ ImgBB upload failed: {cloud_error}")
+        
+        # Save metadata JSON alongside the PNG (for local gallery fallback)
+        try:
+            metadata_json = {
+                'filename': filename,
+                'created_at': datetime.now().isoformat(),
+                'cloud_url': cloud_url,
+                'delete_url': delete_url,
+                'session_id': session.get('gallery_session_id', ''),
+                'prompt': metadata.get('prompt', ''),
+                'negative_prompt': metadata.get('negative_prompt', ''),
+                'model': metadata.get('model', ''),
+                'sampler': metadata.get('sampler', ''),
+                'steps': metadata.get('steps', ''),
+                'cfg_scale': metadata.get('cfg_scale', ''),
+                'width': metadata.get('width', ''),
+                'height': metadata.get('height', ''),
+                'seed': metadata.get('seed', ''),
+                'vae': metadata.get('vae', ''),
+                'lora_models': metadata.get('lora_models', ''),
+                'denoising_strength': metadata.get('denoising_strength', ''),
+            }
+            metadata_filepath = filepath.with_suffix('.json')
+            with open(metadata_filepath, 'w', encoding='utf-8') as mf:
+                json.dump(metadata_json, mf, ensure_ascii=False, indent=2)
+        except Exception as meta_err:
+            logger.warning(f"[Save Image] Metadata JSON save failed: {meta_err}")
+        
+        # Save to generated_images collection in MongoDB (for Gallery)
+        try:
+            from core.image_storage import save_to_mongodb
+            gallery_doc = {
+                'filename': filename,
+                'local_path': f"/storage/images/{filename}",
+                'cloud_url': cloud_url,
+                'delete_url': delete_url,
+                'prompt': metadata.get('prompt', ''),
+                'negative_prompt': metadata.get('negative_prompt', ''),
+                'model': metadata.get('model', ''),
+                'sampler': metadata.get('sampler', ''),
+                'steps': metadata.get('steps', ''),
+                'cfg_scale': metadata.get('cfg_scale', ''),
+                'width': metadata.get('width', ''),
+                'height': metadata.get('height', ''),
+                'seed': metadata.get('seed', ''),
+                'vae': metadata.get('vae', ''),
+                'lora_models': metadata.get('lora_models', ''),
+                'denoising_strength': metadata.get('denoising_strength', ''),
+                'session_id': session.get('gallery_session_id', ''),
+                'source': 'comfyui',
+            }
+            mongo_gallery_id = save_to_mongodb(gallery_doc)
+            if mongo_gallery_id:
+                logger.info(f"[Save Image] Gallery MongoDB saved: {mongo_gallery_id}")
+        except Exception as gallery_err:
+            logger.warning(f"[Save Image] Gallery MongoDB save failed: {gallery_err}")
         
         # Save to chat history
         conversation_id = session.get('conversation_id')

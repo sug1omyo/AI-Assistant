@@ -295,7 +295,7 @@ export class UIUtils {
     }
 
     /**
-     * Close modal
+     * Close modal with animation
      */
     closeModal(modalId) {
         const modal = document.getElementById(modalId);
@@ -311,18 +311,7 @@ export class UIUtils {
     updateStorageDisplay(storageInfo) {
         if (!this.elements.storageInfo || !storageInfo) return;
         
-        const { sizeInMB, maxSizeMB, percentage, color } = storageInfo;
-        
-        // Determine status icon and message
-        let statusIcon = '💚';
-        let statusText = 'Good';
-        if (percentage > 80) {
-            statusIcon = '🔴';
-            statusText = 'Full';
-        } else if (percentage > 50) {
-            statusIcon = '🟡';
-            statusText = 'Warning';
-        }
+        const { sizeInMB, maxSizeMB, percentage, color, sessionCount } = storageInfo;
         
         this.elements.storageInfo.innerHTML = `
             <div class="storage-display">
@@ -340,8 +329,13 @@ export class UIUtils {
                         <i data-lucide="trash-2" style="width:12px;height:12px;"></i> Clear
                     </button>
                 </div>
+                <span class="storage__label">
+                    <i data-lucide="database" style="width:11px;height:11px;"></i>
+                    ${sizeInMB} / ${maxSizeMB} MB
+                </span>
             </div>
         `;
+        if (window.lucide) lucide.createIcons({ nodes: [this.elements.storageInfo] });
     }
 
     /**
