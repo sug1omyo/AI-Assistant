@@ -14,8 +14,7 @@ MANIFEST
 .python-version
 *.pyc
 *.pyo
-**.*/private/
-./private/
+private/
 **.*/knowledge_base/
 ./knowledge_base/
 
