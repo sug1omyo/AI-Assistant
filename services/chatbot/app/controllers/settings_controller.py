@@ -1,4 +1,4 @@
-"""
+﻿"""
 Settings Controller
 
 Handles user settings management.
@@ -30,7 +30,7 @@ class SettingsController:
             return settings
             
         except Exception as e:
-            logger.error(f"❌ Error getting settings: {e}")
+            logger.error(f"âŒ Error getting settings: {e}")
             raise
     
     def update_settings(
@@ -55,11 +55,11 @@ class SettingsController:
             
             result = self.settings_service.update(user_id, filtered)
             
-            logger.info(f"✅ Updated settings for user: {user_id}")
+            logger.info(f"âœ… Updated settings for user: {user_id}")
             return result
             
         except Exception as e:
-            logger.error(f"❌ Error updating settings: {e}")
+            logger.error(f"âŒ Error updating settings: {e}")
             raise
     
     def list_custom_prompts(self, user_id: str) -> Dict[str, Any]:
@@ -71,7 +71,7 @@ class SettingsController:
                 'total': len(prompts)
             }
         except Exception as e:
-            logger.error(f"❌ Error listing custom prompts: {e}")
+            logger.error(f"âŒ Error listing custom prompts: {e}")
             raise
     
     def create_custom_prompt(
@@ -88,10 +88,13 @@ class SettingsController:
                 prompt=prompt
             )
             
-            safe_name = name.replace('\n', ' ').replace('\r', '') if isinstance(name, str) else name
-            logger.info(f"✅ Created custom prompt: {safe_name}")
+            if not isinstance(name, str):
+                name = str(name)
+            # Remove control characters (including newlines) to prevent log injection
+            safe_name = ''.join(ch for ch in name if ord(ch) >= 32)
+            logger.info(f"âœ… Created custom prompt: {safe_name}")
             return result
             
         except Exception as e:
-            logger.error(f"❌ Error creating custom prompt: {e}")
+            logger.error(f"âŒ Error creating custom prompt: {e}")
             raise

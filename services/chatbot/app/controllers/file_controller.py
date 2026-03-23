@@ -1,4 +1,4 @@
-"""
+﻿"""
 File Controller
 
 Handles file upload and management operations.
@@ -13,6 +13,16 @@ from werkzeug.utils import secure_filename
 from ..services.file_service import FileService
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_for_log(value: Any) -> str:
+    """
+    Sanitize potentially untrusted data before logging to prevent log injection.
+    Removes newline and carriage return characters that could forge additional log entries.
+    """
+    if not isinstance(value, str):
+        value = str(value)
+    return value.replace('\r', '').replace('\n', '')
 
 
 class FileController:
@@ -33,7 +43,7 @@ class FileController:
                 'total': len(files)
             }
         except Exception as e:
-            logger.error(f"❌ Error listing files: {e}")
+            logger.error(f"âŒ Error listing files: {e}")
             raise
     
     def upload_file(
@@ -71,11 +81,11 @@ class FileController:
                 file_type=ext
             )
             
-            logger.info(f"✅ Uploaded file: {filename}")
+            logger.info(f"âœ… Uploaded file: {filename}")
             return result
             
         except Exception as e:
-            logger.error(f"❌ Error uploading file: {e}")
+            logger.error(f"âŒ Error uploading file: {e}")
             raise
     
     def get_file_path(self, file_id: str) -> Optional[Path]:
@@ -94,15 +104,16 @@ class FileController:
             return path
             
         except Exception as e:
-            logger.error(f"❌ Error getting file path: {e}")
+            logger.error(f"âŒ Error getting file path: {e}")
             raise
     
     def delete_file(self, file_id: str) -> Dict[str, Any]:
         """Delete a file"""
         try:
             self.file_service.delete(file_id)
-            logger.info(f"✅ Deleted file: {file_id}")
+            safe_file_id = _sanitize_for_log(file_id)
+            logger.info(f"âœ… Deleted file: {safe_file_id}")
             return {'deleted': True, 'file_id': file_id}
         except Exception as e:
-            logger.error(f"❌ Error deleting file: {e}")
+            logger.error(f"âŒ Error deleting file: {e}")
             raise

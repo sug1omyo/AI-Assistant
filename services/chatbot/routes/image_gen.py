@@ -1,23 +1,25 @@
-"""
-Image Generation API routes — Flask Blueprint.
+﻿"""
+Image Generation API routes â€” Flask Blueprint.
 Replaces the old Stable Diffusion routes with a modern multi-provider system.
 
 Endpoints:
-    POST /api/image-gen/generate     → Generate image(s)
-    POST /api/image-gen/edit         → Edit last generated image
-    GET  /api/image-gen/providers    → List available providers
-    GET  /api/image-gen/styles       → List style presets
-    GET  /api/image-gen/health       → Health check all providers
-    GET  /api/image-gen/stats        → Usage statistics
-    GET  /api/image-gen/images/<id>  → Serve stored image
-    GET  /api/image-gen/gallery      → List recent images
-    DELETE /api/image-gen/images/<id> → Delete image
+    POST /api/image-gen/generate     â†’ Generate image(s)
+    POST /api/image-gen/edit         â†’ Edit last generated image
+    GET  /api/image-gen/providers    â†’ List available providers
+    GET  /api/image-gen/styles       â†’ List style presets
+    GET  /api/image-gen/health       â†’ Health check all providers
+    GET  /api/image-gen/stats        â†’ Usage statistics
+    GET  /api/image-gen/images/<id>  â†’ Serve stored image
+    GET  /api/image-gen/gallery      â†’ List recent images
+    DELETE /api/image-gen/images/<id> â†’ Delete image
 """
 
 from __future__ import annotations
 
 import logging
 import base64
+import time as _time
+from functools import wraps
 from flask import Blueprint, request, jsonify, session, send_file
 from io import BytesIO
 
@@ -30,7 +32,65 @@ logger = logging.getLogger(__name__)
 
 image_gen_bp = Blueprint("image_gen", __name__)
 
-# ── Singletons (initialized once, shared across requests) ──────────
+# â”€â”€ Validation & rate limiting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+_MAX_PROMPT = 2000
+_MAX_DIM = 2048
+_MIN_DIM = 64
+_MAX_STEPS = 150
+_RATE_WINDOW = 60
+_RATE_MAX = 10
+_req_log: dict = {}
+
+
+def _validate(data: dict) -> str | None:
+    for key in ("prompt",):
+        if len(data.get(key, "")) > _MAX_PROMPT:
+            return f"{key} too long (max {_MAX_PROMPT})"
+    for d in ("width", "height"):
+        v = data.get(d)
+        if v is not None:
+            try:
+                v = int(v)
+            except (ValueError, TypeError):
+                return f"Invalid {d}"
+            if not (_MIN_DIM <= v <= _MAX_DIM):
+                return f"{d} must be {_MIN_DIM}-{_MAX_DIM}"
+    s = data.get("steps")
+    if s is not None:
+        try:
+            s = int(s)
+        except (ValueError, TypeError):
+            return "Invalid steps"
+        if not (1 <= s <= _MAX_STEPS):
+            return f"steps must be 1-{_MAX_STEPS}"
+    return None
+
+
+def _rate_check() -> str | None:
+    sid = session.get("session_id", request.remote_addr or "anon")
+    now = _time.time()
+    log = _req_log.setdefault(sid, [])
+    _req_log[sid] = [t for t in log if t > now - _RATE_WINDOW]
+    if len(_req_log[sid]) >= _RATE_MAX:
+        return f"Rate limited ({_RATE_MAX} req/{_RATE_WINDOW}s)"
+    _req_log[sid].append(now)
+    return None
+
+
+def _guarded(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        data = request.get_json(force=True, silent=True) or {}
+        err = _rate_check()
+        if err:
+            return jsonify({"error": err}), 429
+        err = _validate(data)
+        if err:
+            return jsonify({"error": err}), 400
+        return f(*args, **kwargs)
+    return wrapper
+
+# â”€â”€ Singletons (initialized once, shared across requests) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _router: ImageGenerationRouter | None = None
 _sessions: SessionManager | None = None
 _storage: ImageStorage | None = None
@@ -57,27 +117,28 @@ def _get_storage() -> ImageStorage:
     return _storage
 
 
-# ── Main generation endpoint ────────────────────────────────────────
+# â”€â”€ Main generation endpoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @image_gen_bp.route("/api/image-gen/generate", methods=["POST"])
+@_guarded
 def generate_image():
     """
     Generate image(s) from a text prompt.
     
     Body (JSON):
-        prompt: str           — Image description
-        quality: str          — "auto"|"fast"|"quality"|"free"|"cheap" (default: auto)
-        style: str|null       — Style preset name
-        width: int            — Output width (default: 1024)
-        height: int           — Output height (default: 1024)
-        provider: str|null    — Force specific provider
-        model: str|null       — Force specific model
-        enhance: bool         — Use LLM prompt enhancement (default: true)
-        num_images: int       — Number of images (default: 1)
-        seed: int|null        — Reproducibility seed
-        steps: int            — Inference steps (default: 28)
-        guidance: float       — Guidance/CFG scale (default: 3.5)
-        conversation_id: str  — For session tracking
+        prompt: str           â€” Image description
+        quality: str          â€” "auto"|"fast"|"quality"|"free"|"cheap" (default: auto)
+        style: str|null       â€” Style preset name
+        width: int            â€” Output width (default: 1024)
+        height: int           â€” Output height (default: 1024)
+        provider: str|null    â€” Force specific provider
+        model: str|null       â€” Force specific model
+        enhance: bool         â€” Use LLM prompt enhancement (default: true)
+        num_images: int       â€” Number of images (default: 1)
+        seed: int|null        â€” Reproducibility seed
+        steps: int            â€” Inference steps (default: 28)
+        guidance: float       â€” Guidance/CFG scale (default: 3.5)
+        conversation_id: str  â€” For session tracking
     """
     data = request.get_json(force=True, silent=True) or {}
     prompt = data.get("prompt", "").strip()
@@ -151,6 +212,10 @@ def generate_image():
     if data.get("style"):
         img_session.active_style = data["style"]
 
+    # Log cost
+    if result.cost_usd > 0:
+        _log_cost('generate', result.provider, result.model, result.cost_usd)
+
     return jsonify({
         "success": True,
         "images": [
@@ -172,21 +237,22 @@ def generate_image():
     })
 
 
-# ── Edit existing image ─────────────────────────────────────────────
+# â”€â”€ Edit existing image â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @image_gen_bp.route("/api/image-gen/edit", methods=["POST"])
+@_guarded
 def edit_image():
     """
     Edit a previously generated image.
     
     Body (JSON):
-        prompt: str            — Edit instruction (e.g., "add a rainbow")
-        conversation_id: str   — Session to find last image
-        image_b64: str|null    — Explicit base64 image to edit (overrides session)
-        image_id: str|null     — Image ID from storage to edit
-        strength: float        — Denoising strength 0-1 (default: 0.75)
-        provider: str|null     — Force provider
-        model: str|null        — Force model
+        prompt: str            â€” Edit instruction (e.g., "add a rainbow")
+        conversation_id: str   â€” Session to find last image
+        image_b64: str|null    â€” Explicit base64 image to edit (overrides session)
+        image_id: str|null     â€” Image ID from storage to edit
+        strength: float        â€” Denoising strength 0-1 (default: 0.75)
+        provider: str|null     â€” Force provider
+        model: str|null        â€” Force model
     """
     data = request.get_json(force=True, silent=True) or {}
     prompt = data.get("prompt", "").strip()
@@ -266,6 +332,10 @@ def edit_image():
         result=result, is_edit=True,
     )
 
+    # Log cost
+    if result.cost_usd > 0:
+        _log_cost('edit', result.provider, result.model, result.cost_usd)
+
     return jsonify({
         "success": True,
         "images": [
@@ -282,7 +352,7 @@ def edit_image():
     })
 
 
-# ── Serve stored images ─────────────────────────────────────────────
+# â”€â”€ Serve stored images â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @image_gen_bp.route("/api/image-gen/images/<image_id>", methods=["GET"])
 def serve_image(image_id: str):
@@ -304,7 +374,7 @@ def delete_image(image_id: str):
     return jsonify({"error": "Image not found"}), 404
 
 
-# ── Gallery ──────────────────────────────────────────────────────────
+# â”€â”€ Gallery â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @image_gen_bp.route("/api/image-gen/gallery", methods=["GET"])
 def gallery():
@@ -316,7 +386,7 @@ def gallery():
     return jsonify({"images": images, "total": len(images)})
 
 
-# ── Provider info ────────────────────────────────────────────────────
+# â”€â”€ Provider info â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @image_gen_bp.route("/api/image-gen/providers", methods=["GET"])
 def list_providers():
@@ -347,4 +417,29 @@ def stats():
     return jsonify({
         "generation": router.get_stats(),
         "storage": storage.get_disk_usage(),
+        "costs": _get_cost_summary(),
     })
+
+
+# â”€â”€ Cost tracking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+_cost_log_v2: list = []  # [{type, provider, model, cost_usd, timestamp}]
+
+
+def _log_cost(gen_type: str, provider: str, model: str, cost_usd: float):
+    """Append a cost entry."""
+    from datetime import datetime
+    _cost_log_v2.append({
+        "type": gen_type,
+        "provider": provider,
+        "model": model,
+        "cost_usd": round(cost_usd, 6),
+        "timestamp": datetime.now().isoformat(),
+    })
+    if len(_cost_log_v2) > 500:
+        del _cost_log_v2[:len(_cost_log_v2) - 500]
+
+
+def _get_cost_summary() -> dict:
+    total = sum(c["cost_usd"] for c in _cost_log_v2)
+    return {"total_usd": round(total, 4), "count": len(_cost_log_v2), "recent": _cost_log_v2[-10:]}

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Extensions module - MongoDB, cache, logger, rate limiter setup
 """
 import os
@@ -24,6 +24,7 @@ werkzeug_logger.setLevel(logging.INFO)
 def _load_root_config_module(module_name, file_name):
     """Load a module from root config directory"""
     root_path = str(ROOT_DIR)
+    app_path = str(ROOT_DIR / 'app')
     chatbot_path = str(CHATBOT_DIR)
     
     original_path_0 = sys.path[0] if sys.path else None
@@ -31,9 +32,15 @@ def _load_root_config_module(module_name, file_name):
     if root_path in sys.path:
         sys.path.remove(root_path)
     sys.path.insert(0, root_path)
+    # app/ must also be on path so that internal `from config.X import Y` works
+    if app_path not in sys.path:
+        sys.path.insert(1, app_path)
     
     try:
-        module_path = ROOT_DIR / 'config' / file_name
+        # Try ROOT_DIR/app/config first, then ROOT_DIR/config as fallback
+        module_path = ROOT_DIR / 'app' / 'config' / file_name
+        if not module_path.exists():
+            module_path = ROOT_DIR / 'config' / file_name
         spec = importlib.util.spec_from_file_location(module_name, module_path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -41,6 +48,8 @@ def _load_root_config_module(module_name, file_name):
     finally:
         if root_path in sys.path:
             sys.path.remove(root_path)
+        if app_path in sys.path:
+            sys.path.remove(app_path)
         if chatbot_path in sys.path:
             sys.path.remove(chatbot_path)
         sys.path.insert(0, chatbot_path)
@@ -96,9 +105,9 @@ MONGODB_ENABLED = False
 try:
     mongodb_client.connect()
     MONGODB_ENABLED = True
-    logger.info("✅ MongoDB connection established")
+    logger.info("âœ… MongoDB connection established")
 except Exception as e:
-    logger.warning(f"⚠️ MongoDB not available: {e}")
+    logger.warning(f"âš ï¸ MongoDB not available: {e}")
 
 
 # Performance modules
@@ -115,9 +124,9 @@ try:
     cache = get_cache_manager()
     db = get_database_manager()
     streaming = StreamingHandler()
-    logger.info("✅ Performance optimization modules loaded")
+    logger.info("âœ… Performance optimization modules loaded")
 except Exception as e:
-    logger.warning(f"⚠️ Performance modules not available: {e}")
+    logger.warning(f"âš ï¸ Performance modules not available: {e}")
 
 
 # ImgBB uploader
@@ -125,9 +134,9 @@ CLOUD_UPLOAD_ENABLED = False
 try:
     from src.utils.imgbb_uploader import ImgBBUploader, upload_to_imgbb
     CLOUD_UPLOAD_ENABLED = True
-    logger.info("✅ ImgBB uploader loaded")
+    logger.info("âœ… ImgBB uploader loaded")
 except ImportError as e:
-    logger.warning(f"⚠️ ImgBB uploader not available: {e}")
+    logger.warning(f"âš ï¸ ImgBB uploader not available: {e}")
 
 
 # Local models
@@ -140,8 +149,8 @@ if not os.getenv('USE_API_ONLY'):
         from src.utils.local_model_loader import model_loader as _model_loader
         model_loader = _model_loader
         LOCALMODELS_AVAILABLE = True
-        logger.info("✅ Local model loader imported")
+        logger.info("âœ… Local model loader imported")
     except Exception as e:
-        logger.warning(f"⚠️ Local models not available: {e}")
+        logger.warning(f"âš ï¸ Local models not available: {e}")
 else:
-    logger.info("ℹ️ Local models disabled (USE_API_ONLY=true)")
+    logger.info("â„¹ï¸ Local models disabled (USE_API_ONLY=true)")

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Main routes: /, /new, /chat, /clear, /history
 """
 import os
@@ -103,13 +103,28 @@ def chat():
             mcp_selected_files = data.get('mcp_selected_files', [])
         
         if not message:
-            return jsonify({'error': 'Tin nhắn trống'}), 400
+            return jsonify({'error': 'Tin nháº¯n trá»‘ng'}), 400
         
         # MCP Integration: Inject code context
         if MCP_AVAILABLE:
             try:
                 mcp_client = get_mcp_client()
                 if mcp_client and mcp_client.enabled:
+                    # Pre-warm memory cache by inferred domain to stabilize long/complex responses.
+                    if hasattr(mcp_client, 'warm_memory_cache_by_question'):
+                        try:
+                            mcp_client.warm_memory_cache_by_question(
+                                question=message,
+                                force_refresh=False,
+                                cache_ttl_seconds=900,
+                                limit=20,
+                                min_importance=4,
+                                max_chars=12000,
+                            )
+                            logger.info("[MCP] Memory cache pre-warm completed")
+                        except Exception as warm_error:
+                            logger.warning(f"[MCP] Memory cache pre-warm skipped: {warm_error}")
+
                     logger.info(f"[MCP] Injecting code context")
                     message = inject_code_context(message, mcp_client, mcp_selected_files)
             except Exception as e:
@@ -125,11 +140,11 @@ def chat():
             
             if 'google-search' in tools:
                 search_result = google_search_tool(message)
-                tool_results.append(f"## 🔍 Google Search Results\n\n{search_result}")
+                tool_results.append(f"## ðŸ” Google Search Results\n\n{search_result}")
             
             if 'github' in tools:
                 github_result = github_search_tool(message)
-                tool_results.append(f"## 🐙 GitHub Search Results\n\n{github_result}")
+                tool_results.append(f"## ðŸ™ GitHub Search Results\n\n{github_result}")
             
             if 'image-generation' in tools:
                 # Handle AI image generation via tools
@@ -198,7 +213,7 @@ def clear():
         chatbot = get_chatbot(session_id)
         chatbot.clear_history()
         
-        return jsonify({'message': 'Đã xóa lịch sử chat'})
+        return jsonify({'message': 'ÄÃ£ xÃ³a lá»‹ch sá»­ chat'})
         
     except Exception as e:
         logger.error(f"[Clear History] Error: {str(e)}")
@@ -226,26 +241,26 @@ def _handle_image_generation_tool(chatbot, message, model):
     import json
     import re
     
-    prompt_request = f"""Bạn là chuyên gia tạo prompt cho Stable Diffusion.
+    prompt_request = f"""Báº¡n lÃ  chuyÃªn gia táº¡o prompt cho Stable Diffusion.
 
-NHIỆM VỤ: Chuyển đổi mô tả của người dùng thành prompt CHÍNH XÁC.
+NHIá»†M Vá»¤: Chuyá»ƒn Ä‘á»•i mÃ´ táº£ cá»§a ngÆ°á»i dÃ¹ng thÃ nh prompt CHÃNH XÃC.
 
-⚠️ QUY TẮC:
-1. CHỈ mô tả ĐÚNG những gì user yêu cầu
-2. NSFW Protection: TẤT CẢ ảnh phải SFW
-3. Negative PHẢI CÓ: nsfw, nude, naked, explicit, sexual
+âš ï¸ QUY Táº®C:
+1. CHá»ˆ mÃ´ táº£ ÄÃšNG nhá»¯ng gÃ¬ user yÃªu cáº§u
+2. NSFW Protection: Táº¤T Cáº¢ áº£nh pháº£i SFW
+3. Negative PHáº¢I CÃ“: nsfw, nude, naked, explicit, sexual
 
-MÔ TẢ: "{message}"
+MÃ” Táº¢: "{message}"
 
-Trả về JSON:
+Tráº£ vá» JSON:
 {{
-    "prompt": "prompt mô tả",
+    "prompt": "prompt mÃ´ táº£",
     "negative_prompt": "bad quality, blurry, nsfw, nude, naked, explicit",
-    "explanation": "giải thích ngắn",
+    "explanation": "giáº£i thÃ­ch ngáº¯n",
     "has_people": false
 }}
 
-CHỈ trả JSON."""
+CHá»ˆ tráº£ JSON."""
     
     try:
         from src.utils.sd_client import get_sd_client
@@ -286,25 +301,25 @@ CHỈ trả JSON."""
             if sd_result.get('images'):
                 image_base64 = sd_result['images'][0]
                 
-                return f"""## 🎨 Ảnh đã được tạo thành công!
+                return f"""## ðŸŽ¨ áº¢nh Ä‘Ã£ Ä‘Æ°á»£c táº¡o thÃ nh cÃ´ng!
 
-**Mô tả gốc:** {message}
+**MÃ´ táº£ gá»‘c:** {message}
 
 **Generated Prompt:**
 ```
 {generated_prompt}
 ```
 
-**Ảnh được tạo:**
+**áº¢nh Ä‘Æ°á»£c táº¡o:**
 <img src="data:image/png;base64,{image_base64}" alt="Generated Image" style="max-width: 100%; border-radius: 8px;">
 
 ---
-🎯 **Thông số:** {image_params['width']}x{image_params['height']} | Steps: {image_params['steps']}"""
+ðŸŽ¯ **ThÃ´ng sá»‘:** {image_params['width']}x{image_params['height']} | Steps: {image_params['steps']}"""
             else:
-                return f"## 🎨 Image Generation\n\n⚠️ Không thể tạo ảnh. SD Response: {sd_result}"
+                return f"## ðŸŽ¨ Image Generation\n\nâš ï¸ KhÃ´ng thá»ƒ táº¡o áº£nh. SD Response: {sd_result}"
         else:
-            return f"## 🎨 Image Generation\n\nKhông thể tạo prompt tự động."
+            return f"## ðŸŽ¨ Image Generation\n\nKhÃ´ng thá»ƒ táº¡o prompt tá»± Ä‘á»™ng."
             
     except Exception as e:
         logging.error(f"[TOOLS] Error in image generation: {e}")
-        return f"## 🎨 Image Generation\n\nLỗi: {str(e)}"
+        return f"## ðŸŽ¨ Image Generation\n\nLá»—i: {str(e)}"
