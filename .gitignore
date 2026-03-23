@@ -266,5 +266,7 @@ ComfyUI/*.log
 # ============================================
 # ARCHIVED SERVICES (in worktree backup)
 # ============================================
-services/edit-image/
-services/stable-diffusion/
+services/edit-image/models/
+services/edit-image/venv/
+services/edit-image/.env
+services/edit-image/log/
