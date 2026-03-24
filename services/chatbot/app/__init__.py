@@ -10,6 +10,7 @@ This package contains the restructured chatbot service with:
 
 from flask import Flask
 from typing import Optional
+import os
 
 
 def create_app(config_name: str = 'default') -> Flask:
@@ -32,5 +33,10 @@ def create_app(config_name: str = 'default') -> Flask:
     return create_application(config_name)
 
 
-__all__ = ['create_app']
+# Backward-compatible module-level app for legacy tests/imports.
+_default_config = 'testing' if os.getenv('TESTING', '').lower() == 'true' else 'default'
+app = create_app(_default_config)
+
+
+__all__ = ['create_app', 'app']
 __version__ = '3.0.0'
