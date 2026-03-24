@@ -46,9 +46,13 @@ def generate_video(
     size: str = "1280x720",
     seconds: int | str = 8,
     model: str = "sora-2",
+    image_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """
     Submit a video generation job via the OpenAI Videos API.
+
+    If *image_path* is provided the API creates image-to-video;
+    otherwise it creates text-to-video.
 
     Returns a dict with the Video object fields plus local metadata.
     The job may still be in_progress — use poll_video() to wait for completion.
@@ -59,13 +63,19 @@ def generate_video(
 
     logger.info(
         f"[Sora2] Submitting — prompt={prompt[:80]!r}, "
-        f"size={size}, seconds={sec}, model={model}"
+        f"size={size}, seconds={sec}, model={model}, image={'yes' if image_path else 'no'}"
     )
 
     client = _get_client()
-    video = client.videos.create(prompt=prompt, model=model, seconds=sec, size=size)
+    create_kwargs: dict[str, Any] = dict(prompt=prompt, model=model, seconds=sec, size=size)
+    if image_path:
+        create_kwargs["image"] = Path(image_path).open("rb")
+
+    video = client.videos.create(**create_kwargs)
 
     job = _video_to_dict(video)
+    if image_path:
+        job["source_image"] = str(image_path)
     _save_meta(job)
     return job
 
@@ -76,6 +86,7 @@ def generate_video_sync(
     size: str = "1280x720",
     seconds: int | str = 8,
     model: str = "sora-2",
+    image_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Submit and block until the video is completed or failed."""
     sec = str(seconds) if str(seconds) in VALID_SECONDS else _snap_seconds(int(seconds))
@@ -84,15 +95,19 @@ def generate_video_sync(
 
     logger.info(
         f"[Sora2] Generating (blocking) — prompt={prompt[:80]!r}, "
-        f"size={size}, seconds={sec}, model={model}"
+        f"size={size}, seconds={sec}, model={model}, image={'yes' if image_path else 'no'}"
     )
 
     client = _get_client()
-    video = client.videos.create_and_poll(
-        prompt=prompt, model=model, seconds=sec, size=size
-    )
+    create_kwargs: dict[str, Any] = dict(prompt=prompt, model=model, seconds=sec, size=size)
+    if image_path:
+        create_kwargs["image"] = Path(image_path).open("rb")
+
+    video = client.videos.create_and_poll(**create_kwargs)
 
     job = _video_to_dict(video)
+    if image_path:
+        job["source_image"] = str(image_path)
     _save_meta(job)
     return job
 
@@ -123,6 +138,27 @@ def download_thumbnail(video_id: str) -> Path:
     dest = VIDEO_STORAGE_DIR / f"{video_id}_thumb.jpg"
     content.stream_to_file(str(dest))
     return dest
+
+
+def cancel_video(video_id: str) -> dict[str, Any]:
+    """Cancel / delete a video generation job via the OpenAI API."""
+    client = _get_client()
+    try:
+        client.videos.delete(video_id)
+        logger.info(f"[Sora2] Cancelled job: {video_id}")
+    except Exception as exc:
+        logger.warning(f"[Sora2] Cancel API call failed for {video_id}: {exc}")
+
+    # Update local metadata
+    meta_path = VIDEO_STORAGE_DIR / f"{video_id}.json"
+    job: dict[str, Any] = {}
+    if meta_path.exists():
+        job = json.loads(meta_path.read_text("utf-8"))
+    job["id"] = video_id
+    job["status"] = "cancelled"
+    job["cancelled_at"] = datetime.now(tz=timezone.utc).isoformat()
+    _save_meta(job)
+    return job
 
 
 def get_job_status(job_id: str) -> dict[str, Any] | None:

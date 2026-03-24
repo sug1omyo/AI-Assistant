@@ -11,6 +11,7 @@ import { FileHandler } from './modules/file-handler.js';
 import { MemoryManager } from './modules/memory-manager.js';
 import { ImageGeneration } from './modules/image-gen.js';
 import { ImageGenV2 } from './modules/image-gen-v2.js';
+import { VideoGen } from './modules/video-gen.js';
 import { ExportHandler } from './modules/export-handler.js';
 import { SplitViewManager } from './modules/split-view.js';
 import { initLanguage } from './language-switcher.js';
@@ -26,11 +27,14 @@ class ChatBotApp {
         this.memoryManager = new MemoryManager(this.apiService);
         this.imageGen = new ImageGeneration(this.apiService);
         this.imageGenV2 = new ImageGenV2(this.apiService);
+        this.videoGen = new VideoGen();
         this.exportHandler = new ExportHandler();
         
         // Expose chatManager and chatApp globally
         window.chatManager = this.chatManager;
         window.chatApp = this;
+        // Keep video module globally available even if event binding later fails
+        window.videoGen = this.videoGen;
         
         // State — auto-enable all image tools on startup
         this.activeTools = new Set(['image-generation', 'img2img']);
@@ -75,6 +79,9 @@ class ChatBotApp {
         } catch (e) {
             console.error('[App] setupEventListeners failed:', e);
         }
+
+        // Ensure video button remains clickable even if another listener setup fails
+        this.bindVideoButtonFallback();
         
         console.log('[App] Setting up file upload handler...');
         console.log('[App] fileInput element:', elements.fileInput);
@@ -410,6 +417,15 @@ class ChatBotApp {
         }
         // Expose V2 globally for onclick handlers
         window.imageGenV2 = this.imageGenV2;
+
+        // Video Generation (Sora 2) button
+        const videoGenBtn = document.getElementById('videoGenBtn');
+        if (videoGenBtn) {
+            videoGenBtn.addEventListener('click', () => {
+                this.videoGen.openModal();
+            });
+        }
+        window.videoGen = this.videoGen;
         
         // Upload files button
         const uploadFilesBtn = document.getElementById('uploadFilesBtn');
@@ -440,6 +456,27 @@ class ChatBotApp {
                 this.uiUtils.updateDeepThinkingVisibility(elements.modelSelect.value);
             });
         }
+    }
+
+    /**
+     * Defensive binding: keep video button interactive when other listeners fail.
+     */
+    bindVideoButtonFallback() {
+        const videoGenBtn = document.getElementById('videoGenBtn');
+        if (!videoGenBtn) return;
+
+        // Avoid duplicate listeners if setupEventListeners already attached one.
+        if (videoGenBtn.dataset.vgBound === '1') return;
+        videoGenBtn.dataset.vgBound = '1';
+
+        videoGenBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (window.videoGen && typeof window.videoGen.openModal === 'function') {
+                window.videoGen.openModal();
+            } else {
+                console.error('[VideoGen] Module not ready (window.videoGen missing)');
+            }
+        });
     }
 
     /**

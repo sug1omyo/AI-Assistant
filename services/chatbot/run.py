@@ -49,8 +49,10 @@ elif USE_NEW_STRUCTURE:
     import importlib.util
 
     app_init_path = service_dir / 'app' / '__init__.py'
-    spec = importlib.util.spec_from_file_location("chatbot_app", app_init_path)
+    spec = importlib.util.spec_from_file_location("chatbot_app", app_init_path,
+                                                    submodule_search_locations=[str(service_dir / 'app')])
     chatbot_app_module = importlib.util.module_from_spec(spec)
+    sys.modules["chatbot_app"] = chatbot_app_module
     spec.loader.exec_module(chatbot_app_module)
 
     create_app = chatbot_app_module.create_app

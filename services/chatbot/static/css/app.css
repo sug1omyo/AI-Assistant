@@ -1609,12 +1609,14 @@ body.light-mode .message__content pre {
   justify-content: center;
   opacity: 0;
   visibility: hidden;
+  pointer-events: none;
   transition: all var(--transition);
 }
 
 .modal-overlay.open {
   opacity: 1;
   visibility: visible;
+  pointer-events: auto;
 }
 
 .modal-panel {

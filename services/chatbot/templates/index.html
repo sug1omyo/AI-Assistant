@@ -254,6 +254,7 @@ try {
                 <!-- Primary actions -->
                 <button class="topbar__btn" id="splitViewBtn" title="Split view"><i data-lucide="columns-2" class="lucide"></i></button>
                 <button class="topbar__btn" id="imageGenV2Btn" title="AI Image (Multi-provider)" style="color: var(--accent);"><i data-lucide="sparkles" class="lucide"></i></button>
+                <button class="topbar__btn" id="videoGenBtn" title="Video Sora2" style="color: var(--warning, #f59e0b);" onclick="window.videoGen?.openModal?.(); console.log('[VideoBtn] click');"><i data-lucide="video" class="lucide"></i></button>
                 <button class="topbar__btn" id="mcpToggleBtn" title="MCP Context"><i data-lucide="message-square-code" class="lucide"></i></button>
                 <button class="topbar__btn" id="darkModeBtn" title="Toggle theme"><i data-lucide="moon" class="lucide" id="darkModeIcon"></i></button>
 
@@ -1037,6 +1038,168 @@ try {
         </div>
     </div>
 </div>
+
+<!-- ═══ Video Generation Modal (Sora 2) ═══ -->
+<div class="modal-overlay" id="videoGenModal">
+    <div class="modal-panel" style="max-width: 680px;">
+        <div class="modal-panel__header" style="border-bottom: 1px solid var(--border-secondary); padding: 16px 24px;">
+            <h2 class="modal-panel__title" style="display: flex; align-items: center; gap: 8px; font-size: 18px;">
+                <i data-lucide="video" class="lucide" style="width: 20px; height: 20px;"></i>
+                Video Generation
+                <span style="font-size: 11px; padding: 2px 8px; background: linear-gradient(135deg, #7c6cf0, #6366f1); color: #fff; border-radius: 10px; font-weight: 600; letter-spacing: 0.5px;">SORA 2</span>
+            </h2>
+            <button class="modal-panel__close" onclick="window.videoGen?.closeModal()">&times;</button>
+        </div>
+        <div class="modal-panel__body" style="padding: 0;">
+            <!-- Status bar -->
+            <div id="vgStatus" style="padding: 10px 24px; font-size: 13px; color: var(--text-tertiary); background: var(--bg-tertiary); border-bottom: 1px solid var(--border-secondary);">
+                <span style="display: inline-flex; align-items: center; gap: 6px;">
+                    <span id="vgStatusDot" style="width: 8px; height: 8px; border-radius: 50%; background: var(--success, #22c55e); display: inline-block;"></span>
+                    <span id="vgStatusText">Ready</span>
+                </span>
+            </div>
+
+            <!-- Tabs -->
+            <div style="display: flex; gap: 0; border-bottom: 1px solid var(--border-secondary);">
+                <button class="vg-tab-btn active" data-tab="generate" onclick="window.videoGen?.switchTab('generate')"
+                    style="flex: 1; padding: 12px; font-size: 13px; font-weight: 600; background: none; border: none; color: var(--text-primary); cursor: pointer; border-bottom: 2px solid var(--accent); transition: all 0.2s;">
+                    🎬 Generate
+                </button>
+                <button class="vg-tab-btn" data-tab="jobs" onclick="window.videoGen?.switchTab('jobs'); window.videoGen?.loadJobs()"
+                    style="flex: 1; padding: 12px; font-size: 13px; font-weight: 600; background: none; border: none; color: var(--text-tertiary); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s;">
+                    📋 History
+                </button>
+            </div>
+
+            <!-- ── Generate Tab ── -->
+            <div class="vg-tab-panel" id="vg-generate" style="display: block; padding: 20px 24px 24px;">
+
+                <!-- Mode Toggle: Text-to-Video / Image-to-Video -->
+                <div style="display: flex; gap: 0; margin-bottom: 20px; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--border-primary);">
+                    <button class="vg-mode-btn" data-mode="text" onclick="window.videoGen?.switchMode('text')"
+                        style="flex: 1; padding: 10px 16px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: all 0.2s; background: var(--accent); color: #fff;">
+                        📝 Text → Video
+                    </button>
+                    <button class="vg-mode-btn" data-mode="image" onclick="window.videoGen?.switchMode('image')"
+                        style="flex: 1; padding: 10px 16px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: all 0.2s; background: var(--bg-tertiary); color: var(--text-secondary);">
+                        🖼️ Image → Video
+                    </button>
+                </div>
+
+                <!-- Image Upload Zone (hidden by default) -->
+                <div id="vgImageUploadZone" style="display: none; margin-bottom: 20px;">
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px;">🖼️ Source Image</label>
+                    <div id="vgDropZone" style="border: 2px dashed var(--border-primary); border-radius: var(--radius-md); padding: 32px 24px; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--bg-tertiary);"
+                         onclick="document.getElementById('vgImageInput').click()">
+                        <div id="vgDropContent">
+                            <div style="font-size: 40px; margin-bottom: 12px; opacity: 0.7;">📤</div>
+                            <div style="font-size: 15px; font-weight: 600; color: var(--text-primary);">Drop image here or click to browse</div>
+                            <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 6px;">Supports PNG, JPG, WebP — Max 20 MB</div>
+                        </div>
+                        <div id="vgImagePreview" style="display: none; position: relative;">
+                            <img id="vgPreviewImg" style="max-width: 100%; max-height: 220px; border-radius: var(--radius-sm); box-shadow: 0 2px 12px rgba(0,0,0,0.15);" alt="Preview">
+                            <div style="margin-top: 10px; font-size: 13px; color: var(--text-secondary);" id="vgImageName"></div>
+                            <button style="position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; border-radius: 50%; background: rgba(0,0,0,0.6); color: #fff; border: none; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px);"
+                                onclick="event.stopPropagation(); window.videoGen?.clearImage()">✕</button>
+                        </div>
+                    </div>
+                    <input type="file" id="vgImageInput" accept="image/png,image/jpeg,image/webp" style="display: none;" onchange="window.videoGen?.handleImageSelect(this)">
+                </div>
+
+                <!-- Prompt -->
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px;">📝 Prompt</label>
+                    <textarea id="vgPrompt" class="form-input" rows="3" style="resize: vertical; font-size: 14px; line-height: 1.5; padding: 12px;" placeholder="Describe the video you want to create..."></textarea>
+                </div>
+
+                <!-- Settings Row -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px;">
+                    <div>
+                        <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">📐 Resolution</label>
+                        <select id="vgResolution" class="form-select" style="width: 100%; font-size: 13px;">
+                            <option value="1280x720" selected>1280×720 Landscape</option>
+                            <option value="720x1280">720×1280 Portrait</option>
+                            <option value="1792x1024">1792×1024 Wide</option>
+                            <option value="1024x1792">1024×1792 Tall</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">⏱️ Duration</label>
+                        <select id="vgDuration" class="form-select" style="width: 100%; font-size: 13px;">
+                            <option value="4">4 seconds</option>
+                            <option value="8" selected>8 seconds</option>
+                            <option value="12">12 seconds</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">🤖 Model</label>
+                        <select id="vgModel" class="form-select" style="width: 100%; font-size: 13px;">
+                            <option value="sora-2" selected>Sora 2 — $0.10/s</option>
+                            <option value="sora-2-pro">Sora 2 Pro — $0.30/s</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Cost Estimate -->
+                <div id="vgCostEstimate" style="margin-bottom: 20px; padding: 12px 16px; background: linear-gradient(135deg, rgba(124,108,240,0.08), rgba(99,102,241,0.04)); border: 1px solid rgba(124,108,240,0.15); border-radius: var(--radius-md); font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; justify-content: space-between;">
+                    <span>💰 Estimated cost</span>
+                    <span style="font-weight: 700; font-size: 15px; color: var(--accent);" id="vgCostValue">$0.80</span>
+                </div>
+
+                <!-- Generate Button -->
+                <button id="vgGenerateBtn" class="btn btn--primary btn--lg" style="width: 100%; font-size: 15px; font-weight: 700; padding: 14px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; gap: 8px;" onclick="window.videoGen?.generate()">
+                    🎬 Generate Video
+                </button>
+
+                <!-- Active Job Progress -->
+                <div id="vgProgress" style="display: none; margin-top: 20px; padding: 20px; background: var(--bg-tertiary); border-radius: var(--radius-md); border: 1px solid var(--border-primary);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <span style="font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                            <span class="vg-spinner" style="display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border-primary); border-top-color: var(--accent); border-radius: 50%; animation: vg-spin 0.8s linear infinite;"></span>
+                            <span id="vgProgressLabel">Generating...</span>
+                        </span>
+                        <span id="vgProgressPct" style="font-size: 14px; font-weight: 700; color: var(--accent);"></span>
+                    </div>
+                    <div style="width: 100%; height: 8px; background: var(--bg-secondary); border-radius: 4px; overflow: hidden;">
+                        <div id="vgProgressBar" style="height: 100%; width: 0%; background: linear-gradient(90deg, #7c6cf0, #6366f1); border-radius: 4px; transition: width 0.4s ease;"></div>
+                    </div>
+                    <div id="vgProgressMeta" style="margin-top: 10px; font-size: 12px; color: var(--text-tertiary);"></div>
+                    <!-- Cancel Button -->
+                    <button id="vgCancelBtn" class="btn btn--sm" onclick="window.videoGen?.cancelCurrentJob()"
+                        style="margin-top: 12px; width: 100%; padding: 10px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #ef4444; border-radius: var(--radius-sm); font-weight: 600; font-size: 13px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                        🛑 Cancel Job — Stop Spending
+                    </button>
+                </div>
+
+                <!-- Result -->
+                <div id="vgResult" style="display: none; margin-top: 20px;">
+                    <video id="vgVideo" controls style="width: 100%; border-radius: var(--radius-md); background: #000; box-shadow: 0 4px 20px rgba(0,0,0,0.3);"></video>
+                    <div style="display: flex; gap: 8px; justify-content: center; margin-top: 14px;">
+                        <button class="btn btn--primary btn--sm" style="padding: 8px 20px; font-weight: 600;" onclick="window.videoGen?.downloadCurrent()">📥 Download MP4</button>
+                        <button class="btn btn--secondary btn--sm" style="padding: 8px 20px; font-weight: 600;" onclick="window.videoGen?.generateAnother()">🔄 New Video</button>
+                    </div>
+                    <div id="vgResultMeta" style="margin-top: 10px; font-size: 12px; color: var(--text-tertiary); text-align: center;"></div>
+                </div>
+            </div>
+
+            <!-- ── History Tab ── -->
+            <div class="vg-tab-panel" id="vg-jobs" style="display: none; padding: 16px 24px 24px;">
+                <div id="vgJobsList" style="max-height: 55vh; overflow-y: auto;">
+                    <p style="color: var(--text-tertiary); text-align: center; padding: 24px;">Loading...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Video Gen spinner animation -->
+<style>
+@keyframes vg-spin { to { transform: rotate(360deg); } }
+#vgCancelBtn:hover { background: rgba(239,68,68,0.2) !important; border-color: #ef4444 !important; }
+.vg-tab-btn:hover { color: var(--text-primary) !important; }
+.vg-mode-btn:hover { opacity: 0.9; }
+.vg-job-cancel:hover { background: rgba(239,68,68,0.15) !important; }
+</style>
 
 <!-- ═══ Image Preview (Discord‑style) ═══ -->
 <div class="image-preview-overlay" id="imagePreviewModal">
