@@ -1,10 +1,14 @@
 /**
- * Video Generation — Sora 2
+ * Video Generation — Sora 2 (Full Feature)
  * Uses /api/video/* endpoints (OpenAI Videos API)
  *
- * Models: sora-2 ($0.10/s), sora-2-pro ($0.30/s)
- * Sizes:  1280x720, 720x1280, 1792x1024, 1024x1792
- * Durations: 4, 8, 12 seconds
+ * Features:
+ *  - Text-to-Video & Image-to-Video (up to 5 reference images)
+ *  - Models: sora-2 ($0.10/s), sora-2-pro ($0.30/s)
+ *  - Sizes: 1280x720, 720x1280, 1792x1024, 1024x1792
+ *  - Durations: 4, 8, 12 seconds
+ *  - Cancel/Stop in-progress jobs
+ *  - Full-quality video download
  */
 
 export class VideoGen {
@@ -12,8 +16,9 @@ export class VideoGen {
         this.isGenerating = false;
         this.pollTimer = null;
         this.currentJobId = null;
-        this.selectedImage = null;  // File object for image-to-video
+        this.selectedImages = [];   // Array of File objects (max 5)
         this.mode = 'text';         // 'text' or 'image'
+        this.MAX_IMAGES = 5;
         this.COST_PER_SEC = { 'sora-2': 0.10, 'sora-2-pro': 0.30 };
     }
 
@@ -41,10 +46,9 @@ export class VideoGen {
 
     switchTab(tab) {
         document.querySelectorAll('#videoGenModal .vg-tab-btn').forEach(btn => {
-            const isActive = btn.dataset.tab === tab;
-            btn.style.color = isActive ? 'var(--text-primary)' : 'var(--text-tertiary)';
-            btn.style.borderBottomColor = isActive ? 'var(--accent)' : 'transparent';
-            btn.classList.toggle('active', isActive);
+            btn.classList.toggle('active', btn.dataset.tab === tab);
+            btn.classList.toggle('btn--primary', btn.dataset.tab === tab);
+            btn.classList.toggle('btn--ghost', btn.dataset.tab !== tab);
         });
         document.querySelectorAll('#videoGenModal .vg-tab-panel').forEach(panel => {
             panel.style.display = panel.id === `vg-${tab}` ? 'block' : 'none';
@@ -56,21 +60,20 @@ export class VideoGen {
     switchMode(mode) {
         this.mode = mode;
         document.querySelectorAll('.vg-mode-btn').forEach(btn => {
-            const isActive = btn.dataset.mode === mode;
-            btn.style.background = isActive ? 'var(--accent)' : 'var(--bg-tertiary)';
-            btn.style.color = isActive ? '#fff' : 'var(--text-secondary)';
+            btn.classList.toggle('btn--primary', btn.dataset.mode === mode);
+            btn.classList.toggle('btn--ghost', btn.dataset.mode !== mode);
         });
         const uploadZone = document.getElementById('vgImageUploadZone');
         if (uploadZone) uploadZone.style.display = mode === 'image' ? 'block' : 'none';
         const prompt = document.getElementById('vgPrompt');
         if (prompt) {
             prompt.placeholder = mode === 'image'
-                ? 'Describe how to animate this image...'
+                ? 'Describe how to animate these images...'
                 : 'Describe the video you want to create...';
         }
     }
 
-    // ── Image Upload ───────────────────────────────────────────────
+    // ── Multi-Image Upload (max 5) ─────────────────────────────────
 
     _setupDragDrop() {
         if (this._dragBound) return;
@@ -91,48 +94,102 @@ export class VideoGen {
             e.preventDefault();
             zone.style.borderColor = 'var(--border-primary)';
             zone.style.background = 'var(--bg-tertiary)';
-            const file = e.dataTransfer?.files?.[0];
-            if (file && file.type.startsWith('image/')) {
-                this._setImage(file);
-            }
+            const files = Array.from(e.dataTransfer?.files || []).filter(f => f.type.startsWith('image/'));
+            this._addImages(files);
         });
     }
 
     handleImageSelect(input) {
-        const file = input?.files?.[0];
-        if (file) this._setImage(file);
+        const files = Array.from(input?.files || []);
+        if (files.length) this._addImages(files);
+        if (input) input.value = '';
     }
 
-    _setImage(file) {
-        const maxSize = 20 * 1024 * 1024;
-        if (file.size > maxSize) {
-            this._showStatus('Image too large (max 20 MB)', 'error');
+    _addImages(files) {
+        const remaining = this.MAX_IMAGES - this.selectedImages.length;
+        if (remaining <= 0) {
+            this._showStatus(`Maximum ${this.MAX_IMAGES} images allowed`, 'error');
             return;
         }
-        this.selectedImage = file;
-        // Show preview
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const img = document.getElementById('vgPreviewImg');
-            if (img) img.src = e.target.result;
-            const name = document.getElementById('vgImageName');
-            if (name) name.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
-            const content = document.getElementById('vgDropContent');
-            if (content) content.style.display = 'none';
-            const preview = document.getElementById('vgImagePreview');
-            if (preview) preview.style.display = 'block';
-        };
-        reader.readAsDataURL(file);
+        const toAdd = files.slice(0, remaining);
+        const maxSize = 20 * 1024 * 1024;
+
+        for (const file of toAdd) {
+            if (file.size > maxSize) {
+                this._showStatus(`${file.name} too large (max 20 MB)`, 'error');
+                continue;
+            }
+            this.selectedImages.push(file);
+        }
+
+        if (files.length > remaining) {
+            this._showStatus(`Only ${remaining} more image(s) can be added (max ${this.MAX_IMAGES})`, 'error');
+        }
+
+        this._renderImagePreviews();
     }
 
-    clearImage() {
-        this.selectedImage = null;
-        const content = document.getElementById('vgDropContent');
-        if (content) content.style.display = 'block';
-        const preview = document.getElementById('vgImagePreview');
-        if (preview) preview.style.display = 'none';
+    removeImage(index) {
+        this.selectedImages.splice(index, 1);
+        this._renderImagePreviews();
+    }
+
+    clearAllImages() {
+        this.selectedImages = [];
+        this._renderImagePreviews();
         const input = document.getElementById('vgImageInput');
         if (input) input.value = '';
+    }
+
+    _renderImagePreviews() {
+        const grid = document.getElementById('vgImageGrid');
+        const counter = document.getElementById('vgImageCounter');
+        const dropContent = document.getElementById('vgDropContent');
+
+        if (counter) {
+            counter.textContent = `${this.selectedImages.length}/${this.MAX_IMAGES} images`;
+            counter.style.color = this.selectedImages.length >= this.MAX_IMAGES ? 'var(--error, #ef4444)' : 'var(--text-tertiary)';
+        }
+
+        if (!grid) return;
+
+        if (this.selectedImages.length === 0) {
+            grid.style.display = 'none';
+            if (dropContent) dropContent.style.display = 'block';
+            return;
+        }
+
+        if (dropContent) dropContent.style.display = this.selectedImages.length >= this.MAX_IMAGES ? 'none' : 'block';
+        grid.style.display = 'grid';
+        grid.innerHTML = '';
+
+        this.selectedImages.forEach((file, i) => {
+            const item = document.createElement('div');
+            item.className = 'vg-img-item';
+            item.style.cssText = 'position:relative; border-radius:var(--radius-sm); overflow:hidden; background:var(--bg-secondary); aspect-ratio:1; border:1px solid var(--border-primary);';
+
+            const img = document.createElement('img');
+            img.style.cssText = 'width:100%; height:100%; object-fit:cover;';
+            img.alt = file.name;
+
+            const reader = new FileReader();
+            reader.onload = (e) => { img.src = e.target.result; };
+            reader.readAsDataURL(file);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.innerHTML = '✕';
+            removeBtn.style.cssText = 'position:absolute; top:2px; right:2px; width:22px; height:22px; border-radius:50%; background:rgba(0,0,0,0.7); color:white; border:none; cursor:pointer; font-size:12px; display:flex; align-items:center; justify-content:center; line-height:1;';
+            removeBtn.onclick = (e) => { e.stopPropagation(); this.removeImage(i); };
+
+            const label = document.createElement('div');
+            label.style.cssText = 'position:absolute; bottom:0; left:0; right:0; padding:2px 4px; background:rgba(0,0,0,0.6); color:white; font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+            label.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`;
+
+            item.appendChild(img);
+            item.appendChild(removeBtn);
+            item.appendChild(label);
+            grid.appendChild(item);
+        });
     }
 
     // ── Cost Estimate ──────────────────────────────────────────────
@@ -151,13 +208,8 @@ export class VideoGen {
         const model = document.getElementById('vgModel')?.value || 'sora-2';
         const rate = this.COST_PER_SEC[model] || 0.10;
         const cost = (duration * rate).toFixed(2);
-        const costVal = document.getElementById('vgCostValue');
-        if (costVal) costVal.textContent = `$${cost}`;
         const el = document.getElementById('vgCostEstimate');
-        if (el) {
-            const span = el.querySelector('span:first-child');
-            if (span) span.textContent = `💰 ${duration}s × $${rate}/s`;
-        }
+        if (el) el.innerHTML = `💰 Estimated cost: <strong>$${cost}</strong> (${duration}s × $${rate}/s)`;
     }
 
     // ── Generate ───────────────────────────────────────────────────
@@ -175,51 +227,34 @@ export class VideoGen {
         const seconds = document.getElementById('vgDuration')?.value || '8';
         const model = document.getElementById('vgModel')?.value || 'sora-2';
 
-        if (this.mode === 'image' && !this.selectedImage) {
-            this._showStatus('Please upload an image first!', 'error');
+        if (this.mode === 'image' && this.selectedImages.length === 0) {
+            this._showStatus('Please upload at least one image!', 'error');
             return;
         }
-
-        // Confirmation dialog to prevent accidental spending
-        const rate = this.COST_PER_SEC[model] || 0.10;
-        const cost = (parseInt(seconds) * rate).toFixed(2);
-        const modeLabel = this.mode === 'image' ? 'Image → Video' : 'Text → Video';
-        const confirmed = confirm(
-            `⚠️ Confirm Video Generation\n\n` +
-            `Mode: ${modeLabel}\n` +
-            `Model: ${model}\n` +
-            `Duration: ${seconds}s | Resolution: ${size}\n` +
-            `Estimated cost: $${cost}\n\n` +
-            `Prompt: "${prompt.slice(0, 100)}${prompt.length > 100 ? '...' : ''}"\n\n` +
-            `Proceed? (You can cancel the job after submitting)`
-        );
-        if (!confirmed) return;
 
         this.isGenerating = true;
         const btn = document.getElementById('vgGenerateBtn');
         if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Submitting...'; }
 
-        // Hide previous result, show progress
         this._hideResult();
-        const modeLabel = this.mode === 'image' ? 'Image-to-Video' : 'Text-to-Video';
+        const imgCount = this.selectedImages.length;
+        const modeLabel = this.mode === 'image' ? `Image-to-Video (${imgCount} image${imgCount > 1 ? 's' : ''})` : 'Text-to-Video';
         this._showProgress(`Submitting ${modeLabel} to OpenAI...`, 0);
 
         try {
             let resp;
-            if (this.mode === 'image' && this.selectedImage) {
-                // Multipart form-data with image
+            if (this.mode === 'image' && this.selectedImages.length > 0) {
                 const formData = new FormData();
                 formData.append('prompt', prompt);
                 formData.append('size', size);
                 formData.append('seconds', seconds);
                 formData.append('model', model);
-                formData.append('image', this.selectedImage);
+                this.selectedImages.forEach(file => formData.append('images', file));
                 resp = await fetch('/api/video/generate', {
                     method: 'POST',
                     body: formData,
                 });
             } else {
-                // JSON body (text-to-video)
                 resp = await fetch('/api/video/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -235,8 +270,7 @@ export class VideoGen {
             this.currentJobId = data.id;
             this._showStatus(`Job submitted: ${data.id}`, 'info');
             this._showProgress('Queued — waiting for OpenAI...', 0);
-
-            // Start polling
+            this._showCancelBtn(true);
             this._startPolling(data.id);
         } catch (e) {
             this._showStatus(`Error: ${e.message}`, 'error');
@@ -245,6 +279,40 @@ export class VideoGen {
             this.isGenerating = false;
             if (btn) { btn.disabled = false; btn.innerHTML = '🎬 Generate Video'; }
         }
+    }
+
+    // ── Cancel / Stop Job ──────────────────────────────────────────
+
+    async cancelJob() {
+        if (!this.currentJobId) return;
+
+        const cancelBtn = document.getElementById('vgCancelBtn');
+        if (cancelBtn) { cancelBtn.disabled = true; cancelBtn.innerHTML = '⏳ Cancelling...'; }
+
+        try {
+            const resp = await fetch(`/api/video/cancel/${this.currentJobId}`, { method: 'POST' });
+            const data = await resp.json();
+
+            this._stopPolling();
+            this._hideProgress();
+            this._showCancelBtn(false);
+
+            if (resp.ok) {
+                this._showStatus(`⛔ Job cancelled: ${this.currentJobId}`, 'info');
+            } else {
+                this._showStatus(`Cancel failed: ${data.error || 'Unknown error'}`, 'error');
+            }
+        } catch (e) {
+            this._showStatus(`Cancel error: ${e.message}`, 'error');
+        } finally {
+            this.currentJobId = null;
+            if (cancelBtn) { cancelBtn.disabled = false; cancelBtn.innerHTML = '⛔ Stop / Cancel'; }
+        }
+    }
+
+    _showCancelBtn(show) {
+        const btn = document.getElementById('vgCancelBtn');
+        if (btn) btn.style.display = show ? 'block' : 'none';
     }
 
     // ── Polling ────────────────────────────────────────────────────
@@ -264,9 +332,21 @@ export class VideoGen {
                 const status = data.status;
                 const progress = data.progress || 0;
 
+                // Update progress meta info
+                const meta = document.getElementById('vgProgressMeta');
+                if (meta) {
+                    const parts = [];
+                    if (data.model) parts.push(data.model);
+                    if (data.size) parts.push(data.size);
+                    if (data.seconds) parts.push(`${data.seconds}s`);
+                    if (data.cost_estimate) parts.push(data.cost_estimate);
+                    meta.textContent = parts.join(' • ');
+                }
+
                 if (status === 'completed') {
                     this._stopPolling();
                     this._showProgress('Completed!', 100);
+                    this._showCancelBtn(false);
                     this._showVideo(jobId, data);
                     this._showStatus('Video ready!', 'success');
                     return;
@@ -274,23 +354,21 @@ export class VideoGen {
 
                 if (status === 'failed') {
                     this._stopPolling();
+                    this._showCancelBtn(false);
                     this._showStatus(`Failed: ${data.error || 'Unknown error'}`, 'error');
                     this._hideProgress();
                     return;
                 }
 
-                // in_progress / queued
                 const label = status === 'queued' ? 'Queued — waiting...' : `Generating... ${progress}%`;
                 this._showProgress(label, progress);
 
-                // Backoff: 2s for first 30s, then 5s
                 elapsed += interval;
                 if (elapsed > 30000 && interval < 5000) interval = 5000;
 
                 this.pollTimer = setTimeout(poll, interval);
             } catch (e) {
                 console.error('[VideoGen] Poll error:', e);
-                // Keep polling on transient errors
                 this.pollTimer = setTimeout(poll, 5000);
             }
         };
@@ -305,14 +383,11 @@ export class VideoGen {
     // ── UI Helpers ─────────────────────────────────────────────────
 
     _showStatus(msg, type = 'info') {
-        const dot = document.getElementById('vgStatusDot');
-        const text = document.getElementById('vgStatusText');
-        if (!text) return;
-        const colors = { error: '#ef4444', success: '#22c55e', info: 'var(--text-tertiary)', warn: '#f59e0b' };
-        const dotColors = { error: '#ef4444', success: '#22c55e', info: 'var(--success, #22c55e)', warn: '#f59e0b' };
-        text.style.color = colors[type] || colors.info;
-        text.textContent = msg;
-        if (dot) dot.style.background = dotColors[type] || dotColors.info;
+        const el = document.getElementById('vgStatus');
+        if (!el) return;
+        const colors = { error: 'var(--error, #ef4444)', success: 'var(--success, #22c55e)', info: 'var(--text-tertiary)' };
+        el.style.color = colors[type] || colors.info;
+        el.textContent = msg;
     }
 
     _showProgress(label, pct) {
@@ -329,6 +404,7 @@ export class VideoGen {
     _hideProgress() {
         const wrap = document.getElementById('vgProgress');
         if (wrap) wrap.style.display = 'none';
+        this._showCancelBtn(false);
     }
 
     _showVideo(jobId, meta) {
@@ -336,7 +412,8 @@ export class VideoGen {
         if (wrap) wrap.style.display = 'block';
         const video = document.getElementById('vgVideo');
         if (video) {
-            video.src = `/api/video/download/${jobId}`;
+            // Use stream endpoint for in-browser playback (full quality)
+            video.src = `/api/video/stream/${jobId}`;
             video.load();
         }
         const metaEl = document.getElementById('vgResultMeta');
@@ -357,10 +434,13 @@ export class VideoGen {
 
     downloadCurrent() {
         if (!this.currentJobId) return;
+        // Use the download endpoint (as_attachment=True) for full quality file
         const a = document.createElement('a');
         a.href = `/api/video/download/${this.currentJobId}`;
-        a.download = `${this.currentJobId}.mp4`;
+        a.download = `sora2_${this.currentJobId}.mp4`;
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
     }
 
     generateAnother() {
@@ -368,50 +448,7 @@ export class VideoGen {
         this._hideProgress();
         this._showStatus('Ready', 'info');
         this.currentJobId = null;
-        this.clearImage();
-    }
-
-    // ── Cancel ─────────────────────────────────────────────────────
-
-    async cancelCurrentJob() {
-        if (!this.currentJobId) return;
-        const jobId = this.currentJobId;
-        const confirmed = confirm(`🛑 Cancel video job?\n\nJob ID: ${jobId}\n\nThis will attempt to stop the generation and may save you money if OpenAI hasn't finished processing.`);
-        if (!confirmed) return;
-        await this._doCancelJob(jobId);
-    }
-
-    async cancelJob(jobId) {
-        const confirmed = confirm(`🛑 Cancel video job?\n\nJob ID: ${jobId}`);
-        if (!confirmed) return;
-        await this._doCancelJob(jobId);
-        this.loadJobs();  // Refresh list
-    }
-
-    async _doCancelJob(jobId) {
-        const cancelBtn = document.getElementById('vgCancelBtn');
-        if (cancelBtn) { cancelBtn.disabled = true; cancelBtn.innerHTML = '⏳ Cancelling...'; }
-
-        try {
-            const resp = await fetch(`/api/video/cancel/${jobId}`, { method: 'POST' });
-            const data = await resp.json();
-            if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-
-            this._stopPolling();
-            this._hideProgress();
-            this._showStatus(`Job ${jobId.slice(0, 12)}... cancelled`, 'warn');
-
-            if (this.currentJobId === jobId) {
-                this.currentJobId = null;
-                this.isGenerating = false;
-                const genBtn = document.getElementById('vgGenerateBtn');
-                if (genBtn) { genBtn.disabled = false; genBtn.innerHTML = '🎬 Generate Video'; }
-            }
-        } catch (e) {
-            this._showStatus(`Cancel failed: ${e.message}`, 'error');
-        } finally {
-            if (cancelBtn) { cancelBtn.disabled = false; cancelBtn.innerHTML = '🛑 Cancel Job — Stop Spending'; }
-        }
+        this.clearAllImages();
     }
 
     // ── Jobs List ──────────────────────────────────────────────────
@@ -432,38 +469,59 @@ export class VideoGen {
             }
 
             container.innerHTML = jobs.map(job => {
-                const statusIcon = { completed: '🟢', failed: '🔴', in_progress: '🟡', queued: '⚪', cancelled: '🟠' }[job.status] || '⚪';
-                const statusLabel = { completed: 'Completed', failed: 'Failed', in_progress: 'In Progress', queued: 'Queued', cancelled: 'Cancelled' }[job.status] || job.status;
+                const statusIcon = { completed: '🟢', failed: '🔴', in_progress: '🟡', queued: '⚪', cancelled: '⛔' }[job.status] || '⚪';
                 const date = job.created_at ? new Date(job.created_at).toLocaleString() : '';
-                const prompt = (job.prompt || '').slice(0, 100) + ((job.prompt || '').length > 100 ? '...' : '');
+                const prompt = (job.prompt || '').slice(0, 80) + ((job.prompt || '').length > 80 ? '...' : '');
                 const isReady = job.status === 'completed';
                 const isActive = job.status === 'in_progress' || job.status === 'queued';
+                const isImg2Vid = Array.isArray(job.source_images) && job.source_images.length > 0;
+                const modeTag = isImg2Vid
+                    ? `<span class="vg-tag vg-tag--img">🖼️ Image→Video</span>`
+                    : `<span class="vg-tag vg-tag--txt">📝 Text→Video</span>`;
                 return `
-                    <div style="padding: 14px 16px; margin-bottom: 8px; background: var(--bg-tertiary); border-radius: var(--radius-md); border: 1px solid var(--border-primary); transition: all 0.2s;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                            <span style="font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 6px;">
-                                ${statusIcon} ${statusLabel}
-                                ${isActive ? '<span style="font-size: 11px; padding: 1px 6px; background: rgba(234,179,8,0.15); color: #eab308; border-radius: 8px;">LIVE</span>' : ''}
-                            </span>
-                            <span style="font-size: 11px; color: var(--text-tertiary);">${date}</span>
+                    <div class="vg-job-card">
+                        <div class="vg-job-header">
+                            <div class="vg-job-status">${statusIcon} ${job.status} ${modeTag}</div>
+                            <span class="vg-job-date">${date}</span>
                         </div>
-                        <p style="font-size: 13px; color: var(--text-secondary); margin: 6px 0; line-height: 1.4;">${this._escapeHtml(prompt)}</p>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-                            <div style="display: flex; gap: 10px; font-size: 12px; color: var(--text-tertiary);">
-                                <span>${job.model || ''}</span>
-                                <span>${job.size || ''}</span>
-                                <span>${job.seconds || ''}s</span>
-                                <span style="font-weight: 600; color: var(--accent);">${job.cost_estimate || ''}</span>
-                            </div>
-                            <div style="display: flex; gap: 6px;">
-                                ${isReady ? `<a href="/api/video/download/${job.id}" download style="font-size: 12px; padding: 4px 10px; background: var(--accent); color: #fff; border-radius: var(--radius-sm); text-decoration: none; font-weight: 600;">📥 Download</a>` : ''}
-                                ${isActive ? `<button class="vg-job-cancel" onclick="window.videoGen?.cancelJob('${job.id}')" style="font-size: 12px; padding: 4px 10px; background: rgba(239,68,68,0.1); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); border-radius: var(--radius-sm); cursor: pointer; font-weight: 600;">🛑 Cancel</button>` : ''}
-                            </div>
+                        <p class="vg-job-prompt">${this._escapeHtml(prompt)}</p>
+                        <div class="vg-job-meta">
+                            <span>${job.model || ''}</span>
+                            <span>${job.size || ''}</span>
+                            <span>${job.seconds || ''}s</span>
+                            <span>${job.cost_estimate || ''}</span>
+                        </div>
+                        <div class="vg-job-actions">
+                            ${isReady ? `<button class="btn btn--sm btn--primary vg-job-action-btn" onclick="window.videoGen?.playJobVideo('${this._escapeHtml(job.id)}')" title="Watch video">▶️ Watch</button>` : ''}
+                            ${isReady ? `<a href="/api/video/download/${this._escapeHtml(job.id)}" download class="btn btn--sm btn--ghost vg-job-action-btn" title="Download">📥 Download</a>` : ''}
+                            ${isActive ? `<button class="btn btn--sm vg-job-action-btn" onclick="window.videoGen?._cancelFromList('${this._escapeHtml(job.id)}')" style="color: var(--error, #ef4444);">⛔ Cancel</button>` : ''}
                         </div>
                     </div>`;
             }).join('');
         } catch (e) {
             container.innerHTML = `<p style="color: var(--error, #ef4444); text-align: center; padding: 16px;">Error: ${e.message}</p>`;
+        }
+    }
+
+    playJobVideo(jobId) {
+        // Switch to Generate tab and show the video
+        this.switchTab('generate');
+        this._showVideo(jobId, {});
+        this._showStatus('Video ready!', 'success');
+        this.currentJobId = jobId;
+        // Load meta from status endpoint for display
+        fetch(`/api/video/status/${jobId}`).then(r => r.json()).then(data => {
+            if (data && !data.error) this._showVideo(jobId, data);
+        }).catch(() => {});
+    }
+
+    async _cancelFromList(jobId) {
+        try {
+            await fetch(`/api/video/cancel/${jobId}`, { method: 'POST' });
+            this._showStatus(`Job ${jobId} cancelled`, 'info');
+            this.loadJobs();
+        } catch (e) {
+            this._showStatus(`Cancel failed: ${e.message}`, 'error');
         }
     }
 

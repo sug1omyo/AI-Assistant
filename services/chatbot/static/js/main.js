@@ -33,8 +33,6 @@ class ChatBotApp {
         // Expose chatManager and chatApp globally
         window.chatManager = this.chatManager;
         window.chatApp = this;
-        // Keep video module globally available even if event binding later fails
-        window.videoGen = this.videoGen;
         
         // State — auto-enable all image tools on startup
         this.activeTools = new Set(['image-generation', 'img2img']);
@@ -79,9 +77,6 @@ class ChatBotApp {
         } catch (e) {
             console.error('[App] setupEventListeners failed:', e);
         }
-
-        // Ensure video button remains clickable even if another listener setup fails
-        this.bindVideoButtonFallback();
         
         console.log('[App] Setting up file upload handler...');
         console.log('[App] fileInput element:', elements.fileInput);
@@ -456,27 +451,6 @@ class ChatBotApp {
                 this.uiUtils.updateDeepThinkingVisibility(elements.modelSelect.value);
             });
         }
-    }
-
-    /**
-     * Defensive binding: keep video button interactive when other listeners fail.
-     */
-    bindVideoButtonFallback() {
-        const videoGenBtn = document.getElementById('videoGenBtn');
-        if (!videoGenBtn) return;
-
-        // Avoid duplicate listeners if setupEventListeners already attached one.
-        if (videoGenBtn.dataset.vgBound === '1') return;
-        videoGenBtn.dataset.vgBound = '1';
-
-        videoGenBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            if (window.videoGen && typeof window.videoGen.openModal === 'function') {
-                window.videoGen.openModal();
-            } else {
-                console.error('[VideoGen] Module not ready (window.videoGen missing)');
-            }
-        });
     }
 
     /**

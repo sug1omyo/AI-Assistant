@@ -1887,6 +1887,84 @@ body.light-mode .message__content pre {
 .file-message-name { font-weight: 500; color: var(--text-primary); }
 .file-message-meta { font-size: 11px; color: var(--text-tertiary); }
 
+/* ── Video Generation (Sora 2) ───────────────────────────────── */
+.vg-jobs-list {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.vg-job-card {
+  padding: 12px;
+  margin-bottom: 8px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-primary);
+}
+.vg-job-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  gap: 8px;
+}
+.vg-job-status {
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.vg-job-date {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.vg-job-prompt {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 4px 0;
+  word-break: break-word;
+}
+.vg-job-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  flex-wrap: wrap;
+}
+.vg-job-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.vg-job-action-btn {
+  font-size: 12px !important;
+  padding: 4px 10px !important;
+}
+.vg-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.vg-tag--img {
+  background: rgba(168, 85, 247, 0.15);
+  color: #a855f7;
+}
+.vg-tag--txt {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
 /* ── Responsive: Tablet & Mobile ────────────────────────────── */
 @media (max-width: 768px) {
 
@@ -2206,6 +2284,56 @@ body.light-mode .message__content pre {
   }
   /* Mobile: always show ellipsis menu */
   .sidebar__chat-menu-btn { opacity: 0.8 !important; }
+
+  /* ── Video Generation Modal (mobile) ── */
+  #videoGenModal .modal-panel {
+    max-width: 100%;
+    max-height: 95vh;
+    margin: 4px;
+  }
+  #videoGenModal .modal-panel__body {
+    padding: 0;
+  }
+  #vg-generate {
+    padding: 0 12px 16px !important;
+  }
+  #vg-jobs {
+    padding: 0 12px 16px !important;
+  }
+  /* Mode toggle responsive */
+  #videoGenModal .vg-mode-btn {
+    font-size: 12px;
+    padding: 6px 4px;
+  }
+  /* Settings grid: stack on mobile */
+  #videoGenModal .vg-settings-grid {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+  /* Image preview grid: 3 cols on mobile */
+  #vgImageGrid {
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+  /* Job cards */
+  .vg-job-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .vg-job-actions {
+    flex-wrap: wrap;
+  }
+  .vg-job-action-btn {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+    justify-content: center;
+  }
+  /* Video result */
+  #vgResult .btn {
+    font-size: 12px;
+    padding: 6px 10px;
+  }
 }
 
 /* ── Responsive: Small phone ───────────────────────────────── */
@@ -2244,6 +2372,15 @@ body.light-mode .message__content pre {
     left: 4px;
     right: 4px;
   }
+
+  /* Video Gen: 2 cols on very small phones */
+  #vgImageGrid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  #videoGenModal .modal-panel__title {
+    font-size: 14px;
+  }
+  .vg-tag { font-size: 10px; padding: 1px 6px; }
 }
 
 /* ── Utility ───────────────────────────────────────────────── */
