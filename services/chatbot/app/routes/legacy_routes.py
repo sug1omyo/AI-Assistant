@@ -9,6 +9,8 @@ from flask import Blueprint, request, jsonify, session, render_template
 from ..controllers.chat_controller import ChatController
 from ..controllers.conversation_controller import ConversationController
 import logging
+import json
+import os
 
 legacy_bp = Blueprint('legacy', __name__)
 chat_controller = ChatController()
@@ -23,7 +25,16 @@ logger = logging.getLogger(__name__)
 @legacy_bp.route('/')
 def index():
     """Main chatbot page"""
-    return render_template('index.html')
+    firebase_config = json.dumps({
+        "apiKey": os.getenv("FIREBASE_API_KEY", ""),
+        "authDomain": os.getenv("FIREBASE_AUTH_DOMAIN", ""),
+        "projectId": os.getenv("FIREBASE_PROJECT_ID", ""),
+        "storageBucket": os.getenv("FIREBASE_STORAGE_BUCKET", ""),
+        "messagingSenderId": os.getenv("FIREBASE_MESSAGING_SENDER_ID", ""),
+        "appId": os.getenv("FIREBASE_APP_ID", ""),
+        "measurementId": os.getenv("FIREBASE_MEASUREMENT_ID", "")
+    })
+    return render_template('index.html', firebase_config=firebase_config)
 
 
 @legacy_bp.route('/monitor')
