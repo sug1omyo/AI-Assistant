@@ -115,7 +115,25 @@ def rtdb_health() -> dict:
         return {'ok': resp.status_code == 200, 'url': FIREBASE_RTDB_URL,
                 'error': None if resp.status_code == 200 else f"HTTP {resp.status_code}"}
     except Exception as e:
-        return {'ok': False, 'url': FIREBASE_RTDB_URL, 'error': str(e)}
+        logger.warning(f"[RTDB] Health check failed: {e}")
+        return {'ok': False, 'url': FIREBASE_RTDB_URL, 'error': 'connection failed'}
+
+
+def upload_to_imgbb(image_base64: str, name: str = None) -> Optional[str]:
+    """
+    Upload image to ImgBB and return the URL
+
+    Args:
+        image_base64: Base64 encoded image data
+        name: Optional name for the image
+
+    Returns:
+        URL of uploaded image or None if failed
+    """
+    if not IMGBB_API_KEY:
+        logger.warning("[ImgBB] No API key configured")
+        return None
+
     try:
         # Remove data URL prefix if present
         if 'base64,' in image_base64:
@@ -199,7 +217,7 @@ def upload_to_drive(image_base64: str, name: str = None, metadata: Dict[str, Any
         else:
             logger.warning(f"[Drive] Upload response without success/url: {data}")
     except Exception as e:
-        result['message'] = str(e)
+        result['message'] = 'Upload failed'
         logger.warning(f"[Drive] Upload failed: {e}")
 
     return result

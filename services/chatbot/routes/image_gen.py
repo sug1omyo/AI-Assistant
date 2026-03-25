@@ -442,7 +442,7 @@ def save_image_to_cloud(image_id: str):
         })
     except Exception as e:
         logger.error(f"[image_gen] save_to_cloud failed for {image_id}: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Failed to save image to cloud"}), 500
 
 
 @image_gen_bp.route("/api/image-gen/meta/<image_id>", methods=["GET"])

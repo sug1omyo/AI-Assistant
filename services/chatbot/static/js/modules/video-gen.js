@@ -481,15 +481,15 @@ export class VideoGen {
                 return `
                     <div class="vg-job-card">
                         <div class="vg-job-header">
-                            <div class="vg-job-status">${statusIcon} ${job.status} ${modeTag}</div>
-                            <span class="vg-job-date">${date}</span>
+                            <div class="vg-job-status">${statusIcon} ${this._escapeHtml(job.status)} ${modeTag}</div>
+                            <span class="vg-job-date">${this._escapeHtml(date)}</span>
                         </div>
                         <p class="vg-job-prompt">${this._escapeHtml(prompt)}</p>
                         <div class="vg-job-meta">
-                            <span>${job.model || ''}</span>
-                            <span>${job.size || ''}</span>
-                            <span>${job.seconds || ''}s</span>
-                            <span>${job.cost_estimate || ''}</span>
+                            <span>${this._escapeHtml(job.model || '')}</span>
+                            <span>${this._escapeHtml(job.size || '')}</span>
+                            <span>${this._escapeHtml(String(job.seconds || ''))}s</span>
+                            <span>${this._escapeHtml(job.cost_estimate || '')}</span>
                         </div>
                         <div class="vg-job-actions">
                             ${isReady ? `<button class="btn btn--sm btn--primary vg-job-action-btn" onclick="window.videoGen?.playJobVideo('${this._escapeHtml(job.id)}')" title="Watch video">▶️ Watch</button>` : ''}
@@ -499,7 +499,7 @@ export class VideoGen {
                     </div>`;
             }).join('');
         } catch (e) {
-            container.innerHTML = `<p style="color: var(--error, #ef4444); text-align: center; padding: 16px;">Error: ${e.message}</p>`;
+            container.innerHTML = `<p style="color: var(--error, #ef4444); text-align: center; padding: 16px;">Error: ${this._escapeHtml(e.message)}</p>`;
         }
     }
 

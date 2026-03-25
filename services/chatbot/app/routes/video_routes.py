@@ -99,12 +99,14 @@ def generate_video():
         )
         return jsonify(result)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        logger.warning("[Video] Validation error: %s", e)
+        return jsonify({"error": "Invalid request parameters"}), 400
     except RuntimeError as e:
-        return jsonify({"error": str(e)}), 503
+        logger.error("[Video] Generation runtime error: %s", e)
+        return jsonify({"error": "Video generation service unavailable"}), 503
     except Exception as e:
         logger.error("[Video] Generation error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "An internal error occurred"}), 500
     finally:
         _cleanup_temps(image_paths)
 
@@ -118,10 +120,11 @@ def cancel_video(video_id: str):
         job = _cancel(video_id)
         return jsonify(job)
     except RuntimeError as e:
-        return jsonify({"error": str(e)}), 503
+        logger.error("[Video] Cancel runtime error: %s", e)
+        return jsonify({"error": "Video service unavailable"}), 503
     except Exception as e:
         logger.error("[Video] Cancel error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "An internal error occurred"}), 500
 
 
 @video_bp.route("/status/<video_id>", methods=["GET"])
@@ -133,10 +136,11 @@ def video_status(video_id: str):
         job = poll_video(video_id)
         return jsonify(job)
     except RuntimeError as e:
-        return jsonify({"error": str(e)}), 503
+        logger.error("[Video] Status poll runtime error: %s", e)
+        return jsonify({"error": "Video service unavailable"}), 503
     except Exception as e:
         logger.error("[Video] Status poll error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "An internal error occurred"}), 500
 
 
 @video_bp.route("/download/<video_id>", methods=["GET"])
@@ -149,10 +153,11 @@ def download_video(video_id: str):
         try:
             local_path = _dl(video_id)
         except RuntimeError as e:
-            return jsonify({"error": str(e)}), 503
+            logger.error("[Video] Download runtime error: %s", e)
+            return jsonify({"error": "Video service unavailable"}), 503
         except Exception as e:
             logger.error("[Video] Download error: %s", e)
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "An internal error occurred"}), 500
 
     file_size = local_path.stat().st_size
     response = send_file(
@@ -178,10 +183,11 @@ def stream_video(video_id: str):
         try:
             local_path = _dl(video_id)
         except RuntimeError as e:
-            return jsonify({"error": str(e)}), 503
+            logger.error("[Video] Stream runtime error: %s", e)
+            return jsonify({"error": "Video service unavailable"}), 503
         except Exception as e:
             logger.error("[Video] Stream error: %s", e)
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "An internal error occurred"}), 500
 
     file_size = local_path.stat().st_size
     response = send_file(

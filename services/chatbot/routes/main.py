@@ -257,7 +257,7 @@ def chat():
         
     except Exception as e:
         logger.error(f"[CHAT] Error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'An internal error occurred'}), 500
 
 
 @main_bp.route('/clear', methods=['POST'])
@@ -306,14 +306,14 @@ def health_databases():
         else:
             result['mongodb'] = {'ok': False, 'error': 'not configured'}
     except Exception as e:
-        result['mongodb'] = {'ok': False, 'error': str(e)}
+        result['mongodb'] = {'ok': False, 'error': 'connection failed'}
 
     # Firebase RTDB
     try:
         from core.image_storage import rtdb_health
         result['firebase_rtdb'] = rtdb_health()
     except Exception as e:
-        result['firebase_rtdb'] = {'ok': False, 'error': str(e)}
+        result['firebase_rtdb'] = {'ok': False, 'error': 'connection failed'}
 
     overall_ok = result['mongodb']['ok'] and result['firebase_rtdb']['ok']
     return jsonify({'ok': overall_ok, **result}), (200 if overall_ok else 503)

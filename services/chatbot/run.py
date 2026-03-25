@@ -50,7 +50,7 @@ if USE_FASTAPI:
         print(f">> Starting Chatbot (FastAPI) on port {port}")
         uvicorn.run(
             "run:app",
-            host='0.0.0.0',
+            host=os.getenv('HOST', '0.0.0.0'),  # noqa: S104
             port=port,
             reload=reload,
             log_level='info',
@@ -75,7 +75,7 @@ elif USE_NEW_STRUCTURE:
         debug = os.getenv('FLASK_DEBUG', 'true').lower() == 'true'
 
         print(f">> Starting Chatbot (Flask New Structure) on port {port}")
-        app.run(host='0.0.0.0', port=port, debug=debug)
+        app.run(host=os.getenv('HOST', '0.0.0.0'), port=port, debug=debug)  # noqa: S104
 
 else:
     # -- Legacy Flask monolith --

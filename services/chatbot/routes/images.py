@@ -177,7 +177,7 @@ def save_image():
         
     except Exception as e:
         logger.error(f"Error saving image: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to save image'}), 500
 
 
 @images_bp.route('/storage/images/<filename>')
@@ -630,4 +630,4 @@ def upload_to_imgbb():
             
     except Exception as e:
         logger.error(f"[UploadImgBB] Error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to upload image'}), 500

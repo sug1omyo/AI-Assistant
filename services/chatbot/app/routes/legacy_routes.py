@@ -75,7 +75,7 @@ def legacy_chat():
         
     except Exception as e:
         logger.error(f"Error in legacy chat: {str(e)}", exc_info=True)
-        return jsonify({'error': f'Failed to process chat message: {str(e)}'}), 500
+        return jsonify({'error': 'Failed to process chat message'}), 500
 
 
 @legacy_bp.route('/conversations', methods=['GET'])
@@ -106,7 +106,8 @@ def legacy_new_conversation():
         return jsonify(result), 200
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error creating conversation: {str(e)}")
+        return jsonify({'error': 'Failed to create conversation'}), 500
 
 
 @legacy_bp.route('/delete_conversation/<conversation_id>', methods=['DELETE'])
@@ -119,7 +120,8 @@ def legacy_delete_conversation(conversation_id: str):
         )
         return jsonify(result), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error deleting conversation: {str(e)}")
+        return jsonify({'error': 'Failed to delete conversation'}), 500
 
 
 # ============================================================================
@@ -137,7 +139,8 @@ def legacy_list_memories():
         result = controller.list_memories(user_id=user_id)
         return jsonify({'memories': result.get('memories', [])}), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error listing memories: {str(e)}")
+        return jsonify({'error': 'Failed to list memories'}), 500
 
 
 @legacy_bp.route('/save_memory', methods=['POST'])

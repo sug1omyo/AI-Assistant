@@ -1198,7 +1198,7 @@ class ChatBotApp {
         // Rebuild downstream branch from snapshot.
         branchMessages.forEach(html => {
             const temp = document.createElement('div');
-            temp.innerHTML = html;
+            temp.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : html;
             const newNode = temp.firstElementChild;
             if (newNode) {
                 chatContainer.appendChild(newNode);
@@ -1941,13 +1941,15 @@ window._igv2Info = async function(imageId, triggerEl) {
         const resp = await fetch(`/api/image-gen/meta/${imageId}`);
         if (!resp.ok) throw new Error('Not found');
         const m = await resp.json();
-        popup.innerHTML = [
-            m.provider ? `<b>Provider:</b> ${m.provider}` : '',
-            m.model    ? `<b>Model:</b> ${m.model}` : '',
-            m.prompt   ? `<b>Prompt:</b> ${m.prompt.substring(0,200)}` : '',
-            m.created_at ? `<b>Created:</b> ${new Date(m.created_at).toLocaleString()}` : '',
-            m.image_id ? `<b>ID:</b> ${m.image_id}` : '',
+        const _esc = (s) => { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; };
+        const rawHtml = [
+            m.provider ? `<b>Provider:</b> ${_esc(m.provider)}` : '',
+            m.model    ? `<b>Model:</b> ${_esc(m.model)}` : '',
+            m.prompt   ? `<b>Prompt:</b> ${_esc(m.prompt.substring(0,200))}` : '',
+            m.created_at ? `<b>Created:</b> ${_esc(new Date(m.created_at).toLocaleString())}` : '',
+            m.image_id ? `<b>ID:</b> ${_esc(m.image_id)}` : '',
         ].filter(Boolean).join('<br>');
+        popup.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml;
     } catch {
         popup.textContent = 'Không tải được thông tin.';
     }
@@ -2458,35 +2460,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 grid.innerHTML = data.images.map(img => {
                     const metadataStr = JSON.stringify(img.metadata).replace(/"/g, '&quot;');
-                    const filename = img.filename || img.path.split('/').pop();
+                    const filename = escapeHtml(img.filename || img.path.split('/').pop());
                     // Prefer cloud URL (ImgBB CDN) for display, fallback to local path
-                    const displayUrl = img.cloud_url || img.path || img.url;
+                    const displayUrl = escapeHtml(img.cloud_url || img.path || img.url);
                     const isCloud = !!img.cloud_url;
                     const hasDrive = !!img.drive_url;
                     const imageDataStr = encodeURIComponent(JSON.stringify({
                         id: img.id || '',
-                        filename,
-                        path: displayUrl,
+                        filename: img.filename || '',
+                        path: img.cloud_url || img.path || img.url || '',
                         cloud_url: img.cloud_url || '',
                         drive_url: img.drive_url || '',
-                        share_url: img.share_url || img.drive_url || img.cloud_url || displayUrl,
+                        share_url: img.share_url || img.drive_url || img.cloud_url || img.path || img.url || '',
                         created: img.created || img.created_at || '',
                         creator: img.creator || '',
                         db_status: img.db_status || {},
                         metadata: img.metadata || {}
                     }));
+                    const safePrompt = escapeHtml(img.prompt || '');
+                    const safeCreated = escapeHtml(img.created || '');
+                    const safeFallback = escapeHtml(img.local_path || img.path || '');
                     return `
                         <div class="gallery-item" data-path="${displayUrl}" data-filename="${filename}" data-metadata="${metadataStr}">
-                            <img src="${displayUrl}" alt="${filename}" loading="lazy" onerror="this.src='${img.local_path || img.path}'">
+                            <img src="${displayUrl}" alt="${filename}" loading="lazy" onerror="this.src='${safeFallback}'">
                             ${isCloud ? '<span class="gallery-cloud-badge" title="Stored in cloud">☁️</span>' : ''}
                             ${hasDrive ? '<span class="gallery-drive-badge" title="Saved to Drive">📁</span>' : ''}
                             <div class="gallery-item-info">
-                                <div style="font-size:10px;opacity:0.7;">📅 ${img.created}</div>
-                                <div class="gallery-item-prompt" title="${img.prompt}">
-                                    ${img.prompt.substring(0, 60)}${img.prompt.length > 60 ? '…' : ''}
+                                <div style="font-size:10px;opacity:0.7;">📅 ${safeCreated}</div>
+                                <div class="gallery-item-prompt" title="${safePrompt}">
+                                    ${escapeHtml((img.prompt || '').substring(0, 60))}${(img.prompt || '').length > 60 ? '…' : ''}
                                 </div>
                             </div>
-                            <button class="gallery-info-btn" onclick="event.stopPropagation(); showGalleryImageInfo('${filename}', '${img.id || ''}', '${imageDataStr}')" title="Thông tin ảnh">
+                            <button class="gallery-info-btn" onclick="event.stopPropagation(); showGalleryImageInfo('${filename}', '${escapeHtml(img.id || '')}', '${imageDataStr}')" title="Thông tin ảnh">
                                 ℹ️
                             </button>
                             <button class="gallery-upload-btn" onclick="event.stopPropagation(); uploadGalleryImageToDB('${filename}')" title="Upload metadata + ảnh lên MongoDB/Firebase/Drive">

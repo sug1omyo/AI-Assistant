@@ -5196,7 +5196,7 @@ def db_health():
         else:
             result['mongodb'] = {'status': 'disabled'}
     except Exception as e:
-        result['mongodb'] = {'status': 'error', 'detail': str(e)[:120]}
+        result['mongodb'] = {'status': 'error', 'detail': 'connection failed'}
 
     # ── Firebase ─────────────────────────────────────────────────────────────
     try:
@@ -5210,7 +5210,7 @@ def db_health():
         else:
             result['firebase'] = {'status': 'not_initialized'}
     except Exception as e:
-        result['firebase'] = {'status': 'error', 'detail': str(e)[:120]}
+        result['firebase'] = {'status': 'error', 'detail': 'connection failed'}
 
     # ── ImgBB ────────────────────────────────────────────────────────────────
     imgbb_key = os.getenv('IMGBB_API_KEY', '')

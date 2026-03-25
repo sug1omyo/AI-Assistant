@@ -1280,7 +1280,7 @@ export class MessageRenderer {
                 assistantTextDiv.style.transform = `translateX(${direction * -18}px)`;
 
                 setTimeout(() => {
-                    assistantTextDiv.innerHTML = history[newIndex].assistantResponse;
+                    assistantTextDiv.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(history[newIndex].assistantResponse) : history[newIndex].assistantResponse;
                     if (typeof hljs !== 'undefined') {
                         assistantTextDiv.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
                     }
