@@ -2460,14 +2460,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 grid.innerHTML = data.images.map(img => {
                     const metadataStr = JSON.stringify(img.metadata).replace(/"/g, '&quot;');
-                    const filename = escapeHtml(img.filename || img.path.split('/').pop());
+                    const rawFilename = img.filename || (img.path || '').split('/').pop() || '';
+                    const filename = escapeHtml(rawFilename);
+                    // JS-safe: escape single quotes and backslashes for onclick contexts
+                    const jsFilename = rawFilename.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                     // Prefer cloud URL (ImgBB CDN) for display, fallback to local path
-                    const displayUrl = escapeHtml(img.cloud_url || img.path || img.url);
+                    const displayUrl = escapeHtml(img.cloud_url || img.path || img.url || '');
                     const isCloud = !!img.cloud_url;
                     const hasDrive = !!img.drive_url;
                     const imageDataStr = encodeURIComponent(JSON.stringify({
                         id: img.id || '',
-                        filename: img.filename || '',
+                        filename: rawFilename,
                         path: img.cloud_url || img.path || img.url || '',
                         cloud_url: img.cloud_url || '',
                         drive_url: img.drive_url || '',
@@ -2477,6 +2480,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         db_status: img.db_status || {},
                         metadata: img.metadata || {}
                     }));
+                    const jsImgId = (img.id || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                     const safePrompt = escapeHtml(img.prompt || '');
                     const safeCreated = escapeHtml(img.created || '');
                     const safeFallback = escapeHtml(img.local_path || img.path || '');
@@ -2491,13 +2495,13 @@ document.addEventListener('DOMContentLoaded', () => {
                                     ${escapeHtml((img.prompt || '').substring(0, 60))}${(img.prompt || '').length > 60 ? '…' : ''}
                                 </div>
                             </div>
-                            <button class="gallery-info-btn" onclick="event.stopPropagation(); showGalleryImageInfo('${filename}', '${escapeHtml(img.id || '')}', '${imageDataStr}')" title="Thông tin ảnh">
+                            <button class="gallery-info-btn" onclick="event.stopPropagation(); showGalleryImageInfo('${jsFilename}', '${jsImgId}', '${imageDataStr}')" title="Thông tin ảnh">
                                 ℹ️
                             </button>
-                            <button class="gallery-upload-btn" onclick="event.stopPropagation(); uploadGalleryImageToDB('${filename}')" title="Upload metadata + ảnh lên MongoDB/Firebase/Drive">
+                            <button class="gallery-upload-btn" onclick="event.stopPropagation(); uploadGalleryImageToDB('${jsFilename}')" title="Upload metadata + ảnh lên MongoDB/Firebase/Drive">
                                 ⬆️
                             </button>
-                            <button class="gallery-delete-btn" onclick="event.stopPropagation(); deleteGalleryImage('${filename}')" title="Xóa ảnh">
+                            <button class="gallery-delete-btn" onclick="event.stopPropagation(); deleteGalleryImage('${jsFilename}')" title="Xóa ảnh">
                                 🗑️
                             </button>
                         </div>
