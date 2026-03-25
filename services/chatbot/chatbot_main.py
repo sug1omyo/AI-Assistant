@@ -1318,6 +1318,42 @@ def index_desktop():
     return render_template('index.html', firebase_config=firebase_config)
 
 
+# ── Auto-logging helper ───────────────────────────────────────────────────
+def _auto_log_chat(message: str, response: str, model: str, context: str,
+                   tools: list, is_tool: bool = False,
+                   thinking_process: str = None) -> None:
+    """Save every chat turn to MongoDB chat_logs (non-blocking, best-effort)."""
+    if not MONGODB_ENABLED:
+        return
+    import threading
+    def _save():
+        try:
+            db = get_db()
+            if db is None:
+                return
+            from flask import request as _req, session as _sess
+            doc = {
+                'timestamp': datetime.utcnow(),
+                'session_id': _sess.get('session_id', ''),
+                'user_id': _sess.get('user_id', 'anonymous'),
+                'ip': _req.headers.get('X-Forwarded-For', _req.remote_addr or ''),
+                'user_agent': _req.headers.get('User-Agent', '')[:200],
+                'platform': _req.json.get('platform', 'web') if _req.is_json else 'form',
+                'model': model,
+                'context': context,
+                'tools': tools or [],
+                'is_tool_result': is_tool,
+                'message': message[:4000] if message else '',
+                'response': response[:8000] if response else '',
+                'has_thinking': bool(thinking_process),
+            }
+            db.chat_logs.insert_one(doc)
+        except Exception as _e:
+            logger.debug(f'[chat_log] write failed (non-fatal): {_e}')
+    t = threading.Thread(target=_save, daemon=True)
+    t.start()
+
+
 @app.route('/chat', methods=['POST'])
 def chat():
     """Chat endpoint - handles both JSON and FormData (with files)"""
@@ -2044,6 +2080,7 @@ Respond in JSON format:
         # If tools were used, return tool results
         if tool_results:
             combined_results = "\n\n---\n\n".join(tool_results)
+            _auto_log_chat(message, combined_results, 'tools', context, tools, is_tool=True)
             return jsonify({
                 'response': combined_results,
                 'model': 'tools',
@@ -2098,6 +2135,8 @@ Respond in JSON format:
             response = result
             thinking_process = None
         
+        _auto_log_chat(message, response, model, context, tools,
+                       thinking_process=thinking_process)
         return jsonify({
             'response': response,
             'model': model,
@@ -5133,6 +5172,65 @@ def require_api_key(f):
             return jsonify({'error': 'Invalid or missing API key', 'code': 'UNAUTHORIZED'}), 401
         return f(*args, **kwargs)
     return decorated
+
+
+@app.route('/api/db-health', methods=['GET'])
+def db_health():
+    """Check liveness of all storage backends."""
+    result = {}
+
+    # ── MongoDB ──────────────────────────────────────────────────────────────
+    try:
+        db = get_db()
+        if db is not None:
+            db.client.admin.command('ping')
+            n_logs = db.chat_logs.estimated_document_count()
+            n_convs = db.conversations.estimated_document_count()
+            n_msgs  = db.messages.estimated_document_count()
+            result['mongodb'] = {
+                'status': 'ok',
+                'chat_logs': n_logs,
+                'conversations': n_convs,
+                'messages': n_msgs,
+            }
+        else:
+            result['mongodb'] = {'status': 'disabled'}
+    except Exception as e:
+        result['mongodb'] = {'status': 'error', 'detail': 'connection failed'}
+
+    # ── Firebase ─────────────────────────────────────────────────────────────
+    try:
+        import firebase_admin
+        if firebase_admin._apps:
+            # Quick Firestore ping
+            from firebase_admin import firestore as _fs
+            _fs.client().collection('_health').document('ping').set(
+                {'ts': datetime.utcnow().isoformat()}, merge=True)
+            result['firebase'] = {'status': 'ok', 'apps': list(firebase_admin._apps.keys())}
+        else:
+            result['firebase'] = {'status': 'not_initialized'}
+    except Exception as e:
+        result['firebase'] = {'status': 'error', 'detail': 'connection failed'}
+
+    # ── ImgBB ────────────────────────────────────────────────────────────────
+    imgbb_key = os.getenv('IMGBB_API_KEY', '')
+    result['imgbb'] = {'status': 'key_present' if imgbb_key else 'no_key'}
+
+    # ── Google Drive ─────────────────────────────────────────────────────────
+    drive_creds = os.getenv('GOOGLE_DRIVE_CREDENTIALS_PATH', '') or os.getenv('GOOGLE_SERVICE_ACCOUNT_PATH', '')
+    drive_ok = bool(drive_creds) and Path(drive_creds).exists()
+    result['google_drive'] = {'status': 'creds_present' if drive_ok else 'no_creds',
+                              'path': drive_creds if drive_ok else ''}
+
+    # ── Local image storage ───────────────────────────────────────────────────
+    storage_dir = Path(__file__).parent / 'Storage' / 'Image_Gen'
+    total_imgs = sum(1 for _ in storage_dir.rglob('*.png')) if storage_dir.exists() else 0
+    result['local_storage'] = {'status': 'ok', 'total_images': total_imgs,
+                               'path': str(storage_dir)}
+
+    overall = 'ok' if result.get('mongodb', {}).get('status') == 'ok' else 'degraded'
+    return jsonify({'overall': overall, 'backends': result,
+                    'checked_at': datetime.utcnow().isoformat() + 'Z'})
 
 
 @app.route('/api/v1/chat', methods=['POST'])

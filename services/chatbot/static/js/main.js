@@ -11,6 +11,7 @@ import { FileHandler } from './modules/file-handler.js';
 import { MemoryManager } from './modules/memory-manager.js';
 import { ImageGeneration } from './modules/image-gen.js';
 import { ImageGenV2 } from './modules/image-gen-v2.js';
+import { VideoGen } from './modules/video-gen.js';
 import { ExportHandler } from './modules/export-handler.js';
 import { SplitViewManager } from './modules/split-view.js';
 import { initLanguage } from './language-switcher.js';
@@ -26,6 +27,7 @@ class ChatBotApp {
         this.memoryManager = new MemoryManager(this.apiService);
         this.imageGen = new ImageGeneration(this.apiService);
         this.imageGenV2 = new ImageGenV2(this.apiService);
+        this.videoGen = new VideoGen();
         this.exportHandler = new ExportHandler();
         
         // Expose chatManager and chatApp globally
@@ -72,7 +74,12 @@ class ChatBotApp {
         // Load chat sessions
         this.chatManager.loadSessions();
         console.log('[DEBUG] After loadSessions: chatSessions=', Object.keys(this.chatManager.chatSessions), 'currentId=', this.chatManager.currentChatId);
-        this.loadCurrentChat();
+        this.renderChatList();
+        try {
+            this.loadCurrentChat();
+        } catch (e) {
+            console.error('[App] loadCurrentChat failed:', e);
+        }
         
         // Setup UI
         this.uiUtils.initDarkMode();
@@ -340,6 +347,16 @@ class ChatBotApp {
                 this.uiUtils.closeSidebar();
             }
         });
+
+        // Sidebar refresh
+        const chatRefreshBtn = document.getElementById('chatRefreshBtn');
+        if (chatRefreshBtn) {
+            chatRefreshBtn.addEventListener('click', () => {
+                chatRefreshBtn.classList.add('is-refreshing');
+                this.renderChatList();
+                setTimeout(() => chatRefreshBtn.classList.remove('is-refreshing'), 650);
+            });
+        }
         
         // Stop generation button
         const stopBtn = document.getElementById('stopGenerationBtn');
@@ -419,6 +436,15 @@ class ChatBotApp {
         }
         // Expose V2 globally for onclick handlers
         window.imageGenV2 = this.imageGenV2;
+
+        // Video Generation (Sora 2) button
+        const videoGenBtn = document.getElementById('videoGenBtn');
+        if (videoGenBtn) {
+            videoGenBtn.addEventListener('click', () => {
+                this.videoGen.openModal();
+            });
+        }
+        window.videoGen = this.videoGen;
         
         // Upload files button
         const uploadFilesBtn = document.getElementById('uploadFilesBtn');
@@ -459,9 +485,10 @@ class ChatBotApp {
         if (!session) return;
         
         const elements = this.uiUtils.elements;
+        const messages = Array.isArray(session.messages) ? session.messages : [];
         
         // Load messages
-        if (session.messages.length > 0) {
+        if (messages.length > 0) {
             this.uiUtils.hideWelcomeScreen();
             const joined = session.messages.join('');
             elements.chatContainer.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(joined) : joined;
@@ -477,7 +504,10 @@ class ChatBotApp {
                         // Update version indicators for messages with history
                         const messageDiv = elements.chatContainer.querySelector(`[data-message-id="${messageId}"]`);
                         if (messageDiv && versions.length > 1) {
-                            messageDiv.dataset.currentVersion = (versions.length - 1).toString();
+                            const restoredCurrent = messageDiv.dataset.currentVersion;
+                            messageDiv.dataset.currentVersion = (restoredCurrent !== undefined && restoredCurrent !== null && restoredCurrent !== '')
+                                ? restoredCurrent
+                                : (versions.length - 1).toString();
                             this.messageRenderer.updateVersionIndicator(messageDiv);
                         }
                     }
@@ -556,14 +586,27 @@ class ChatBotApp {
 
             if (result.success) {
                 let imgSrc = '';
-                if (result.images?.length > 0 && result.images[0].url) imgSrc = result.images[0].url;
-                else if (result.images_url?.length > 0) imgSrc = result.images_url[0];
+                let imageId = '';
+                if (result.images?.length > 0 && result.images[0].url) {
+                    imgSrc = result.images[0].url;
+                    imageId = result.images[0].image_id || '';
+                } else if (result.images_url?.length > 0) {
+                    imgSrc = result.images_url[0];
+                }
 
                 const meta = `🎨 **${result.provider}** / ${result.model} | ${Math.round(result.latency_ms)}ms | $${result.cost_usd}`;
                 const enhanced = result.prompt_used ? `\n📝 ${result.prompt_used.substring(0, 150)}` : '';
+                const promptEsc = (result.prompt_used || message).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+                const imgSrcEsc = imgSrc.replace(/'/g, '%27');
+                const overlayButtons = `
+                    <div class="igv2-img-overlay">
+                        <button class="igv2-img-btn" title="Tải ảnh" onclick="window._igv2Download('${imgSrcEsc}','${imageId}')">⬇</button>
+                        <button class="igv2-img-btn" title="Thông tin" onclick="window._igv2Info('${imageId}',this)">ℹ</button>
+                        ${imageId ? `<button class="igv2-img-btn igv2-save-btn" title="Lưu & Upload Drive" onclick="window._igv2Save('${imageId}',this)">☁</button>` : ''}
+                    </div>`;
                 this.messageRenderer.addMessage(
                     elements.chatContainer,
-                    `<div class="igv2-chat-image"><img src="${imgSrc}" alt="Generated" style="max-width:100%;border-radius:12px;cursor:pointer;" onclick="window.open('${imgSrc}','_blank')"><div class="igv2-chat-meta">${meta}${enhanced}</div></div>`,
+                    `<div class="igv2-chat-image" data-image-id="${imageId}" data-prompt="${promptEsc}">${overlayButtons}<img src="${imgSrc}" alt="Generated" onclick="window.open('${imgSrc}','_blank')"><div class="igv2-chat-meta">${meta}${enhanced}</div></div>`,
                     false, formValues.model, formValues.context,
                     this.uiUtils.formatTimestamp(new Date())
                 );
@@ -576,6 +619,7 @@ class ChatBotApp {
                 );
             }
             elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+            await this.saveCurrentSession(true);  // Persist image message before any session switch
             return;  // Don't send to chat API
         }
         // ── End Image Gen V2 Auto-Detect ─────────────────────
@@ -1078,6 +1122,10 @@ class ChatBotApp {
      */
     async saveCurrentSession(updateTimestamp = false) {
         const elements = this.uiUtils.elements;
+
+        // Sync per-version downstream branches before persisting HTML.
+        this.syncConversationBranches();
+
         // Exclude the welcome screen element from saved messages
         const messages = Array.from(elements.chatContainer.children)
             .filter(el => el.id !== 'welcomeScreen')
@@ -1096,6 +1144,125 @@ class ChatBotApp {
             (fromId, toId, position) => this.handleReorderChat(fromId, toId, position),
             (chatId) => this.handleTogglePin(chatId)
         );
+    }
+
+    syncConversationBranches() {
+        const session = this.chatManager.getCurrentSession();
+        const chatContainer = this.uiUtils?.elements?.chatContainer;
+        if (!session || !chatContainer) return;
+
+        if (!session.conversationBranches) {
+            session.conversationBranches = {};
+        }
+
+        const allMessages = Array.from(chatContainer.children).filter(el => el.id !== 'welcomeScreen');
+        allMessages.forEach((msgEl, idx) => {
+            if (!msgEl.classList.contains('user')) return;
+            const messageId = msgEl.dataset.messageId;
+            if (!messageId) return;
+
+            const currentVersion = parseInt(msgEl.dataset.currentVersion || '0', 10);
+            if (Number.isNaN(currentVersion)) return;
+
+            if (!session.conversationBranches[messageId]) {
+                session.conversationBranches[messageId] = {};
+            }
+
+            const downstream = allMessages.slice(idx + 1).map(el => el.outerHTML);
+            session.conversationBranches[messageId][currentVersion] = downstream;
+        });
+    }
+
+    applyVersionBranch(messageDiv, versionIndex) {
+        const session = this.chatManager.getCurrentSession();
+        const chatContainer = this.uiUtils?.elements?.chatContainer;
+        if (!session || !chatContainer || !messageDiv) return;
+
+        const messageId = messageDiv.dataset.messageId;
+        if (!messageId) return;
+
+        const branchesByMessage = session.conversationBranches?.[messageId];
+        if (!branchesByMessage) return;
+
+        const branchMessages = branchesByMessage[versionIndex];
+        if (!Array.isArray(branchMessages)) return;
+
+        // Remove everything after anchor message.
+        let node = messageDiv.nextElementSibling;
+        while (node) {
+            const next = node.nextElementSibling;
+            node.remove();
+            node = next;
+        }
+
+        // Rebuild downstream branch from snapshot.
+        branchMessages.forEach(html => {
+            const temp = document.createElement('div');
+            temp.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : html;
+            const newNode = temp.firstElementChild;
+            if (newNode) {
+                chatContainer.appendChild(newNode);
+            }
+        });
+
+        // Re-attach actions after DOM restore.
+        this.messageRenderer.reattachEventListeners(
+            chatContainer,
+            null,
+            null,
+            (img) => this.openImagePreview(img)
+        );
+        this.messageRenderer.makeImagesClickable((img) => this.openImagePreview(img));
+
+        // Persist selected branch immediately (without bumping updatedAt order).
+        this.saveCurrentSession(false);
+    }
+
+    /**
+     * Fork session from a specific message
+     */
+    handleForkSession(messageDiv) {
+        const chatContainer = this.uiUtils.elements.chatContainer;
+        const allMessages = Array.from(chatContainer.children).filter(el => el.id !== 'welcomeScreen');
+        const msgIndex = allMessages.indexOf(messageDiv);
+        if (msgIndex === -1) return;
+
+        // Save current session first so messages array is up-to-date
+        this.saveCurrentSession();
+
+        const sourceChatId = this.chatManager.currentChatId;
+        const newId = this.chatManager.forkSession(sourceChatId, msgIndex);
+        if (!newId) return;
+
+        // Load the forked session
+        this.loadCurrentChat();
+        this.renderChatList();
+
+        // Scroll to bottom
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+
+        // Brief notification
+        const lang = localStorage.getItem('chatbot_language') || 'vi';
+        this.showForkNotification(
+            lang === 'vi'
+                ? '🔀 Đã tách nhánh! Bạn có thể tiếp tục chat từ đây.'
+                : '🔀 Forked! You can continue chatting from here.'
+        );
+    }
+
+    /**
+     * Show a temporary toast notification for fork
+     */
+    showForkNotification(message) {
+        const toast = document.createElement('div');
+        toast.className = 'fork-toast';
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        requestAnimationFrame(() => toast.classList.add('show'));
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        }, 2500);
     }
 
     /**
@@ -1133,6 +1300,7 @@ class ChatBotApp {
         this.fileHandler.renderSessionFiles(this.uiUtils.elements.fileList);
         
         this.saveCurrentSession();
+        this.renderChatList();
     }
 
     /**
@@ -1157,6 +1325,8 @@ class ChatBotApp {
         if (!this.uiUtils.showConfirm('Bạn có chắc muốn xóa cuộc trò chuyện này?')) {
             return;
         }
+
+        const wasCurrent = chatId === this.chatManager.currentChatId;
         
         const result = this.chatManager.deleteChat(chatId);
         
@@ -1164,9 +1334,18 @@ class ChatBotApp {
             this.uiUtils.showAlert(result.message);
             return;
         }
-        
-        this.loadCurrentChat();
-        this.saveCurrentSession();
+
+        if (result.remainingCount === 0) {
+            this.uiUtils.clearChat();
+            this.uiUtils.showWelcomeScreen();
+            this.fileHandler.clearSessionFiles();
+            this.fileHandler.renderSessionFiles(this.uiUtils.elements.fileList);
+        } else if (wasCurrent) {
+            this.loadCurrentChat();
+        }
+
+        this.renderChatList();
+        this.uiUtils.updateStorageDisplay(this.chatManager.getStorageInfo());
     }
 
     /**
@@ -1736,6 +1915,79 @@ class ChatBotApp {
     }
 }
 
+// ── Image overlay button handlers (global) ──────────────────────────────────
+
+window._igv2Download = function(imgSrc, imageId) {
+    const a = document.createElement('a');
+    // Prefer the local serve URL for clean filename
+    a.href = imageId ? `/api/image-gen/images/${imageId}` : imgSrc;
+    a.download = imageId ? `${imageId}.png` : 'generated.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+};
+
+window._igv2Info = async function(imageId, triggerEl) {
+    // Remove any existing popup first
+    document.querySelectorAll('.igv2-info-popup').forEach(p => p.remove());
+    if (!imageId) return;
+
+    const popup = document.createElement('div');
+    popup.className = 'igv2-info-popup';
+    popup.textContent = 'Đang tải…';
+    triggerEl.closest('.igv2-chat-image').appendChild(popup);
+
+    try {
+        const resp = await fetch(`/api/image-gen/meta/${imageId}`);
+        if (!resp.ok) throw new Error('Not found');
+        const m = await resp.json();
+        const _esc = (s) => { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; };
+        const rawHtml = [
+            m.provider ? `<b>Provider:</b> ${_esc(m.provider)}` : '',
+            m.model    ? `<b>Model:</b> ${_esc(m.model)}` : '',
+            m.prompt   ? `<b>Prompt:</b> ${_esc(m.prompt.substring(0,200))}` : '',
+            m.created_at ? `<b>Created:</b> ${_esc(new Date(m.created_at).toLocaleString())}` : '',
+            m.image_id ? `<b>ID:</b> ${_esc(m.image_id)}` : '',
+        ].filter(Boolean).join('<br>');
+        popup.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml;
+    } catch {
+        popup.textContent = 'Không tải được thông tin.';
+    }
+
+    // Close on outside click
+    const close = (e) => { if (!popup.contains(e.target) && e.target !== triggerEl) { popup.remove(); document.removeEventListener('click', close, true); } };
+    setTimeout(() => document.addEventListener('click', close, true), 50);
+};
+
+window._igv2Save = async function(imageId, triggerEl) {
+    if (!imageId) return;
+    triggerEl.disabled = true;
+    triggerEl.textContent = '⏳';
+    try {
+        const resp = await fetch(`/api/image-gen/save/${imageId}`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            triggerEl.textContent = '✅';
+            triggerEl.title = data.drive_url ? `Drive: ${data.drive_url}` : 'Đã lưu!';
+            if (data.drive_url) {
+                const a = document.createElement('a');
+                a.href = data.drive_url;
+                a.target = '_blank';
+                a.style.cssText = 'position:absolute;opacity:0;pointer-events:none';
+                // Don't auto-open; just update tooltip
+            }
+        } else {
+            triggerEl.textContent = '❌';
+            triggerEl.title = data.error || 'Lỗi khi lưu';
+            setTimeout(() => { triggerEl.textContent = '☁'; triggerEl.disabled = false; }, 3000);
+        }
+    } catch (e) {
+        triggerEl.textContent = '❌';
+        triggerEl.title = String(e);
+        setTimeout(() => { triggerEl.textContent = '☁'; triggerEl.disabled = false; }, 3000);
+    }
+};
+
 // Initialize app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     const app = new ChatBotApp();
@@ -2181,11 +2433,13 @@ document.addEventListener('DOMContentLoaded', () => {
     window.downloadChatAsText = () => app.exportHandler.downloadChatAsText(app.currentSession, app.chatManager.sessions);
     
     // === GALLERY FUNCTIONS ===
-    // Track if showing all images (for owner)
-    let galleryShowAll = false;
-    
-    window.openGallery = async (showAll = false) => {
-        galleryShowAll = showAll;
+    const escapeHtml = (text) => {
+        const div = document.createElement('div');
+        div.textContent = text == null ? '' : String(text);
+        return div.innerHTML;
+    };
+
+    window.openGallery = async () => {
         const modal = document.getElementById('galleryModal');
         const grid = document.getElementById('galleryGrid');
         const stats = document.getElementById('galleryStats');
@@ -2196,32 +2450,58 @@ document.addEventListener('DOMContentLoaded', () => {
         grid.innerHTML = '<div style="text-align: center; padding: 50px; color: #999;">⏳ Đang tải ảnh...</div>';
         
         try {
-            const url = showAll ? '/api/gallery/images?all=true' : '/api/gallery/images';
+            const url = '/api/gallery/images?all=true';
             const response = await fetch(url);
             const data = await response.json();
             
             if (data.success && data.images.length > 0) {
-                const modeText = showAll ? ' (Tất cả)' : ' (Session hiện tại)';
                 const sourceText = data.source === 'mongodb' ? ' ☁️' : ' 💾';
-                stats.textContent = `📊 Tổng số: ${data.total} ảnh${modeText}${sourceText}`;
+                stats.textContent = `📊 Tổng số: ${data.total} ảnh (Tất cả)${sourceText}`;
                 
                 grid.innerHTML = data.images.map(img => {
                     const metadataStr = JSON.stringify(img.metadata).replace(/"/g, '&quot;');
-                    const filename = img.filename || img.path.split('/').pop();
+                    const rawFilename = img.filename || (img.path || '').split('/').pop() || '';
+                    const filename = escapeHtml(rawFilename);
+                    // JS-safe: escape single quotes and backslashes for onclick contexts
+                    const jsFilename = rawFilename.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                     // Prefer cloud URL (ImgBB CDN) for display, fallback to local path
-                    const displayUrl = img.cloud_url || img.path || img.url;
+                    const displayUrl = escapeHtml(img.cloud_url || img.path || img.url || '');
                     const isCloud = !!img.cloud_url;
+                    const hasDrive = !!img.drive_url;
+                    const imageDataStr = encodeURIComponent(JSON.stringify({
+                        id: img.id || '',
+                        filename: rawFilename,
+                        path: img.cloud_url || img.path || img.url || '',
+                        cloud_url: img.cloud_url || '',
+                        drive_url: img.drive_url || '',
+                        share_url: img.share_url || img.drive_url || img.cloud_url || img.path || img.url || '',
+                        created: img.created || img.created_at || '',
+                        creator: img.creator || '',
+                        db_status: img.db_status || {},
+                        metadata: img.metadata || {}
+                    }));
+                    const jsImgId = (img.id || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                    const safePrompt = escapeHtml(img.prompt || '');
+                    const safeCreated = escapeHtml(img.created || '');
+                    const safeFallback = escapeHtml(img.local_path || img.path || '');
                     return `
                         <div class="gallery-item" data-path="${displayUrl}" data-filename="${filename}" data-metadata="${metadataStr}">
-                            <img src="${displayUrl}" alt="${filename}" loading="lazy" onerror="this.src='${img.local_path || img.path}'">
+                            <img src="${displayUrl}" alt="${filename}" loading="lazy" onerror="this.src='${safeFallback}'">
                             ${isCloud ? '<span class="gallery-cloud-badge" title="Stored in cloud">☁️</span>' : ''}
+                            ${hasDrive ? '<span class="gallery-drive-badge" title="Saved to Drive">📁</span>' : ''}
                             <div class="gallery-item-info">
-                                <div style="font-size:10px;opacity:0.7;">📅 ${img.created}</div>
-                                <div class="gallery-item-prompt" title="${img.prompt}">
-                                    ${img.prompt.substring(0, 60)}${img.prompt.length > 60 ? '…' : ''}
+                                <div style="font-size:10px;opacity:0.7;">📅 ${safeCreated}</div>
+                                <div class="gallery-item-prompt" title="${safePrompt}">
+                                    ${escapeHtml((img.prompt || '').substring(0, 60))}${(img.prompt || '').length > 60 ? '…' : ''}
                                 </div>
                             </div>
-                            <button class="gallery-delete-btn" onclick="event.stopPropagation(); deleteGalleryImage('${filename}')" title="Xóa ảnh">
+                            <button class="gallery-info-btn" onclick="event.stopPropagation(); showGalleryImageInfo('${jsFilename}', '${jsImgId}', '${imageDataStr}')" title="Thông tin ảnh">
+                                ℹ️
+                            </button>
+                            <button class="gallery-upload-btn" onclick="event.stopPropagation(); uploadGalleryImageToDB('${jsFilename}')" title="Upload metadata + ảnh lên MongoDB/Firebase/Drive">
+                                ⬆️
+                            </button>
+                            <button class="gallery-delete-btn" onclick="event.stopPropagation(); deleteGalleryImage('${jsFilename}')" title="Xóa ảnh">
                                 🗑️
                             </button>
                         </div>
@@ -2252,10 +2532,10 @@ document.addEventListener('DOMContentLoaded', () => {
             grid.innerHTML = '<div class="gallery-empty">❌ Error while loading images</div>';
         }
     };
-    
+
+    // Backward compatibility: old button may still call this
     window.toggleGalleryMode = () => {
-        galleryShowAll = !galleryShowAll;
-        openGallery(galleryShowAll);
+        openGallery();
     };
     
     window.closeGallery = () => {
@@ -2265,8 +2545,137 @@ document.addEventListener('DOMContentLoaded', () => {
     
     window.refreshGallery = async () => {
         console.log('[Gallery] Refreshing...');
-        // Re-open with current mode
-        await openGallery(galleryShowAll);
+        await openGallery();
+    };
+
+    window.showGalleryImageInfo = async (filename, imageId = '', encodedImageData = '') => {
+        const modal = document.getElementById('galleryInfoModal');
+        const body = document.getElementById('galleryInfoBody');
+        if (!modal || !body) return;
+
+        modal.classList.add('active', 'open');
+        body.innerHTML = '<div style="padding:12px 0; color: var(--text-tertiary);">⏳ Đang tải thông tin ảnh...</div>';
+
+        let fromCard = {};
+        if (encodedImageData) {
+            try {
+                fromCard = JSON.parse(decodeURIComponent(encodedImageData));
+            } catch (_) {}
+        }
+
+        const renderInfoBody = (payload = {}) => {
+            const metadata = payload.metadata || fromCard.metadata || {};
+            const db = payload.db_status || fromCard.db_status || {};
+            const links = payload.links || {
+                share_url: fromCard.share_url || fromCard.drive_url || fromCard.cloud_url || fromCard.path || '',
+                drive_folder_url: 'https://drive.google.com/drive/folders/11MN5m72gl84LsP1NMfBjeX9YAzsIlRxz?usp=sharing'
+            };
+
+            const allMeta = Object.entries(metadata)
+                .filter(([_, v]) => v !== null && v !== undefined && String(v).trim() !== '')
+                .map(([k, v]) => `<div class="lightbox__meta-item"><span class="lightbox__meta-label">${escapeHtml(k)}</span><span class="lightbox__meta-value">${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : v)}</span></div>`)
+                .join('');
+
+            body.innerHTML = `
+                <div class="lightbox__meta-grid" style="margin-bottom: 12px;">
+                    <div class="lightbox__meta-item"><span class="lightbox__meta-label">Người tạo</span><span class="lightbox__meta-value">${escapeHtml((payload.creator || fromCard.creator || 'unknown'))}</span></div>
+                    <div class="lightbox__meta-item"><span class="lightbox__meta-label">Thời gian đã tạo</span><span class="lightbox__meta-value">${escapeHtml((payload.created_at || fromCard.created || ''))}</span></div>
+                    <div class="lightbox__meta-item"><span class="lightbox__meta-label">MongoDB</span><span class="lightbox__meta-value">${db.mongodb ? 'Da co' : 'Chua co/khong ro'}</span></div>
+                    <div class="lightbox__meta-item"><span class="lightbox__meta-label">Firebase</span><span class="lightbox__meta-value">${db.firebase ? 'Da co' : 'Chua co/khong ro'}</span></div>
+                    <div class="lightbox__meta-item" style="grid-column:1/-1"><span class="lightbox__meta-label">Share link</span><span class="lightbox__meta-value">${escapeHtml(links.share_url || '')}</span></div>
+                    <div class="lightbox__meta-item" style="grid-column:1/-1"><span class="lightbox__meta-label">Drive folder</span><span class="lightbox__meta-value">${escapeHtml(links.drive_folder_url || '')}</span></div>
+                </div>
+                <div class="lightbox__meta-label" style="margin-bottom:8px;">Thong so anh</div>
+                <div class="lightbox__meta-grid">${allMeta || '<div class="lightbox__meta-item" style="grid-column:1/-1"><span class="lightbox__meta-value">Khong co metadata</span></div>'}</div>
+                <div style="display:flex; gap:8px; margin-top:14px; flex-wrap: wrap;">
+                    <button class="btn btn--sm btn--primary" onclick="uploadGalleryImageToDB('${escapeHtml(filename)}')">⬆️ Upload len DB</button>
+                    ${(links.share_url || fromCard.share_url) ? `<button class="btn btn--sm btn--ghost" onclick="copyGalleryShareLink('${escapeHtml(links.share_url || fromCard.share_url)}')">🔗 Copy Share Link</button>` : ''}
+                </div>
+            `;
+        };
+
+        try {
+            const response = await fetch(`/api/gallery/image-info?filename=${encodeURIComponent(filename)}`);
+            if (response.status === 404) {
+                renderInfoBody({});
+                return;
+            }
+            const data = await response.json();
+            if (!data.success) throw new Error(data.error || 'Cannot load image info');
+            renderInfoBody(data);
+        } catch (error) {
+            console.error('[Gallery] image-info error:', error);
+            // Graceful fallback: still show what we currently know from gallery card
+            renderInfoBody({});
+        }
+    };
+
+    window.closeGalleryInfo = () => {
+        const modal = document.getElementById('galleryInfoModal');
+        if (modal) modal.classList.remove('active', 'open');
+    };
+
+    window.copyGalleryShareLink = async (url) => {
+        try {
+            await navigator.clipboard.writeText(url || '');
+            alert('✅ Đã copy share link');
+        } catch (_) {
+            prompt('Copy link:', url || '');
+        }
+    };
+
+    window.uploadGalleryImageToDB = async (filename) => {
+        if (!filename) return;
+        try {
+            let response = await fetch('/api/gallery/upload-db', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename })
+            });
+
+            // Fallback for older backend versions that do not have /api/gallery/upload-db
+            if (response.status === 404) {
+                const item = document.querySelector(`.gallery-item[data-filename="${CSS.escape(filename)}"]`);
+                const imagePath = item?.getAttribute('data-path') || `/storage/images/${filename}`;
+                const metadataRaw = item?.getAttribute('data-metadata') || '{}';
+                let metadata = {};
+                try { metadata = JSON.parse(metadataRaw); } catch (_) {}
+                metadata.filename = filename;
+
+                const imgResp = await fetch(imagePath);
+                if (!imgResp.ok) throw new Error('Cannot fetch local image for fallback upload');
+                const blob = await imgResp.blob();
+                const b64 = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve((reader.result || '').toString());
+                    reader.onerror = () => reject(new Error('Cannot convert image to base64'));
+                    reader.readAsDataURL(blob);
+                });
+
+                response = await fetch('/api/save-generated-image', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: b64, metadata })
+                });
+                if (response.status === 404) {
+                    response = await fetch('/api/save-image', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ image: b64, metadata })
+                    });
+                }
+            }
+
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || (data.success === false)) {
+                throw new Error(data.error || `Upload failed (${response.status})`);
+            }
+            alert('✅ Đã upload lên MongoDB/Firebase/Drive (nếu cấu hình Drive endpoint hợp lệ).');
+            await refreshGallery();
+        } catch (error) {
+            console.error('[Gallery] upload-db error:', error);
+            alert('❌ Upload DB lỗi: ' + (error.message || 'Unknown error'));
+        }
     };
     
     window.deleteGalleryImage = async (filename) => {

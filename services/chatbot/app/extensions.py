@@ -45,12 +45,17 @@ def init_mongodb(app: Flask) -> None:
         from pymongo import MongoClient
         
         uri = app.config.get('MONGODB_URI')
-        _mongodb_client = MongoClient(
-            uri, 
-            serverSelectionTimeoutMS=5000,
-            tls=True,
-            tlsAllowInvalidCertificates=True
-        )
+        
+        # Only force TLS for non-localhost URIs (Atlas/SRV handle TLS automatically)
+        connect_kwargs = dict(serverSelectionTimeoutMS=5000)
+        if uri and not uri.startswith('mongodb+srv://'):
+            # For standard mongodb:// URIs, only add TLS for non-localhost
+            parsed_host = uri.split('@')[-1].split('/')[0].split(':')[0] if '@' in uri else uri.replace('mongodb://', '').split('/')[0].split(':')[0]
+            if parsed_host not in ('localhost', '127.0.0.1', '::1'):
+                connect_kwargs['tls'] = True
+                connect_kwargs['tlsAllowInvalidCertificates'] = True
+        
+        _mongodb_client = MongoClient(uri, **connect_kwargs)
         
         # Test connection
         _mongodb_client.admin.command('ping')

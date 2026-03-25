@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 # ImgBB API
 IMGBB_API_KEY = os.getenv('IMGBB_API_KEY', '')
 IMGBB_UPLOAD_URL = 'https://api.imgbb.com/1/upload'
+GOOGLE_DRIVE_UPLOAD_URL = os.getenv('GOOGLE_DRIVE_UPLOAD_URL', '')
+GOOGLE_DRIVE_FOLDER_URL = os.getenv(
+    'GOOGLE_DRIVE_FOLDER_URL',
+    'https://drive.google.com/drive/folders/11MN5m72gl84LsP1NMfBjeX9YAzsIlRxz?usp=sharing'
+)
 
 # MongoDB (optional)
 try:
@@ -55,22 +60,80 @@ except Exception as e:
     logger.warning(f"[ImageStorage] Firebase not available: {e}")
     firebase_db = None
 
+# Firebase Realtime Database (REST API — no Admin SDK required)
+FIREBASE_RTDB_URL = os.getenv('FIREBASE_RTDB_URL', '').rstrip('/')
+FIREBASE_DB_SECRET = os.getenv('FIREBASE_DB_SECRET', '')
+
+
+def rtdb_push(path: str, data: dict) -> Optional[str]:
+    """Push data to Firebase RTDB under the given path (POST → auto key).
+
+    Returns the auto-generated key string, or None on failure.
+    Works without a service account — uses DB Secret if set, otherwise
+    relies on the RTDB security rules allowing writes.
+    """
+    if not FIREBASE_RTDB_URL:
+        return None
+    try:
+        url = f"{FIREBASE_RTDB_URL}/{path.strip('/')}.json"
+        params = {'auth': FIREBASE_DB_SECRET} if FIREBASE_DB_SECRET else {}
+        resp = requests.post(url, json=data, params=params, timeout=10)
+        if resp.status_code == 200:
+            key = (resp.json() or {}).get('name')
+            logger.info(f"[RTDB] Push /{path} → key={key}")
+            return key
+        logger.warning(f"[RTDB] Push failed {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        logger.warning(f"[RTDB] Push error: {e}")
+    return None
+
+
+def rtdb_set(path: str, data: dict) -> bool:
+    """Set data at a specific RTDB path (PUT).  Returns True on success."""
+    if not FIREBASE_RTDB_URL:
+        return False
+    try:
+        url = f"{FIREBASE_RTDB_URL}/{path.strip('/')}.json"
+        params = {'auth': FIREBASE_DB_SECRET} if FIREBASE_DB_SECRET else {}
+        resp = requests.put(url, json=data, params=params, timeout=10)
+        if resp.status_code == 200:
+            logger.info(f"[RTDB] Set /{path}: OK")
+            return True
+        logger.warning(f"[RTDB] Set failed {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        logger.warning(f"[RTDB] Set error: {e}")
+    return False
+
+
+def rtdb_health() -> dict:
+    """Ping Firebase RTDB. Returns {ok: bool, url: str, error: str|None}."""
+    if not FIREBASE_RTDB_URL:
+        return {'ok': False, 'url': '', 'error': 'FIREBASE_RTDB_URL not configured'}
+    try:
+        params = {'auth': FIREBASE_DB_SECRET, 'shallow': 'true'} if FIREBASE_DB_SECRET else {'shallow': 'true'}
+        resp = requests.get(f"{FIREBASE_RTDB_URL}/.json", params=params, timeout=8)
+        return {'ok': resp.status_code == 200, 'url': FIREBASE_RTDB_URL,
+                'error': None if resp.status_code == 200 else f"HTTP {resp.status_code}"}
+    except Exception as e:
+        logger.warning(f"[RTDB] Health check failed: {e}")
+        return {'ok': False, 'url': FIREBASE_RTDB_URL, 'error': 'connection failed'}
+
 
 def upload_to_imgbb(image_base64: str, name: str = None) -> Optional[str]:
     """
     Upload image to ImgBB and return the URL
-    
+
     Args:
         image_base64: Base64 encoded image data
         name: Optional name for the image
-        
+
     Returns:
         URL of uploaded image or None if failed
     """
     if not IMGBB_API_KEY:
         logger.warning("[ImgBB] No API key configured")
         return None
-    
+
     try:
         # Remove data URL prefix if present
         if 'base64,' in image_base64:
@@ -99,6 +162,65 @@ def upload_to_imgbb(image_base64: str, name: str = None) -> Optional[str]:
         logger.error(f"[ImgBB] Exception: {e}")
     
     return None
+
+
+def upload_to_drive(image_base64: str, name: str = None, metadata: Dict[str, Any] = None) -> Dict[str, Any]:
+    """
+    Upload image to Google Drive through configured webhook endpoint.
+
+    Expected request body:
+      { image: <base64>, name: <filename>, metadata: {...} }
+
+    The endpoint can return fields like:
+      url, webViewLink, webContentLink, file_id
+    """
+    result = {
+        'success': False,
+        'url': None,
+        'file_id': None,
+        'folder_url': GOOGLE_DRIVE_FOLDER_URL,
+        'message': ''
+    }
+
+    if not GOOGLE_DRIVE_UPLOAD_URL:
+        result['message'] = 'GOOGLE_DRIVE_UPLOAD_URL not configured'
+        return result
+
+    try:
+        if 'base64,' in image_base64:
+            image_base64 = image_base64.split('base64,')[1]
+
+        payload = {
+            'image': image_base64,
+            'name': name or f"generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+            'metadata': metadata or {}
+        }
+
+        response = requests.post(GOOGLE_DRIVE_UPLOAD_URL, json=payload, timeout=45)
+        if response.status_code != 200:
+            result['message'] = f'HTTP {response.status_code}'
+            return result
+
+        data = response.json() if response.content else {}
+        drive_url = data.get('url') or data.get('webViewLink') or data.get('webContentLink')
+
+        result.update({
+            'success': bool(data.get('success', False) or drive_url),
+            'url': drive_url,
+            'file_id': data.get('file_id') or data.get('id') or data.get('fileId'),
+            'folder_url': data.get('folder_url') or GOOGLE_DRIVE_FOLDER_URL,
+            'message': data.get('message', '')
+        })
+
+        if result['success']:
+            logger.info(f"[Drive] Image uploaded: {result['url']}")
+        else:
+            logger.warning(f"[Drive] Upload response without success/url: {data}")
+    except Exception as e:
+        result['message'] = 'Upload failed'
+        logger.warning(f"[Drive] Upload failed: {e}")
+
+    return result
 
 
 def save_to_mongodb(image_data: Dict[str, Any]) -> Optional[str]:
@@ -171,8 +293,13 @@ def store_generated_image(
     result = {
         'success': False,
         'imgbb_url': None,
+        'drive_url': None,
+        'drive_file_id': None,
+        'drive_folder_url': GOOGLE_DRIVE_FOLDER_URL,
         'mongodb_id': None,
-        'firebase_id': None
+        'firebase_id': None,
+        'saved_to_mongodb': False,
+        'saved_to_firebase': False
     }
     
     # Upload to ImgBB
@@ -180,10 +307,25 @@ def store_generated_image(
     if imgbb_url:
         result['imgbb_url'] = imgbb_url
         result['success'] = True
+
+    drive_result = upload_to_drive(
+        image_base64=image_base64,
+        name=(metadata or {}).get('filename'),
+        metadata=metadata or {}
+    )
+    if drive_result.get('success'):
+        result['drive_url'] = drive_result.get('url')
+        result['drive_file_id'] = drive_result.get('file_id')
+        result['drive_folder_url'] = drive_result.get('folder_url') or GOOGLE_DRIVE_FOLDER_URL
+        result['success'] = True
     
     # Prepare metadata
     image_metadata = {
         'url': imgbb_url,
+        'cloud_url': imgbb_url,
+        'drive_url': result['drive_url'],
+        'drive_file_id': result['drive_file_id'],
+        'drive_folder_url': result['drive_folder_url'],
         'prompt': prompt,
         'negative_prompt': negative_prompt,
         'source': 'comfyui',
@@ -191,16 +333,16 @@ def store_generated_image(
     }
     
     # Save to MongoDB
-    if imgbb_url:
-        mongo_id = save_to_mongodb(image_metadata.copy())
-        if mongo_id:
-            result['mongodb_id'] = mongo_id
+    mongo_id = save_to_mongodb(image_metadata.copy())
+    if mongo_id:
+        result['mongodb_id'] = mongo_id
+        result['saved_to_mongodb'] = True
     
     # Save to Firebase
-    if imgbb_url:
-        firebase_id = save_to_firebase(image_metadata.copy())
-        if firebase_id:
-            result['firebase_id'] = firebase_id
+    firebase_id = save_to_firebase(image_metadata.copy())
+    if firebase_id:
+        result['firebase_id'] = firebase_id
+        result['saved_to_firebase'] = True
     
     logger.info(f"[ImageStorage] Storage result: {result}")
     return result

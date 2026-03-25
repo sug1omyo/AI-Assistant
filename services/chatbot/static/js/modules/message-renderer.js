@@ -43,6 +43,26 @@ export class MessageRenderer {
 
         this.messageHistory = new Map(); // Store message edit history
         this.initMarked();
+        this.bindGlobalEditDelegation();
+    }
+
+    bindGlobalEditDelegation() {
+        if (window.__editDelegationBound) return;
+        window.__editDelegationBound = true;
+
+        document.addEventListener('click', (e) => {
+            const editBtn = e.target.closest('.edit-btn, .edit-message-btn');
+            if (!editBtn) return;
+
+            const messageDiv = editBtn.closest('.message.user');
+            if (!messageDiv) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const textContent = messageDiv.querySelector('.message-text')?.textContent || '';
+            this.showEditChatTool(messageDiv, textContent);
+        });
     }
 
     /**
@@ -477,7 +497,7 @@ export class MessageRenderer {
         } else {
             // Edit button for user messages
             const editBtn = this.createActionButton('edit-btn', 'pencil', 'Edit');
-            editBtn.onclick = () => this.showEditForm(messageDiv, content);
+            editBtn.onclick = () => this.showEditChatTool(messageDiv, content);
             actionsDiv.appendChild(editBtn);
             
             // More options button
@@ -487,6 +507,13 @@ export class MessageRenderer {
         }
         
         contentDiv.appendChild(actionsDiv);
+    }
+
+    /**
+     * Open Edit Chat tool
+     */
+    showEditChatTool(messageDiv, originalContent) {
+        this.showEditForm(messageDiv, originalContent, true);
     }
 
     /**
@@ -667,8 +694,12 @@ export class MessageRenderer {
         const isUser = messageDiv.classList.contains('user');
         const content = messageDiv.querySelector('.message-text')?.textContent || '';
         
+        // Remove existing popup before opening a new one
+        document.querySelectorAll('.message-options-menu').forEach(el => el.remove());
+
         const menu = document.createElement('div');
-        menu.className = 'message-options-menu';
+        menu.className = 'message-options-menu message-more-popup';
+        const lang = localStorage.getItem('chatbot_language') || 'vi';
         menu.innerHTML = `
             <button class="option-item" data-action="copy">
                 <span>📋</span> Copy message
@@ -678,16 +709,40 @@ export class MessageRenderer {
                 <span>📤</span> Export to file
             </button>
             ` : ''}
+            <button class="option-item" data-action="fork">
+                <span>🔀</span> ${lang === 'vi' ? 'Tách nhánh từ đây' : 'Fork from here'}
+            </button>
             <button class="option-item" data-action="delete">
                 <span>🗑️</span> Delete message
             </button>
         `;
-        
-        // Position menu
-        const rect = button.getBoundingClientRect();
+
+        // Position menu (below button, clamp within viewport)
         menu.style.position = 'fixed';
-        menu.style.top = `${rect.bottom + 5}px`;
-        menu.style.left = `${rect.left - 100}px`;
+        menu.style.visibility = 'hidden';
+        document.body.appendChild(menu);
+
+        const rect = button.getBoundingClientRect();
+        const menuRect = menu.getBoundingClientRect();
+        const margin = 10;
+
+        let top = rect.bottom + 8;
+        let left = rect.right - menuRect.width;
+
+        if (left < margin) left = margin;
+        if (left + menuRect.width > window.innerWidth - margin) {
+            left = window.innerWidth - menuRect.width - margin;
+        }
+        if (top + menuRect.height > window.innerHeight - margin) {
+            top = rect.top - menuRect.height - 8;
+        }
+        if (top < margin) {
+            top = margin;
+        }
+
+        menu.style.top = `${top}px`;
+        menu.style.left = `${left}px`;
+        menu.style.visibility = 'visible';
         
         // Add event listeners
         menu.querySelectorAll('.option-item').forEach(item => {
@@ -707,8 +762,6 @@ export class MessageRenderer {
                 }
             });
         }, 10);
-        
-        document.body.appendChild(menu);
     }
     
     /**
@@ -721,6 +774,11 @@ export class MessageRenderer {
                 break;
             case 'export':
                 this.exportMessageToFile(content);
+                break;
+            case 'fork':
+                if (typeof window.chatApp?.handleForkSession === 'function') {
+                    window.chatApp.handleForkSession(messageDiv);
+                }
                 break;
             case 'delete':
                 if (confirm('Delete this message?')) {
@@ -813,9 +871,17 @@ export class MessageRenderer {
     /**
      * Show edit form for user message
      */
-    showEditForm(messageDiv, originalContent) {
+    showEditForm(messageDiv, originalContent, asTool = false) {
         // Check if edit form already exists
-        if (messageDiv.querySelector('.edit-form')) {
+        const existingForm = messageDiv.querySelector('.edit-form');
+        if (existingForm) {
+            existingForm.style.display = '';
+            const existingTextarea = existingForm.querySelector('textarea');
+            if (existingTextarea) {
+                existingTextarea.focus();
+                existingTextarea.setSelectionRange(existingTextarea.value.length, existingTextarea.value.length);
+            }
+            existingForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             return;
         }
         
@@ -846,9 +912,135 @@ export class MessageRenderer {
         
         // Create edit form
         const editForm = document.createElement('div');
-        editForm.className = 'edit-form';
+        editForm.className = `edit-form ${asTool ? 'edit-chat-tool' : ''}`;
+
+        const modelSelectSource = document.getElementById('modelSelect');
+        const contextSelectSource = document.getElementById('contextSelect');
+
+        const toolHeader = document.createElement('div');
+        toolHeader.className = 'edit-chat-tool__header';
+        toolHeader.innerHTML = '<span class="edit-chat-tool__title">Edit Chat Tool</span>';
+
+        const toolSettings = document.createElement('div');
+        toolSettings.className = 'edit-chat-tool__settings';
+
+        const modelWrap = document.createElement('label');
+        modelWrap.className = 'edit-chat-tool__field';
+        modelWrap.innerHTML = '<span>Model chat</span>';
+        const modelSelect = document.createElement('select');
+        modelSelect.className = 'edit-chat-tool__select';
+
+        if (modelSelectSource) {
+            modelSelect.innerHTML = modelSelectSource.innerHTML;
+            modelSelect.value = messageDiv.dataset.model || modelSelectSource.value || 'grok';
+        }
+        modelWrap.appendChild(modelSelect);
+
+        // ── Rich Agent dropdown (thinkingMode-style) ──
+        const agentMeta = [
+            { value: 'casual',        icon: 'message-circle', label: 'Casual Chat',  desc: 'Trò chuyện tự nhiên', emoji: '💬' },
+            { value: 'programming',   icon: 'code-2',         label: 'Programming',  desc: 'Hỗ trợ lập trình',    emoji: '💻' },
+            { value: 'creative',      icon: 'palette',        label: 'Creative',     desc: 'Sáng tạo nội dung',   emoji: '🎨' },
+            { value: 'research',      icon: 'search',         label: 'Research',     desc: 'Nghiên cứu chuyên sâu',emoji: '🔬' },
+            { value: 'psychological', icon: 'heart-handshake',label: 'Psychology',   desc: 'Tâm lý & tư vấn',     emoji: '🧘' },
+            { value: 'lifestyle',     icon: 'sparkles',       label: 'Lifestyle',    desc: 'Phong cách sống',      emoji: '🌟' },
+        ];
+
+        const currentAgent = messageDiv.dataset.context || (contextSelectSource ? contextSelectSource.value : 'casual');
+        const currentMeta = agentMeta.find(a => a.value === currentAgent) || agentMeta[0];
+
+        const agentWrap = document.createElement('div');
+        agentWrap.className = 'edit-chat-tool__field edit-chat-tool__agent-field';
+        agentWrap.innerHTML = '<span>Agent chat</span>';
+
+        // Hidden select stays for form value
+        const agentSelect = document.createElement('select');
+        agentSelect.className = 'edit-chat-tool__select';
+        agentSelect.style.display = 'none';
+        if (contextSelectSource) {
+            agentSelect.innerHTML = contextSelectSource.innerHTML;
+            agentSelect.value = currentAgent;
+        }
+
+        // Trigger button
+        const agentBtn = document.createElement('button');
+        agentBtn.type = 'button';
+        agentBtn.className = 'edit-chat-tool__agent-btn';
+        agentBtn.innerHTML = `<span class="edit-agent-icon"><i data-lucide="${currentMeta.icon}" class="lucide"></i></span>`
+            + `<span class="edit-agent-label">${currentMeta.label}</span>`
+            + `<i data-lucide="chevron-down" class="lucide edit-agent-chevron"></i>`;
+
+        // Dropdown panel
+        const agentDrop = document.createElement('div');
+        agentDrop.className = 'edit-agent-dropdown model-dropdown hidden';
+        const groupDiv = document.createElement('div');
+        groupDiv.className = 'model-dropdown__group';
+        groupDiv.innerHTML = '<div class="model-dropdown__group-label">Agent</div>';
+
+        agentMeta.forEach(m => {
+            const item = document.createElement('div');
+            item.className = `model-dropdown__item edit-agent-option${m.value === currentAgent ? ' active' : ''}`;
+            item.dataset.value = m.value;
+            item.innerHTML =
+                `<span class="model-dropdown__item-icon"><i data-lucide="${m.icon}" class="lucide"></i></span>`
+                + `<div class="model-dropdown__item-info">`
+                +   `<div class="model-dropdown__item-name">${m.emoji} ${m.label}</div>`
+                +   `<div class="model-dropdown__item-desc">${m.desc}</div>`
+                + `</div>`;
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                agentSelect.value = m.value;
+                agentBtn.querySelector('.edit-agent-icon').innerHTML = `<i data-lucide="${m.icon}" class="lucide"></i>`;
+                agentBtn.querySelector('.edit-agent-label').textContent = m.label;
+                agentDrop.querySelectorAll('.edit-agent-option').forEach(o => o.classList.remove('active'));
+                item.classList.add('active');
+                agentDrop.classList.add('hidden');
+                agentDrop.classList.remove('open');
+                if (window.lucide) lucide.createIcons({ nodes: [agentBtn] });
+            });
+            groupDiv.appendChild(item);
+        });
+        agentDrop.appendChild(groupDiv);
+
+        // Toggle dropdown
+        agentBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = !agentDrop.classList.contains('hidden');
+            agentDrop.classList.toggle('hidden', isOpen);
+            agentDrop.classList.toggle('open', !isOpen);
+        });
+
+        // Close on outside click
+        const closeAgent = (e) => {
+            if (!agentWrap.contains(e.target)) {
+                agentDrop.classList.add('hidden');
+                agentDrop.classList.remove('open');
+            }
+        };
+        document.addEventListener('click', closeAgent);
+        // Cleanup when form removed
+        const agentObserver = new MutationObserver(() => {
+            if (!document.contains(agentWrap)) {
+                document.removeEventListener('click', closeAgent);
+                agentObserver.disconnect();
+            }
+        });
+        agentObserver.observe(messageDiv, { childList: true, subtree: true });
+
+        agentWrap.appendChild(agentSelect);
+        agentWrap.appendChild(agentBtn);
+        agentWrap.appendChild(agentDrop);
+
+        toolSettings.appendChild(modelWrap);
+        toolSettings.appendChild(agentWrap);
+
+        // Initialize lucide icons after DOM ready
+        requestAnimationFrame(() => {
+            if (window.lucide) lucide.createIcons({ nodes: [agentWrap] });
+        });
         
         const textarea = document.createElement('textarea');
+        textarea.className = 'edit-chat-tool__textarea';
         textarea.value = originalContent;
         textarea.placeholder = 'Chỉnh sửa tin nhắn...';
         
@@ -860,7 +1052,41 @@ export class MessageRenderer {
         saveBtn.textContent = '💾 Lưu & Tạo lại response';
         saveBtn.onclick = () => {
             const newContent = textarea.value.trim();
+            console.log('[Edit] Save clicked', {
+                messageId,
+                currentVersion: messageDiv.dataset.currentVersion,
+                hasCallback: !!this.onEditSave,
+                hasChatAppFallback: !!(window.chatApp && typeof window.chatApp.handleEditSave === 'function')
+            });
+
+            // Apply selected model/agent globally for next regeneration
+            if (modelSelectSource && modelSelect.value) {
+                modelSelectSource.value = modelSelect.value;
+                modelSelectSource.dispatchEvent(new Event('change'));
+
+                const modelLabel = document.getElementById('modelSelectorLabel');
+                if (modelLabel) {
+                    const selectedOption = modelSelect.options[modelSelect.selectedIndex];
+                    modelLabel.textContent = selectedOption ? selectedOption.textContent : modelSelect.value;
+                }
+            }
+
+            if (contextSelectSource && agentSelect.value) {
+                contextSelectSource.value = agentSelect.value;
+                contextSelectSource.dispatchEvent(new Event('change'));
+            }
+
+            // Persist chosen model/agent on this message
+            if (modelSelect.value) messageDiv.dataset.model = modelSelect.value;
+            if (agentSelect.value) messageDiv.dataset.context = agentSelect.value;
+
             if (newContent && newContent !== originalContent) {
+                const previousVersion = parseInt(messageDiv.dataset.currentVersion || '0', 10);
+                if (window.chatApp && typeof window.chatApp.syncConversationBranches === 'function' && !Number.isNaN(previousVersion)) {
+                    // Capture current downstream branch before creating a new version.
+                    window.chatApp.syncConversationBranches();
+                }
+
                 // Find and save old assistant response before removing
                 let nextMsg = messageDiv.nextElementSibling;
                 while (nextMsg && !nextMsg.classList.contains('assistant')) {
@@ -893,8 +1119,17 @@ export class MessageRenderer {
                 }
                 
                 // Regenerate response with edited message
-                if (window.chatApp && this.onEditSave) {
+                if (this.onEditSave) {
                     this.onEditSave(messageDiv, newContent, originalContent);
+                } else if (window.chatApp && typeof window.chatApp.handleEditSave === 'function') {
+                    // Fallback for edge cases where callback binding is missing on restored sessions
+                    window.chatApp.handleEditSave(messageDiv, newContent, originalContent);
+                } else {
+                    // Avoid silent failure: user can see that regenerate did not run
+                    console.error('[Edit] Missing onEditSave callback and fallback handler.');
+                    if (window.chatApp?.uiUtils?.showAlert) {
+                        window.chatApp.uiUtils.showAlert('Khong the tao lai response: callback Edit chua duoc khoi tao. Hay reload trang.');
+                    }
                 }
             }
         };
@@ -906,6 +1141,8 @@ export class MessageRenderer {
         
         buttonsDiv.appendChild(saveBtn);
         buttonsDiv.appendChild(cancelBtn);
+        editForm.appendChild(toolHeader);
+        editForm.appendChild(toolSettings);
         editForm.appendChild(textarea);
         editForm.appendChild(buttonsDiv);
         
@@ -963,7 +1200,7 @@ export class MessageRenderer {
         // Back button
         const backBtn = document.createElement('button');
         backBtn.className = 'version-nav-btn';
-        backBtn.innerHTML = '◀';
+        backBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
         backBtn.title = 'Previous version';
         backBtn.disabled = currentIdx === 0;
         backBtn.onclick = () => this.navigateVersion(messageDiv, currentIdx - 1);
@@ -976,7 +1213,7 @@ export class MessageRenderer {
         // Forward button
         const forwardBtn = document.createElement('button');
         forwardBtn.className = 'version-nav-btn';
-        forwardBtn.innerHTML = '▶';
+        forwardBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
         forwardBtn.title = 'Next version';
         forwardBtn.disabled = currentIdx === total - 1;
         forwardBtn.onclick = () => this.navigateVersion(messageDiv, currentIdx + 1);
@@ -997,53 +1234,87 @@ export class MessageRenderer {
         const history = this.getMessageHistory(messageId);
         
         if (newIndex < 0 || newIndex >= history.length) return;
+
+        const oldIndex = parseInt(messageDiv.dataset.currentVersion || '0');
+        const direction = newIndex > oldIndex ? 1 : -1; // 1 = forward, -1 = back
         
-        // Update user message content
+        // ── Smooth user-message crossfade ──
         const textDiv = messageDiv.querySelector('.message-text');
-        textDiv.textContent = history[newIndex].userContent;
+        if (textDiv) {
+            textDiv.style.transition = 'none';
+            textDiv.style.opacity = '1';
+            textDiv.style.transform = 'translateX(0)';
+            // Force reflow
+            void textDiv.offsetWidth;
+            textDiv.style.transition = 'opacity .22s ease, transform .22s ease';
+            textDiv.style.opacity = '0';
+            textDiv.style.transform = `translateX(${direction * -18}px)`;
+
+            setTimeout(() => {
+                textDiv.textContent = history[newIndex].userContent;
+                textDiv.style.transform = `translateX(${direction * 18}px)`;
+                // Force reflow
+                void textDiv.offsetWidth;
+                textDiv.style.opacity = '1';
+                textDiv.style.transform = 'translateX(0)';
+            }, 200);
+        }
         
-        // Update or create assistant response
+        // ── Smooth assistant-message crossfade ──
         let assistantMsg = messageDiv.nextElementSibling;
         while (assistantMsg && !assistantMsg.classList.contains('assistant')) {
             assistantMsg = assistantMsg.nextElementSibling;
         }
         
-        // Check if this version has a response (not empty string)
         const hasResponse = history[newIndex].assistantResponse && history[newIndex].assistantResponse.trim() !== '';
         
-        if (hasResponse) {
-            if (assistantMsg) {
-                // Update existing assistant message
-                const assistantTextDiv = assistantMsg.querySelector('.message-text');
-                assistantTextDiv.innerHTML = history[newIndex].assistantResponse;
-                
-                // Re-highlight code blocks
-                if (typeof hljs !== 'undefined') {
-                    assistantTextDiv.querySelectorAll('pre code').forEach((block) => {
-                        hljs.highlightElement(block);
-                    });
-                }
-            } else {
-                // Create new assistant message with full structure
-                const chatContainer = messageDiv.parentElement;
-                const model = messageDiv.dataset.model || 'gemini';
-                const context = messageDiv.dataset.context || 'casual';
-                const timestamp = messageDiv.dataset.timestamp || new Date().toLocaleTimeString('vi-VN');
-                
-                // Use addMessage to create properly formatted assistant message
-                const tempContainer = document.createElement('div');
-                this.addMessage(tempContainer, history[newIndex].assistantResponse, false, model, context, timestamp);
-                
-                // Insert the created message after user message
-                const newAssistantMsg = tempContainer.firstChild;
-                messageDiv.parentNode.insertBefore(newAssistantMsg, messageDiv.nextSibling);
+        if (hasResponse && assistantMsg) {
+            const assistantTextDiv = assistantMsg.querySelector('.message-text');
+            if (assistantTextDiv) {
+                assistantTextDiv.style.transition = 'none';
+                assistantTextDiv.style.opacity = '1';
+                assistantTextDiv.style.transform = 'translateX(0)';
+                void assistantTextDiv.offsetWidth;
+                assistantTextDiv.style.transition = 'opacity .22s ease, transform .22s ease';
+                assistantTextDiv.style.opacity = '0';
+                assistantTextDiv.style.transform = `translateX(${direction * -18}px)`;
+
+                setTimeout(() => {
+                    assistantTextDiv.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(history[newIndex].assistantResponse) : history[newIndex].assistantResponse;
+                    if (typeof hljs !== 'undefined') {
+                        assistantTextDiv.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+                    }
+                    assistantTextDiv.style.transform = `translateX(${direction * 18}px)`;
+                    void assistantTextDiv.offsetWidth;
+                    assistantTextDiv.style.opacity = '1';
+                    assistantTextDiv.style.transform = 'translateX(0)';
+                }, 200);
             }
+        } else if (hasResponse && !assistantMsg) {
+            const chatContainer = messageDiv.parentElement;
+            const model = messageDiv.dataset.model || 'gemini';
+            const context = messageDiv.dataset.context || 'casual';
+            const timestamp = messageDiv.dataset.timestamp || new Date().toLocaleTimeString('vi-VN');
+            
+            const tempContainer = document.createElement('div');
+            this.addMessage(tempContainer, history[newIndex].assistantResponse, false, model, context, timestamp);
+            const newAssistantMsg = tempContainer.firstChild;
+            newAssistantMsg.style.opacity = '0';
+            newAssistantMsg.style.transform = `translateX(${direction * 18}px)`;
+            messageDiv.parentNode.insertBefore(newAssistantMsg, messageDiv.nextSibling);
+            void newAssistantMsg.offsetWidth;
+            newAssistantMsg.style.transition = 'opacity .28s ease, transform .28s ease';
+            newAssistantMsg.style.opacity = '1';
+            newAssistantMsg.style.transform = 'translateX(0)';
         }
-        // Note: If no response in this version, keep the current assistant message as-is
-        // Don't remove it - user might be navigating through versions temporarily
         
         // Update current version
         messageDiv.dataset.currentVersion = newIndex.toString();
+
+        // Restore downstream conversation branch for selected version (Grok-like branching).
+        if (window.chatApp && typeof window.chatApp.applyVersionBranch === 'function') {
+            window.chatApp.applyVersionBranch(messageDiv, newIndex);
+        }
         
         // Refresh version indicator
         this.updateVersionIndicator(messageDiv);
@@ -1124,7 +1395,7 @@ export class MessageRenderer {
                 // User message actions
                 const editBtn = actionsDiv.querySelector('.edit-btn');
                 if (editBtn) {
-                    editBtn.onclick = () => this.showEditForm(messageDiv, content);
+                    editBtn.onclick = () => this.showEditChatTool(messageDiv, content);
                 }
                 
                 const moreBtn = actionsDiv.querySelector('.more-btn');
@@ -1140,7 +1411,7 @@ export class MessageRenderer {
             if (!messageDiv) return;
             
             const currentVersion = parseInt(messageDiv.dataset.currentVersion || '0');
-            const isBack = btn.innerHTML === '◀';
+            const isBack = (btn.title || '').toLowerCase().includes('previous');
             const newIndex = isBack ? currentVersion - 1 : currentVersion + 1;
             
             btn.onclick = () => this.navigateVersion(messageDiv, newIndex);
@@ -1150,7 +1421,7 @@ export class MessageRenderer {
         chatContainer.querySelectorAll('.edit-message-btn').forEach(btn => {
             const messageDiv = btn.closest('.message');
             const textContent = messageDiv.querySelector('.message-text')?.textContent || '';
-            btn.onclick = () => this.showEditForm(messageDiv, textContent);
+            btn.onclick = () => this.showEditChatTool(messageDiv, textContent);
         });
         
         chatContainer.querySelectorAll('.copy-message-btn').forEach(btn => {

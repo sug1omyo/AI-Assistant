@@ -117,6 +117,33 @@ def _get_storage() -> ImageStorage:
     return _storage
 
 
+def _save_to_gallery(saved: dict, prompt: str, provider: str, model: str,
+                     conversation_id: str, source: str = 'image_gen_v2') -> None:
+    """Bridge: persist image metadata to MongoDB so it appears in the main gallery."""
+    if saved.get('error'):
+        return
+    try:
+        from core.image_storage import save_to_mongodb
+        from datetime import datetime
+        import os
+        doc = {
+            'url': saved.get('url', ''),
+            'local_path': saved.get('url', ''),
+            'filename': os.path.basename(saved.get('local_path', '')),
+            'prompt': prompt,
+            'provider': provider,
+            'model': model,
+            'source': source,
+            'conversation_id': conversation_id,
+            'session_id': conversation_id,
+            'created_at': datetime.utcnow(),
+            'image_id': saved.get('image_id', ''),
+        }
+        save_to_mongodb(doc)
+    except Exception as e:
+        logger.warning(f'[image_gen] gallery sync failed (non-fatal): {e}')
+
+
 # â”€â”€ Main generation endpoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @image_gen_bp.route("/api/image-gen/generate", methods=["POST"])
@@ -191,6 +218,7 @@ def generate_image():
             metadata=result.metadata,
         )
         saved_images.append(saved)
+        _save_to_gallery(saved, prompt, result.provider, result.model, conversation_id)
 
     for img_url in result.images_url:
         saved = storage.save(
@@ -202,6 +230,7 @@ def generate_image():
             metadata=result.metadata,
         )
         saved_images.append(saved)
+        _save_to_gallery(saved, prompt, result.provider, result.model, conversation_id)
 
     # Update session
     img_session.add_generation(
@@ -318,6 +347,7 @@ def edit_image():
             conversation_id=conversation_id,
         )
         saved_images.append(saved)
+        _save_to_gallery(saved, prompt, result.provider, result.model, conversation_id, source='image_gen_v2_edit')
     for img_url in result.images_url:
         saved = storage.save(
             image_url=img_url, prompt=prompt,
@@ -325,6 +355,7 @@ def edit_image():
             conversation_id=conversation_id,
         )
         saved_images.append(saved)
+        _save_to_gallery(saved, prompt, result.provider, result.model, conversation_id, source='image_gen_v2_edit')
 
     # Update session
     img_session.add_generation(
@@ -372,6 +403,56 @@ def delete_image(image_id: str):
     if deleted:
         return jsonify({"success": True, "message": f"Deleted {image_id}"})
     return jsonify({"error": "Image not found"}), 404
+
+
+@image_gen_bp.route("/api/image-gen/save/<image_id>", methods=["POST"])
+def save_image_to_cloud(image_id: str):
+    """Upload a stored image to Google Drive + ImgBB and save to MongoDB gallery."""
+    import base64 as _b64
+    storage = _get_storage()
+
+    img_bytes = storage.get(image_id)
+    if not img_bytes:
+        return jsonify({"error": "Image not found"}), 404
+
+    meta = storage.get_metadata(image_id) or {}
+
+    try:
+        from core.image_storage import store_generated_image
+        image_b64 = _b64.b64encode(img_bytes).decode("utf-8")
+        store_meta = {
+            "filename": f"{image_id}.png",
+            "prompt": meta.get("prompt", ""),
+            "provider": meta.get("provider", ""),
+            "model": meta.get("model", ""),
+            "image_id": image_id,
+            "source": "image_gen_v2",
+        }
+        result = store_generated_image(
+            image_base64=image_b64,
+            prompt=meta.get("prompt", ""),
+            metadata=store_meta,
+        )
+        return jsonify({
+            "success": True,
+            "drive_url": result.get("drive_url"),
+            "imgbb_url": result.get("imgbb_url"),
+            "drive_folder_url": result.get("drive_folder_url"),
+            "mongodb_id": str(result.get("mongodb_id", "")),
+        })
+    except Exception as e:
+        logger.error(f"[image_gen] save_to_cloud failed for {image_id}: {e}", exc_info=True)
+        return jsonify({"error": "Failed to save image to cloud"}), 500
+
+
+@image_gen_bp.route("/api/image-gen/meta/<image_id>", methods=["GET"])
+def get_image_meta(image_id: str):
+    """Return stored metadata for an image."""
+    storage = _get_storage()
+    meta = storage.get_metadata(image_id)
+    if not meta:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(meta)
 
 
 # â”€â”€ Gallery â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -33,7 +33,61 @@ def get_session_id():
     return session['gallery_session_id']
 
 
+def _to_iso(value):
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    return value or ''
+
+
+def _load_local_image_record(filename: str):
+    filepath = IMAGE_STORAGE_DIR / filename
+    if not filepath.exists():
+        return None, None
+    metadata_file = filepath.with_suffix('.json')
+    payload = {}
+    if metadata_file.exists():
+        try:
+            with open(metadata_file, 'r', encoding='utf-8') as f:
+                payload = json.load(f)
+        except Exception:
+            payload = {}
+    return filepath, payload
+
+
+def _check_db_presence(filename: str):
+    status = {
+        'mongodb': False,
+        'firebase': False,
+        'mongodb_id': None,
+        'firebase_id': None,
+    }
+
+    try:
+        from core.image_storage import images_collection
+        if images_collection is not None:
+            doc = images_collection.find_one({'filename': filename}, {'_id': 1})
+            if doc:
+                status['mongodb'] = True
+                status['mongodb_id'] = str(doc.get('_id'))
+    except Exception as e:
+        logger.warning(f"[ImageInfo] Mongo presence check failed: {e}")
+
+    try:
+        from core.image_storage import firebase_db
+        if firebase_db is not None:
+            docs = firebase_db.collection('generated_images').where('filename', '==', filename).limit(1).stream()
+            for doc in docs:
+                status['firebase'] = True
+                status['firebase_id'] = doc.id
+                break
+    except Exception as e:
+        logger.warning(f"[ImageInfo] Firebase presence check failed: {e}")
+
+    return status
+
+
 @images_bp.route('/api/save-image', methods=['POST'])
+@images_bp.route('/api/save-generated-image', methods=['POST'])
 def save_image():
     """Save generated image to disk and upload to cloud with session tracking"""
     try:
@@ -61,11 +115,16 @@ def save_image():
         with open(filepath, 'wb') as f:
             f.write(image_data)
         
-        # Add session_id to metadata for cloud storage
+        # Add filename/session_id to metadata for cloud storage
+        metadata['filename'] = filename
         metadata['session_id'] = session_id
         
         # Upload to cloud (ImgBB + MongoDB/Firebase)
         cloud_url = None
+        drive_url = None
+        drive_file_id = None
+        mongodb_saved = False
+        firebase_saved = False
         try:
             from core.image_storage import store_generated_image
             storage_result = store_generated_image(
@@ -76,6 +135,10 @@ def save_image():
             )
             if storage_result.get('success'):
                 cloud_url = storage_result.get('imgbb_url')
+                drive_url = storage_result.get('drive_url')
+                drive_file_id = storage_result.get('drive_file_id')
+                mongodb_saved = bool(storage_result.get('saved_to_mongodb'))
+                firebase_saved = bool(storage_result.get('saved_to_firebase'))
         except Exception as e:
             logger.warning(f"[SaveImage] Cloud upload failed: {e}")
         
@@ -86,8 +149,14 @@ def save_image():
                 'filename': filename,
                 'created_at': datetime.now().isoformat(),
                 'cloud_url': cloud_url,
+                'drive_url': drive_url,
+                'drive_file_id': drive_file_id,
                 'session_id': session_id,  # Track session for privacy
-                'metadata': metadata
+                'metadata': metadata,
+                'db_status': {
+                    'mongodb': mongodb_saved,
+                    'firebase': firebase_saved,
+                }
             }, f, ensure_ascii=False, indent=2)
         
         image_url = f"/storage/images/{filename}"
@@ -97,12 +166,18 @@ def save_image():
             'filename': filename,
             'url': image_url,
             'cloud_url': cloud_url,
+            'drive_url': drive_url,
+            'drive_file_id': drive_file_id,
+            'db_status': {
+                'mongodb': mongodb_saved,
+                'firebase': firebase_saved,
+            },
             'path': str(filepath)
         })
         
     except Exception as e:
         logger.error(f"Error saving image: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to save image'}), 500
 
 
 @images_bp.route('/storage/images/<filename>')
@@ -254,6 +329,7 @@ def get_gallery():
                         created = created.isoformat()
                     
                     cloud_url = doc.get('cloud_url') or doc.get('url')
+                    drive_url = doc.get('drive_url')
                     local_path = doc.get('local_path', '')
                     filename = doc.get('filename', '')
                     
@@ -266,10 +342,17 @@ def get_gallery():
                         'url': display_url,
                         'path': display_url,
                         'cloud_url': cloud_url,
+                        'drive_url': drive_url,
+                        'share_url': drive_url or cloud_url or local_path,
                         'local_path': local_path,
                         'created_at': created,
                         'created': created,
                         'prompt': doc.get('prompt', 'No prompt'),
+                        'creator': doc.get('creator') or doc.get('session_id') or 'unknown',
+                        'db_status': {
+                            'mongodb': True,
+                            'firebase': bool(doc.get('firebase_id')),
+                        },
                         'metadata': {
                             'prompt': doc.get('prompt', ''),
                             'negative_prompt': doc.get('negative_prompt', ''),
@@ -283,6 +366,9 @@ def get_gallery():
                             'vae': doc.get('vae', ''),
                             'lora_models': doc.get('lora_models', ''),
                             'denoising_strength': doc.get('denoising_strength', ''),
+                            'drive_url': drive_url,
+                            'cloud_url': cloud_url,
+                            'filename': filename,
                         }
                     })
                 
@@ -292,10 +378,11 @@ def get_gallery():
         except Exception as mongo_err:
             logger.warning(f"[Gallery] MongoDB fetch failed, falling back to local: {mongo_err}")
         
-        # â”€â”€ Fallback: local disk â”€â”€
+        # ── Fallback: local disk (flat + date-based subdirs from image_gen_v2) ──
         if not images:
-            for img_file in IMAGE_STORAGE_DIR.glob('*.png'):
-                metadata_file = img_file.with_suffix('.json')
+            for img_file in IMAGE_STORAGE_DIR.rglob('*.png'):
+                # Support both flat (.json) and date-based subdirs (.meta.json)
+                metadata_file = img_file.with_suffix('.meta.json') if not img_file.with_suffix('.json').exists() else img_file.with_suffix('.json')
                 metadata = {}
                 if metadata_file.exists():
                     try:
@@ -303,22 +390,33 @@ def get_gallery():
                             metadata = json.load(f)
                     except:
                         pass
-                
+
                 image_session_id = metadata.get('session_id')
                 if not show_all:
                     if image_session_id is not None and image_session_id != current_session_id:
                         continue
-                
+
+                # Build a servable URL: image_gen_v2 images served via /api/image-gen/images/<id>
+                image_id = metadata.get('image_id', '')
+                if image_id:
+                    serve_url = f"/api/image-gen/images/{image_id}"
+                else:
+                    serve_url = f"/storage/images/{img_file.name}"
+
                 images.append({
                     'filename': img_file.name,
-                    'url': f"/storage/images/{img_file.name}",
-                    'path': f"/storage/images/{img_file.name}",
+                    'url': serve_url,
+                    'path': serve_url,
                     'cloud_url': metadata.get('cloud_url'),
-                    'local_path': f"/storage/images/{img_file.name}",
+                    'drive_url': metadata.get('drive_url'),
+                    'share_url': metadata.get('drive_url') or metadata.get('cloud_url') or serve_url,
+                    'local_path': serve_url,
                     'created_at': metadata.get('created_at', ''),
                     'created': metadata.get('created_at', ''),
                     'prompt': metadata.get('prompt', 'No prompt'),
-                    'metadata': metadata
+                    'creator': metadata.get('creator') or metadata.get('session_id') or 'local-session',
+                    'db_status': metadata.get('db_status', {'mongodb': False, 'firebase': False}),
+                    'metadata': metadata.get('metadata', metadata)
                 })
             
             images.sort(key=lambda x: x.get('created_at', ''), reverse=True)
@@ -372,6 +470,139 @@ def get_cloud_gallery():
         return jsonify({'error': 'Failed to get cloud gallery'}), 500
 
 
+@images_bp.route('/api/gallery/image-info', methods=['GET'])
+def get_image_info():
+    """Get full metadata and database status for one image."""
+    try:
+        filename = request.args.get('filename', '').strip()
+        if not filename or not re.match(r'^[a-zA-Z0-9_\-\.]+$', filename):
+            return jsonify({'error': 'Invalid filename'}), 400
+
+        filepath, local_payload = _load_local_image_record(filename)
+        db_status = _check_db_presence(filename)
+
+        # Try enrich from MongoDB document if available
+        mongo_doc = None
+        try:
+            from core.image_storage import images_collection
+            if images_collection is not None:
+                mongo_doc = images_collection.find_one({'filename': filename})
+        except Exception as e:
+            logger.warning(f"[ImageInfo] Mongo fetch failed: {e}")
+
+        created_at = ''
+        if mongo_doc:
+            created_at = _to_iso(mongo_doc.get('created_at'))
+        elif local_payload:
+            created_at = local_payload.get('created_at', '')
+        elif filepath:
+            created_at = datetime.fromtimestamp(filepath.stat().st_mtime).isoformat()
+
+        metadata = {}
+        if local_payload:
+            metadata = local_payload.get('metadata', local_payload)
+        if mongo_doc:
+            metadata = {
+                **metadata,
+                'prompt': mongo_doc.get('prompt', metadata.get('prompt', '')),
+                'negative_prompt': mongo_doc.get('negative_prompt', metadata.get('negative_prompt', '')),
+                'model': mongo_doc.get('model', metadata.get('model', '')),
+                'sampler': mongo_doc.get('sampler', metadata.get('sampler', '')),
+                'steps': mongo_doc.get('steps', metadata.get('steps', '')),
+                'cfg_scale': mongo_doc.get('cfg_scale', metadata.get('cfg_scale', '')),
+                'width': mongo_doc.get('width', metadata.get('width', '')),
+                'height': mongo_doc.get('height', metadata.get('height', '')),
+                'seed': mongo_doc.get('seed', metadata.get('seed', '')),
+                'vae': mongo_doc.get('vae', metadata.get('vae', '')),
+                'lora_models': mongo_doc.get('lora_models', metadata.get('lora_models', '')),
+                'denoising_strength': mongo_doc.get('denoising_strength', metadata.get('denoising_strength', '')),
+            }
+
+        cloud_url = (mongo_doc or {}).get('cloud_url') or (mongo_doc or {}).get('url') or (local_payload or {}).get('cloud_url')
+        drive_url = (mongo_doc or {}).get('drive_url') or (local_payload or {}).get('drive_url')
+        local_url = f"/storage/images/{filename}" if filepath else None
+
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'creator': (mongo_doc or {}).get('creator') or (local_payload or {}).get('session_id') or 'unknown',
+            'created_at': created_at,
+            'metadata': metadata,
+            'links': {
+                'local_url': local_url,
+                'cloud_url': cloud_url,
+                'drive_url': drive_url,
+                'share_url': drive_url or cloud_url or local_url,
+                'drive_folder_url': os.getenv('GOOGLE_DRIVE_FOLDER_URL', 'https://drive.google.com/drive/folders/11MN5m72gl84LsP1NMfBjeX9YAzsIlRxz?usp=sharing'),
+            },
+            'db_status': db_status,
+        })
+    except Exception as e:
+        logger.error(f"[ImageInfo] Error: {e}")
+        return jsonify({'error': 'Failed to load image info'}), 500
+
+
+@images_bp.route('/api/gallery/upload-db', methods=['POST'])
+def upload_image_to_db():
+    """Manual upload one local image + full metadata to cloud/db."""
+    try:
+        data = request.get_json(silent=True) or {}
+        filename = str(data.get('filename', '')).strip()
+        if not filename or not re.match(r'^[a-zA-Z0-9_\-\.]+$', filename):
+            return jsonify({'error': 'Invalid filename'}), 400
+
+        filepath, local_payload = _load_local_image_record(filename)
+        if not filepath:
+            return jsonify({'error': 'Image not found locally'}), 404
+
+        with open(filepath, 'rb') as f:
+            image_b64 = base64.b64encode(f.read()).decode('utf-8')
+
+        metadata = local_payload.get('metadata', local_payload if isinstance(local_payload, dict) else {})
+        metadata['filename'] = filename
+        metadata['session_id'] = metadata.get('session_id') or get_session_id()
+
+        from core.image_storage import store_generated_image
+        result = store_generated_image(
+            image_base64=image_b64,
+            prompt=metadata.get('prompt', ''),
+            negative_prompt=metadata.get('negative_prompt', ''),
+            metadata=metadata
+        )
+
+        db_status = {
+            'mongodb': bool(result.get('saved_to_mongodb')),
+            'firebase': bool(result.get('saved_to_firebase')),
+        }
+
+        # Update local metadata snapshot
+        meta_file = filepath.with_suffix('.json')
+        merged_local = {
+            **(local_payload if isinstance(local_payload, dict) else {}),
+            'filename': filename,
+            'created_at': (local_payload or {}).get('created_at', datetime.now().isoformat()),
+            'cloud_url': result.get('imgbb_url') or (local_payload or {}).get('cloud_url'),
+            'drive_url': result.get('drive_url') or (local_payload or {}).get('drive_url'),
+            'drive_file_id': result.get('drive_file_id') or (local_payload or {}).get('drive_file_id'),
+            'db_status': db_status,
+            'metadata': metadata,
+        }
+        with open(meta_file, 'w', encoding='utf-8') as f:
+            json.dump(merged_local, f, ensure_ascii=False, indent=2)
+
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'cloud_url': result.get('imgbb_url'),
+            'drive_url': result.get('drive_url'),
+            'db_status': db_status,
+            'storage_result': result,
+        })
+    except Exception as e:
+        logger.error(f"[UploadDB] Error: {e}")
+        return jsonify({'error': 'Failed to upload to database'}), 500
+
+
 @images_bp.route('/api/upload-imgbb', methods=['POST'])
 def upload_to_imgbb():
     """Upload image to ImgBB"""
@@ -399,4 +630,4 @@ def upload_to_imgbb():
             
     except Exception as e:
         logger.error(f"[UploadImgBB] Error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to upload image'}), 500

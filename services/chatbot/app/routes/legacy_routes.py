@@ -9,6 +9,8 @@ from flask import Blueprint, request, jsonify, session, render_template
 from ..controllers.chat_controller import ChatController
 from ..controllers.conversation_controller import ConversationController
 import logging
+import json
+import os
 
 legacy_bp = Blueprint('legacy', __name__)
 chat_controller = ChatController()
@@ -23,7 +25,16 @@ logger = logging.getLogger(__name__)
 @legacy_bp.route('/')
 def index():
     """Main chatbot page"""
-    return render_template('index.html')
+    firebase_config = json.dumps({
+        "apiKey": os.getenv("FIREBASE_API_KEY", ""),
+        "authDomain": os.getenv("FIREBASE_AUTH_DOMAIN", ""),
+        "projectId": os.getenv("FIREBASE_PROJECT_ID", ""),
+        "storageBucket": os.getenv("FIREBASE_STORAGE_BUCKET", ""),
+        "messagingSenderId": os.getenv("FIREBASE_MESSAGING_SENDER_ID", ""),
+        "appId": os.getenv("FIREBASE_APP_ID", ""),
+        "measurementId": os.getenv("FIREBASE_MEASUREMENT_ID", "")
+    })
+    return render_template('index.html', firebase_config=firebase_config)
 
 
 @legacy_bp.route('/monitor')
@@ -63,7 +74,7 @@ def legacy_chat():
         }), 200
         
     except Exception as e:
-        logger.error(f"Error in legacy chat: {str(e)}")
+        logger.error(f"Error in legacy chat: {str(e)}", exc_info=True)
         return jsonify({'error': 'Failed to process chat message'}), 500
 
 
@@ -95,7 +106,8 @@ def legacy_new_conversation():
         return jsonify(result), 200
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error creating conversation: {str(e)}")
+        return jsonify({'error': 'Failed to create conversation'}), 500
 
 
 @legacy_bp.route('/delete_conversation/<conversation_id>', methods=['DELETE'])
@@ -108,7 +120,8 @@ def legacy_delete_conversation(conversation_id: str):
         )
         return jsonify(result), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error deleting conversation: {str(e)}")
+        return jsonify({'error': 'Failed to delete conversation'}), 500
 
 
 # ============================================================================
@@ -126,7 +139,8 @@ def legacy_list_memories():
         result = controller.list_memories(user_id=user_id)
         return jsonify({'memories': result.get('memories', [])}), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error listing memories: {str(e)}")
+        return jsonify({'error': 'Failed to list memories'}), 500
 
 
 @legacy_bp.route('/save_memory', methods=['POST'])

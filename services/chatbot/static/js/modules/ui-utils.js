@@ -324,6 +324,20 @@ export class UIUtils {
         
         const { sizeInMB, maxSizeMB, percentage, color, sessionCount } = storageInfo;
         
+        // Prevent runtime errors when rendering storage widget.
+        let statusIcon = '🟢';
+        let statusText = 'Good';
+        if (percentage >= 90) {
+            statusIcon = '🔴';
+            statusText = 'Critical';
+        } else if (percentage >= 75) {
+            statusIcon = '🟠';
+            statusText = 'Warning';
+        } else if (percentage >= 50) {
+            statusIcon = '🟡';
+            statusText = 'Moderate';
+        }
+        
         this.elements.storageInfo.innerHTML = `
             <div class="storage-display">
                 <div class="storage-header">
@@ -377,10 +391,12 @@ export class UIUtils {
             if (!session) return '';
             const isActive = id === currentChatId;
             const isPinned = session.pinned || false;
-            const preview = session.messages.length > 0 
-                ? (session.messages[1] || session.messages[0]).replace(/<[^>]*>/g, '').substring(0, 50) + '...'
+            const messages = Array.isArray(session.messages) ? session.messages : [];
+            const firstMsg = messages[1] || messages[0];
+            const preview = messages.length > 0 && typeof firstMsg === 'string'
+                ? firstMsg.replace(/<[^>]*>/g, '').substring(0, 50) + '...'
                 : 'No messages';
-            const msgCount = session.messages.length;
+            const msgCount = messages.length;
             
             return `
                 <div class="sidebar__chat-item ${isActive ? 'active' : ''} ${isPinned ? 'pinned' : ''}" 
@@ -562,7 +578,10 @@ export class UIUtils {
             // Persist
             if (window.chatManager && window.chatManager.chatSessions[chatId]) {
                 window.chatManager.chatSessions[chatId].title = newTitle;
+                window.chatManager.chatSessions[chatId].updatedAt = new Date();
+                window.chatManager.chatSessions[chatId].order = null;
                 window.chatManager.saveSessions();
+                window.dispatchEvent(new Event('chatListNeedsUpdate'));
             }
         };
 

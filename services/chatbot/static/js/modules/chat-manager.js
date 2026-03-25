@@ -12,6 +12,7 @@ export class ChatSession {
         this.messages = [];
         this.attachedFiles = []; // Store uploaded files for this chat session
         this.messageVersions = {}; // Store message edit versions: { messageId: [{content, response, timestamp}] }
+        this.conversationBranches = {}; // Branch snapshots: { messageId: { versionIndex: [messageHTML, ...] } }
         this.pinned = false;  // Pinned chats always appear at top
         this.order = null;    // Custom order (null = auto-sort by updatedAt)
         this.createdAt = new Date();
@@ -47,7 +48,15 @@ export class ChatManager {
                         this.chatSessions[id].messages = session.messages.filter(
                             msg => typeof msg === 'string' && !msg.includes('id="welcomeScreen"')
                         );
+                    } else {
+                        // Ensure messages is always a valid array
+                        this.chatSessions[id].messages = [];
                     }
+                    // Ensure other required fields exist
+                    if (!this.chatSessions[id].title) this.chatSessions[id].title = 'Untitled';
+                    if (!this.chatSessions[id].attachedFiles) this.chatSessions[id].attachedFiles = [];
+                    if (!this.chatSessions[id].messageVersions) this.chatSessions[id].messageVersions = {};
+                    if (!this.chatSessions[id].conversationBranches) this.chatSessions[id].conversationBranches = {};
                 });
                 console.log('[ChatManager] Loaded', Object.keys(this.chatSessions).length, 'sessions from localStorage');
             } catch (e) {
@@ -303,25 +312,26 @@ export class ChatManager {
      * Delete chat session
      */
     deleteChat(chatId) {
+        if (!this.chatSessions[chatId]) {
+            return { success: false, message: 'Cuoc tro chuyen khong ton tai' };
+        }
+
         delete this.chatSessions[chatId];
-        
-        // If deleting current chat, switch to another or create new
+
+        const remainingIds = this.getSortedChatIds();
+
+        // If deleting current chat, switch to the next available one (or none)
         if (chatId === this.currentChatId) {
-            const remainingIds = Object.keys(this.chatSessions);
-            if (remainingIds.length > 0) {
-                this.currentChatId = remainingIds[0];
-            } else {
-                // No chats left, create a new one
-                this.newChat();
-            }
+            this.currentChatId = remainingIds.length > 0 ? remainingIds[0] : null;
         }
-        
-        // If all chats were deleted, ensure we have at least one
-        if (Object.keys(this.chatSessions).length === 0) {
-            this.newChat();
-        }
-        
-        return { success: true };
+
+        // Persist deletion immediately so it cannot reappear after refresh
+        this.saveSessions();
+
+        return {
+            success: true,
+            remainingCount: remainingIds.length
+        };
     }
 
     /**
@@ -384,6 +394,8 @@ export class ChatManager {
     togglePin(chatId) {
         if (this.chatSessions[chatId]) {
             this.chatSessions[chatId].pinned = !this.chatSessions[chatId].pinned;
+            this.chatSessions[chatId].updatedAt = new Date();
+            this.chatSessions[chatId].order = null;
             this.saveSessions();
             return this.chatSessions[chatId].pinned;
         }
@@ -464,6 +476,13 @@ export class ChatManager {
             assistantResponse: assistantResponse,
             timestamp: timestamp
         });
+
+        if (!session.conversationBranches) {
+            session.conversationBranches = {};
+        }
+        if (!session.conversationBranches[messageId]) {
+            session.conversationBranches[messageId] = {};
+        }
         
         this.saveSessions();
     }
@@ -475,6 +494,65 @@ export class ChatManager {
         const session = this.getCurrentSession();
         if (!session || !session.messageVersions) return [];
         return session.messageVersions[messageId] || [];
+    }
+
+    /**
+     * Fork session: create new session with messages up to a specific index
+     * @param {string} fromChatId - Source session ID
+     * @param {number} upToIndex - Include messages 0..upToIndex (inclusive)
+     * @returns {string} New session ID
+     */
+    forkSession(fromChatId, upToIndex) {
+        const source = this.chatSessions[fromChatId];
+        if (!source) return null;
+
+        const id = 'chat_' + Date.now();
+        const session = new ChatSession(id);
+
+        // Copy messages up to and including the given index
+        const srcMessages = Array.isArray(source.messages) ? source.messages : [];
+        session.messages = srcMessages.slice(0, upToIndex + 1);
+
+        // Collect message IDs present in the forked slice
+        const parser = new DOMParser();
+        const includedIds = new Set();
+        session.messages.forEach(html => {
+            const doc = parser.parseFromString(html, 'text/html');
+            const el = doc.body.firstElementChild;
+            if (el && el.dataset.messageId) includedIds.add(el.dataset.messageId);
+        });
+
+        // Copy relevant messageVersions
+        if (source.messageVersions) {
+            for (const msgId of includedIds) {
+                if (source.messageVersions[msgId]) {
+                    session.messageVersions[msgId] = JSON.parse(JSON.stringify(source.messageVersions[msgId]));
+                }
+            }
+        }
+
+        // Copy relevant conversationBranches
+        if (source.conversationBranches) {
+            for (const msgId of includedIds) {
+                if (source.conversationBranches[msgId]) {
+                    session.conversationBranches[msgId] = JSON.parse(JSON.stringify(source.conversationBranches[msgId]));
+                }
+            }
+        }
+
+        // Copy attached files
+        session.attachedFiles = source.attachedFiles ? JSON.parse(JSON.stringify(source.attachedFiles)) : [];
+
+        const lang = localStorage.getItem('chatbot_language') || 'vi';
+        session.title = (lang === 'vi' ? '🔀 Nhánh: ' : '🔀 Fork: ') + (source.title || 'Untitled');
+        session.createdAt = new Date();
+        session.updatedAt = new Date();
+
+        this.chatSessions[id] = session;
+        this.currentChatId = id;
+        this.saveSessions();
+        console.log(`[ChatManager] Forked session ${fromChatId} → ${id} (${session.messages.length} messages)`);
+        return id;
     }
 
     /**

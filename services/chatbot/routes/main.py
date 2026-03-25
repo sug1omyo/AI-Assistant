@@ -5,6 +5,8 @@ import os
 import sys
 import json
 import uuid
+import time
+import threading
 from datetime import datetime
 from pathlib import Path
 from flask import Blueprint, request, jsonify, session, render_template
@@ -29,6 +31,40 @@ except ImportError:
     pass
 
 main_bp = Blueprint('main', __name__)
+
+
+# ── DB monitoring helpers ──────────────────────────────────────────────────
+
+def _log_chat_event(event: str, data: dict) -> None:
+    """Fire-and-forget: write a chat event to MongoDB + Firebase RTDB.
+    
+    Runs in a daemon background thread so it never blocks the response.
+    event: "input" | "output"
+    data: dict with message, response, model, session_id, etc.
+    """
+    def _worker():
+        try:
+            from datetime import datetime as _dt
+            payload = {**data, 'event': event, 'timestamp': _dt.utcnow().isoformat() + 'Z',
+                       'collection': 'chat_logs'}
+            # MongoDB
+            try:
+                from core.image_storage import mongo_db as _mdb
+                if _mdb is not None:
+                    _mdb['chat_logs'].insert_one(payload.copy())
+            except Exception as me:
+                logger.debug(f"[monitor] mongo write skipped: {me}")
+            # Firebase RTDB
+            try:
+                from core.image_storage import rtdb_push
+                sid = data.get('session_id', 'unknown')
+                rtdb_push(f"chat_logs/{sid}", {k: v for k, v in payload.items() if k != '_id'})
+            except Exception as fe:
+                logger.debug(f"[monitor] rtdb write skipped: {fe}")
+        except Exception as e:
+            logger.debug(f"[monitor] _log_chat_event error: {e}")
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 @main_bp.route('/')
@@ -175,6 +211,15 @@ def chat():
                         logger.error(f"Error loading memory {mem_id}: {e}")
         
         # Process chat
+        _t0 = time.time()
+        # Log input event (non-blocking)
+        _log_chat_event('input', {
+            'session_id': session.get('session_id', ''),
+            'message': message[:500],  # cap length
+            'model': model,
+            'context': context,
+        })
+
         if history:
             original_history = chatbot.conversation_history.copy()
             result = chatbot.chat(message, model, context, deep_thinking, history, memories, language, custom_prompt)
@@ -189,6 +234,16 @@ def chat():
         else:
             response = result
             thinking_process = None
+
+        # Log output event (non-blocking)
+        _log_chat_event('output', {
+            'session_id': session.get('session_id', ''),
+            'message': message[:500],
+            'response': response[:1000],  # cap length
+            'model': model,
+            'context': context,
+            'latency_ms': round((time.time() - _t0) * 1000, 1),
+        })
         
         return jsonify({
             'response': response,
@@ -202,7 +257,7 @@ def chat():
         
     except Exception as e:
         logger.error(f"[CHAT] Error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'An internal error occurred'}), 500
 
 
 @main_bp.route('/clear', methods=['POST'])
@@ -234,6 +289,34 @@ def history():
     except Exception as e:
         logger.error(f"[History] Error: {str(e)}")
         return jsonify({'error': 'Failed to retrieve chat history'}), 500
+
+
+@main_bp.route('/api/health/databases', methods=['GET'])
+def health_databases():
+    """Check MongoDB + Firebase RTDB connectivity."""
+    from datetime import datetime as _dt
+    result = {'timestamp': _dt.utcnow().isoformat() + 'Z'}
+
+    # MongoDB
+    try:
+        from core.image_storage import mongo_client as _mc
+        if _mc is not None:
+            _mc.admin.command('ping')
+            result['mongodb'] = {'ok': True}
+        else:
+            result['mongodb'] = {'ok': False, 'error': 'not configured'}
+    except Exception as e:
+        result['mongodb'] = {'ok': False, 'error': 'connection failed'}
+
+    # Firebase RTDB
+    try:
+        from core.image_storage import rtdb_health
+        result['firebase_rtdb'] = rtdb_health()
+    except Exception as e:
+        result['firebase_rtdb'] = {'ok': False, 'error': 'connection failed'}
+
+    overall_ok = result['mongodb']['ok'] and result['firebase_rtdb']['ok']
+    return jsonify({'ok': overall_ok, **result}), (200 if overall_ok else 503)
 
 
 def _handle_image_generation_tool(chatbot, message, model):
