@@ -63,8 +63,8 @@ def legacy_chat():
         }), 200
         
     except Exception as e:
-        logger.error(f"Error in legacy chat: {str(e)}")
-        return jsonify({'error': 'Failed to process chat message'}), 500
+        logger.error(f"Error in legacy chat: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Failed to process chat message: {str(e)}'}), 500
 
 
 @legacy_bp.route('/conversations', methods=['GET'])

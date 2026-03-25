@@ -20,6 +20,18 @@ sys.path.insert(0, str(service_dir))
 project_root = service_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
+# Load environment variables EARLY — before any app module imports
+# so that config class attributes (evaluated at import time) pick up .env values.
+from services.shared_env import load_shared_env
+load_shared_env(__file__)
+
+# Load chatbot-specific .env for vars not already set by shared env
+# (e.g. FAL_API_KEY, STEPFUN_API_KEY that only exist in chatbot .env).
+from dotenv import load_dotenv
+_chatbot_env = service_dir / '.env'
+if _chatbot_env.exists():
+    load_dotenv(_chatbot_env)  # no override: shared env values take priority
+
 USE_FASTAPI = os.getenv('USE_FASTAPI', 'false').lower() == 'true'
 USE_NEW_STRUCTURE = os.getenv('USE_NEW_STRUCTURE', 'false').lower() == 'true'
 
@@ -62,13 +74,13 @@ elif USE_NEW_STRUCTURE:
         port = int(os.getenv('FLASK_PORT', 5000))
         debug = os.getenv('FLASK_DEBUG', 'true').lower() == 'true'
 
-        print(f"\U0001f680 Starting Chatbot (Flask New Structure) on port {port}")
+        print(f">> Starting Chatbot (Flask New Structure) on port {port}")
         app.run(host='0.0.0.0', port=port, debug=debug)
 
 else:
     # -- Legacy Flask monolith --
-    print("\u2139\ufe0f  Using legacy application structure")
-    print("\U0001f4a1 Set USE_FASTAPI=true for async FastAPI mode")
+    print("[i] Using legacy application structure")
+    print("[*] Set USE_FASTAPI=true for async FastAPI mode")
 
     if __name__ == '__main__':
         app_py_path = service_dir / 'chatbot_main.py'

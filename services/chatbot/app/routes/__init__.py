@@ -38,4 +38,37 @@ def register_blueprints(app: Flask) -> None:
     from .legacy_routes import legacy_bp
     app.register_blueprint(legacy_bp)
     
+    # Register original route blueprints that the frontend depends on
+    # (images, stream, memory, stable_diffusion, etc.)
+    _register_original_blueprints(app)
+    
     app.logger.info("âœ… All blueprints registered")
+
+
+def _register_original_blueprints(app: Flask) -> None:
+    """Register original route blueprints from routes/ directory for full frontend compatibility."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    blueprint_imports = [
+        ('routes.images', 'images_bp', None),
+        ('routes.stream', 'stream_bp', None),
+        ('routes.memory', 'memory_bp', '/memory'),
+        ('routes.conversations', 'conversations_bp', None),
+        ('routes.stable_diffusion', 'sd_bp', None),
+        ('routes.image_gen', 'image_gen_bp', None),
+        ('routes.models', 'models_bp', None),
+        ('routes.async_routes', 'async_bp', None),
+        ('routes.mcp', 'mcp_bp', '/api/mcp'),
+    ]
+    
+    for module_name, bp_attr, url_prefix in blueprint_imports:
+        try:
+            import importlib
+            mod = importlib.import_module(module_name)
+            bp = getattr(mod, bp_attr)
+            kwargs = {'url_prefix': url_prefix} if url_prefix else {}
+            app.register_blueprint(bp, **kwargs)
+            logger.info(f"âœ… Registered original blueprint: {bp_attr}")
+        except Exception as e:
+            logger.warning(f"âš ï¸ Could not register {bp_attr}: {e}")
