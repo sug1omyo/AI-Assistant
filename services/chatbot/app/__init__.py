@@ -47,5 +47,12 @@ def _get_app():
         _app = create_app(_default_config)
     return _app
 
+
+def __getattr__(name):
+    if name == 'app':
+        return _get_app()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = ['create_app', 'app', 'SYSTEM_PROMPTS']
 __version__ = '3.0.0'
