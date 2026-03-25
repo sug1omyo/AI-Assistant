@@ -46,6 +46,15 @@ class ChatBotApp {
     }
 
     /**
+     * Escape HTML special characters to prevent XSS
+     */
+    _escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text || '';
+        return div.innerHTML;
+    }
+
+    /**
      * Initialize the application
      */
     async init() {
@@ -481,7 +490,8 @@ class ChatBotApp {
         // Load messages
         if (messages.length > 0) {
             this.uiUtils.hideWelcomeScreen();
-            elements.chatContainer.innerHTML = messages.join('');
+            const joined = session.messages.join('');
+            elements.chatContainer.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(joined) : joined;
             
             // Restore message version history from session
             if (session.messageVersions) {
@@ -757,9 +767,10 @@ class ChatBotApp {
                 const textDiv = document.createElement('div');
                 textDiv.className = 'message-text image-gen-result';
                 if (typeof marked !== 'undefined') {
-                    textDiv.innerHTML = marked.parse(responseContent);
+                    const rawHtml = marked.parse(responseContent);
+                    textDiv.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml;
                 } else {
-                    textDiv.innerHTML = responseContent;
+                    textDiv.textContent = responseContent;
                 }
                 contentDiv.appendChild(textDiv);
                 bodyDiv.appendChild(contentDiv);
@@ -1689,7 +1700,7 @@ class ChatBotApp {
                         folderList.style.display = 'block';
                         const tag = document.createElement('div');
                         tag.className = 'mcp-folder-tag';
-                        tag.innerHTML = `📁 ${folderName} (${folderData.files.length} files) <button class="mcp-remove-btn" data-type="folder" data-name="${folderName}">×</button>`;
+                        tag.innerHTML = `📁 ${this._escapeHtml(folderName)} (${folderData.files.length} files) <button class="mcp-remove-btn" data-type="folder" data-name="${this._escapeHtml(folderName)}">×</button>`;
                         tag.querySelector('button').addEventListener('click', (e) => {
                             this.mcpContext.folders = this.mcpContext.folders.filter(f => f.name !== folderName);
                             tag.remove();
@@ -1747,7 +1758,7 @@ class ChatBotApp {
                             const tag = document.createElement('div');
                             tag.className = 'mcp-folder-tag';
                             const hostname = new URL(url.startsWith('http') ? url : 'https://' + url).hostname;
-                            tag.innerHTML = `🌐 ${hostname} <button class="mcp-remove-btn">×</button>`;
+                            tag.innerHTML = `🌐 ${this._escapeHtml(hostname)} <button class="mcp-remove-btn">×</button>`;
                             tag.querySelector('button').addEventListener('click', () => {
                                 this.mcpContext.urls = this.mcpContext.urls.filter(u => u.url !== url);
                                 tag.remove();
@@ -1807,7 +1818,7 @@ class ChatBotApp {
                             if (uploadList) {
                                 const tag = document.createElement('div');
                                 tag.className = 'mcp-folder-tag';
-                                tag.innerHTML = `📄 ${file.name} <button class="mcp-remove-btn">×</button>`;
+                                tag.innerHTML = `📄 ${this._escapeHtml(file.name)} <button class="mcp-remove-btn">×</button>`;
                                 tag.querySelector('button').addEventListener('click', () => {
                                     this.mcpContext.uploads = this.mcpContext.uploads.filter(u => u.filename !== file.name);
                                     tag.remove();
