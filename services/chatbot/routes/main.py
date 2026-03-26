@@ -59,6 +59,31 @@ def _log_chat_event(event: str, data: dict) -> None:
                 from core.image_storage import rtdb_push
                 sid = data.get('session_id', 'unknown')
                 rtdb_push(f"chat_logs/{sid}", {k: v for k, v in payload.items() if k != '_id'})
+
+                # New normalized conversation stream for Firebase (v2 schema)
+                if event == 'input':
+                    convo_item = {
+                        'session_id': sid,
+                        'role': 'user',
+                        'content': data.get('message', ''),
+                        'model': data.get('model', ''),
+                        'context': data.get('context', ''),
+                        'timestamp': payload['timestamp'],
+                        'schema_version': 2,
+                    }
+                else:
+                    convo_item = {
+                        'session_id': sid,
+                        'role': 'assistant',
+                        'content': data.get('response', ''),
+                        'user_content': data.get('message', ''),
+                        'model': data.get('model', ''),
+                        'context': data.get('context', ''),
+                        'latency_ms': data.get('latency_ms'),
+                        'timestamp': payload['timestamp'],
+                        'schema_version': 2,
+                    }
+                rtdb_push(f"conversations_v2/{sid}/messages", convo_item)
             except Exception as fe:
                 logger.debug(f"[monitor] rtdb write skipped: {fe}")
         except Exception as e:

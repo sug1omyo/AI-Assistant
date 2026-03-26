@@ -1,4 +1,4 @@
-﻿"""
+"""
 Learning Service
 
 Handles AI self-learning from conversations and user feedback.
@@ -73,7 +73,7 @@ class LearningService:
         # Also save to MongoDB if available
         self._save_to_database(entry)
         
-        logger.info(f"ðŸ“š Learning data submitted: {entry['_id']} (quality: {quality_score})")
+        logger.info(f"📚 Learning data submitted: {entry['_id']} (quality: {quality_score})")
         
         return entry
     
@@ -129,7 +129,7 @@ class LearningService:
         with open(archive_file, 'w', encoding='utf-8') as f:
             json.dump(archive_entry, f, ensure_ascii=False, indent=2)
         
-        logger.info(f"ðŸ“ Conversation archived: {archive_entry['_id']} (learn: {should_learn})")
+        logger.info(f"📁 Conversation archived: {archive_entry['_id']} (learn: {should_learn})")
         
         return archive_entry
     
@@ -314,13 +314,13 @@ class LearningService:
         # Content quality indicators
         if '```' in answer:  # Has code blocks
             score += 0.1
-        if any(word in answer.lower() for word in ['vÃ­ dá»¥', 'example', 'Ä‘á»ƒ', 'because']):
+        if any(word in answer.lower() for word in ['ví dụ', 'example', 'để', 'because']):
             score += 0.05
         
         # Negative indicators
-        if answer.startswith('Lá»—i') or answer.startswith('Error'):
+        if answer.startswith('Lỗi') or answer.startswith('Error'):
             score -= 0.3
-        if 'khÃ´ng thá»ƒ' in answer.lower() or "can't" in answer.lower():
+        if 'không thể' in answer.lower() or "can't" in answer.lower():
             score -= 0.1
         
         return max(0.0, min(1.0, score))
@@ -338,7 +338,7 @@ class LearningService:
         for msg in messages:
             if msg.get('role') == 'assistant':
                 content = msg.get('content', '')
-                if len(content) > 200 and not content.startswith('Lá»—i'):
+                if len(content) > 200 and not content.startswith('Lỗi'):
                     quality_count += 1
         
         return quality_count >= 2
@@ -369,11 +369,11 @@ class LearningService:
     def _save_to_database(self, entry: Dict[str, Any]) -> None:
         """Save learning entry to MongoDB (if available)"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 db.learning_data.insert_one(entry)
         except Exception as e:
             logger.debug(f"Could not save to database: {e}")

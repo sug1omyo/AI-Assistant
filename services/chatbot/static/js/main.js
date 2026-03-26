@@ -596,17 +596,24 @@ class ChatBotApp {
 
                 const meta = `🎨 **${result.provider}** / ${result.model} | ${Math.round(result.latency_ms)}ms | $${result.cost_usd}`;
                 const enhanced = result.prompt_used ? `\n📝 ${result.prompt_used.substring(0, 150)}` : '';
-                const promptEsc = (result.prompt_used || message).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
-                const imgSrcEsc = imgSrc.replace(/'/g, '%27');
+                const htmlAttrEsc = (value) => String(value || '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+                const promptEsc = htmlAttrEsc(result.prompt_used || message);
+                const imgSrcAttr = htmlAttrEsc(imgSrc);
+                const imageIdAttr = htmlAttrEsc(imageId);
                 const overlayButtons = `
                     <div class="igv2-img-overlay">
-                        <button class="igv2-img-btn" title="Tải ảnh" onclick="window._igv2Download('${imgSrcEsc}','${imageId}')">⬇</button>
-                        <button class="igv2-img-btn" title="Thông tin" onclick="window._igv2Info('${imageId}',this)">ℹ</button>
-                        ${imageId ? `<button class="igv2-img-btn igv2-save-btn" title="Lưu & Upload Drive" onclick="window._igv2Save('${imageId}',this)">☁</button>` : ''}
+                        <button type="button" class="igv2-img-btn" title="Tải ảnh" data-igv2-action="download" data-img-src="${imgSrcAttr}" data-image-id="${imageIdAttr}">⬇</button>
+                        <button type="button" class="igv2-img-btn" title="Thông tin" data-igv2-action="info" data-image-id="${imageIdAttr}">ℹ</button>
+                        ${imageId ? `<button type="button" class="igv2-img-btn igv2-save-btn" title="Lưu & Upload Drive" data-igv2-action="save" data-image-id="${imageIdAttr}">☁</button>` : ''}
                     </div>`;
                 this.messageRenderer.addMessage(
                     elements.chatContainer,
-                    `<div class="igv2-chat-image" data-image-id="${imageId}" data-prompt="${promptEsc}">${overlayButtons}<img src="${imgSrc}" alt="Generated" onclick="window.open('${imgSrc}','_blank')"><div class="igv2-chat-meta">${meta}${enhanced}</div></div>`,
+                    `<div class="igv2-chat-image" data-image-id="${imageIdAttr}" data-prompt="${promptEsc}">${overlayButtons}<img src="${imgSrc}" alt="Generated" data-igv2-open="${imgSrcAttr}"><div class="igv2-chat-meta">${meta}${enhanced}</div></div>`,
                     false, formValues.model, formValues.context,
                     this.uiUtils.formatTimestamp(new Date())
                 );
@@ -1988,6 +1995,38 @@ window._igv2Save = async function(imageId, triggerEl) {
     }
 };
 
+if (!window.__igv2OverlayDelegationBound) {
+    window.__igv2OverlayDelegationBound = true;
+    document.addEventListener('click', (event) => {
+        const actionBtn = event.target.closest('.igv2-img-btn[data-igv2-action]');
+        if (actionBtn) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const action = actionBtn.getAttribute('data-igv2-action');
+            const imageId = actionBtn.getAttribute('data-image-id') || '';
+            const imgSrc = actionBtn.getAttribute('data-img-src') || '';
+
+            if (action === 'download') {
+                window._igv2Download(imgSrc, imageId);
+            } else if (action === 'info') {
+                window._igv2Info(imageId, actionBtn);
+            } else if (action === 'save') {
+                window._igv2Save(imageId, actionBtn);
+            }
+            return;
+        }
+
+        const imageEl = event.target.closest('.igv2-chat-image img[data-igv2-open]');
+        if (imageEl) {
+            const targetUrl = imageEl.getAttribute('data-igv2-open');
+            if (targetUrl) {
+                window.open(targetUrl, '_blank', 'noopener');
+            }
+        }
+    });
+}
+
 // Initialize app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     const app = new ChatBotApp();
@@ -2563,6 +2602,55 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (_) {}
         }
 
+        const toSafeText = (value) => {
+            if (value === null || value === undefined || value === '') return 'Khong co';
+            if (typeof value === 'boolean') return value ? 'Co' : 'Khong';
+            if (typeof value === 'object') return JSON.stringify(value);
+            return String(value);
+        };
+
+        const toSafeLink = (value) => {
+            const raw = String(value || '').trim();
+            if (!raw || !/^https?:\/\//i.test(raw)) return '';
+            return raw;
+        };
+
+        const dateText = (value) => {
+            const raw = String(value || '').trim();
+            if (!raw) return 'Khong ro';
+            const d = new Date(raw);
+            if (Number.isNaN(d.getTime())) return raw;
+            return d.toLocaleString('vi-VN');
+        };
+
+        const renderRow = (label, value, options = {}) => {
+            const full = options.full ? ' gallery-info-row--full' : '';
+            const statusClass = options.statusClass ? ` ${options.statusClass}` : '';
+            if (options.link) {
+                const safeHref = escapeHtml(options.link);
+                return `
+                    <div class="gallery-info-row${full}">
+                        <span class="gallery-info-label">${escapeHtml(label)}</span>
+                        <a class="gallery-info-value gallery-info-value--link" href="${safeHref}" target="_blank" rel="noopener noreferrer">${escapeHtml(value)}</a>
+                    </div>
+                `;
+            }
+            if (options.status) {
+                return `
+                    <div class="gallery-info-row${full}">
+                        <span class="gallery-info-label">${escapeHtml(label)}</span>
+                        <span class="gallery-info-value gallery-info-status${statusClass}">${escapeHtml(value)}</span>
+                    </div>
+                `;
+            }
+            return `
+                <div class="gallery-info-row${full}">
+                    <span class="gallery-info-label">${escapeHtml(label)}</span>
+                    <span class="gallery-info-value">${escapeHtml(value)}</span>
+                </div>
+            `;
+        };
+
         const renderInfoBody = (payload = {}) => {
             const metadata = payload.metadata || fromCard.metadata || {};
             const db = payload.db_status || fromCard.db_status || {};
@@ -2571,23 +2659,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 drive_folder_url: 'https://drive.google.com/drive/folders/11MN5m72gl84LsP1NMfBjeX9YAzsIlRxz?usp=sharing'
             };
 
+            const creator = toSafeText(payload.creator || fromCard.creator || 'unknown');
+            const createdAt = dateText(payload.created_at || fromCard.created || '');
+            const shareLink = toSafeLink(links.share_url || fromCard.share_url || '');
+            const driveFolder = toSafeLink(links.drive_folder_url || '');
+            const mongoText = db.mongodb ? 'Da dong bo' : 'Chua dong bo';
+            const firebaseText = db.firebase ? 'Da dong bo' : 'Chua dong bo';
+
             const allMeta = Object.entries(metadata)
                 .filter(([_, v]) => v !== null && v !== undefined && String(v).trim() !== '')
-                .map(([k, v]) => `<div class="lightbox__meta-item"><span class="lightbox__meta-label">${escapeHtml(k)}</span><span class="lightbox__meta-value">${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : v)}</span></div>`)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([k, v]) => renderRow(k, toSafeText(v)))
                 .join('');
 
             body.innerHTML = `
-                <div class="lightbox__meta-grid" style="margin-bottom: 12px;">
-                    <div class="lightbox__meta-item"><span class="lightbox__meta-label">Người tạo</span><span class="lightbox__meta-value">${escapeHtml((payload.creator || fromCard.creator || 'unknown'))}</span></div>
-                    <div class="lightbox__meta-item"><span class="lightbox__meta-label">Thời gian đã tạo</span><span class="lightbox__meta-value">${escapeHtml((payload.created_at || fromCard.created || ''))}</span></div>
-                    <div class="lightbox__meta-item"><span class="lightbox__meta-label">MongoDB</span><span class="lightbox__meta-value">${db.mongodb ? 'Da co' : 'Chua co/khong ro'}</span></div>
-                    <div class="lightbox__meta-item"><span class="lightbox__meta-label">Firebase</span><span class="lightbox__meta-value">${db.firebase ? 'Da co' : 'Chua co/khong ro'}</span></div>
-                    <div class="lightbox__meta-item" style="grid-column:1/-1"><span class="lightbox__meta-label">Share link</span><span class="lightbox__meta-value">${escapeHtml(links.share_url || '')}</span></div>
-                    <div class="lightbox__meta-item" style="grid-column:1/-1"><span class="lightbox__meta-label">Drive folder</span><span class="lightbox__meta-value">${escapeHtml(links.drive_folder_url || '')}</span></div>
+                <div class="gallery-info-card">
+                    <div class="gallery-info-card__title">Tong quan</div>
+                    <div class="gallery-info-grid">
+                        ${renderRow('Nguoi tao', creator)}
+                        ${renderRow('Thoi gian tao', createdAt)}
+                        ${renderRow('MongoDB', mongoText, { status: true, statusClass: db.mongodb ? 'gallery-info-status--ok' : '' })}
+                        ${renderRow('Firebase', firebaseText, { status: true, statusClass: db.firebase ? 'gallery-info-status--ok' : '' })}
+                        ${shareLink ? renderRow('Share link', shareLink, { full: true, link: shareLink }) : ''}
+                        ${driveFolder ? renderRow('Drive folder', driveFolder, { full: true, link: driveFolder }) : ''}
+                    </div>
                 </div>
-                <div class="lightbox__meta-label" style="margin-bottom:8px;">Thong so anh</div>
-                <div class="lightbox__meta-grid">${allMeta || '<div class="lightbox__meta-item" style="grid-column:1/-1"><span class="lightbox__meta-value">Khong co metadata</span></div>'}</div>
-                <div style="display:flex; gap:8px; margin-top:14px; flex-wrap: wrap;">
+
+                <div class="gallery-info-card">
+                    <div class="gallery-info-card__title">Thong so anh</div>
+                    <div class="gallery-info-grid">${allMeta || renderRow('Metadata', 'Khong co metadata', { full: true })}</div>
+                </div>
+
+                <div class="gallery-info-actions">
                     <button class="btn btn--sm btn--primary" onclick="uploadGalleryImageToDB('${escapeHtml(filename)}')">⬆️ Upload len DB</button>
                     ${(links.share_url || fromCard.share_url) ? `<button class="btn btn--sm btn--ghost" onclick="copyGalleryShareLink('${escapeHtml(links.share_url || fromCard.share_url)}')">🔗 Copy Share Link</button>` : ''}
                 </div>

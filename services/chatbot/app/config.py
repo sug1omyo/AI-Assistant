@@ -18,6 +18,11 @@ class BaseConfig:
     # Database
     MONGODB_URI = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/ai_assistant')
     MONGODB_ENABLED = os.getenv('MONGODB_ENABLED', 'true').lower() == 'true'
+    MONGODB_DB_NAME = os.getenv('MONGODB_DB_NAME', 'chatbot_db')
+    MONGODB_X509_ENABLED = os.getenv('MONGODB_X509_ENABLED', 'false').lower() == 'true'
+    MONGODB_X509_URI = os.getenv('MONGODB_X509_URI', '')
+    MONGODB_X509_CERT_PATH = os.getenv('MONGODB_X509_CERT_PATH', '')
+    MONGODB_TLS_ALLOW_INVALID_CERTIFICATES = os.getenv('MONGODB_TLS_ALLOW_INVALID_CERTIFICATES', 'true').lower() == 'true'
     
     # Redis Cache
     REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379')

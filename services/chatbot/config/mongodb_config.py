@@ -8,6 +8,7 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from datetime import datetime
 import os
+from pathlib import Path
 try:
     from services.shared_env import load_shared_env
 except ModuleNotFoundError:
@@ -26,6 +27,10 @@ load_shared_env(__file__)
 MONGODB_URI = os.getenv(
     'MONGODB_URI'
 )
+MONGODB_X509_ENABLED = os.getenv('MONGODB_X509_ENABLED', 'false').lower() == 'true'
+MONGODB_X509_URI = os.getenv('MONGODB_X509_URI', '').strip()
+MONGODB_X509_CERT_PATH = os.getenv('MONGODB_X509_CERT_PATH', '').strip()
+MONGODB_TLS_ALLOW_INVALID_CERTIFICATES = os.getenv('MONGODB_TLS_ALLOW_INVALID_CERTIFICATES', 'true').lower() == 'true'
 
 # Database name
 DATABASE_NAME = "chatbot_db"
@@ -56,18 +61,32 @@ class MongoDBClient:
     def connect(self):
         """Establish MongoDB connection"""
         if self._client is None:
+            uri = MONGODB_X509_URI if (MONGODB_X509_ENABLED and MONGODB_X509_URI) else MONGODB_URI
             # Skip if no URI configured
-            if not MONGODB_URI:
+            if not uri:
                 print("âš ï¸ MongoDB URI not configured, running without database")
                 return False
             try:
+                connect_kwargs = {
+                    'server_api': ServerApi('1'),
+                    'serverSelectionTimeoutMS': 5000,
+                    'connectTimeoutMS': 5000,
+                    'tls': True,
+                    'tlsAllowInvalidCertificates': MONGODB_TLS_ALLOW_INVALID_CERTIFICATES,
+                }
+
+                if MONGODB_X509_ENABLED and MONGODB_X509_CERT_PATH:
+                    cert_path = Path(MONGODB_X509_CERT_PATH)
+                    if cert_path.exists():
+                        connect_kwargs['tlsCertificateKeyFile'] = str(cert_path)
+                        connect_kwargs['authMechanism'] = 'MONGODB-X509'
+                        connect_kwargs['authSource'] = '$external'
+                    else:
+                        print(f"âš ï¸ X.509 cert file not found: {cert_path}")
+
                 self._client = MongoClient(
-                    MONGODB_URI, 
-                    server_api=ServerApi('1'),
-                    serverSelectionTimeoutMS=5000,
-                    connectTimeoutMS=5000,
-                    tls=True,
-                    tlsAllowInvalidCertificates=True
+                    uri,
+                    **connect_kwargs
                 )
                 # Test connection
                 self._client.admin.command('ping')

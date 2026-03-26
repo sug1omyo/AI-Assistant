@@ -73,13 +73,23 @@ def _check_db_presence(filename: str):
         logger.warning(f"[ImageInfo] Mongo presence check failed: {e}")
 
     try:
-        from core.image_storage import firebase_db
+        from core.image_storage import firebase_db, rtdb_get
         if firebase_db is not None:
-            docs = firebase_db.collection('generated_images').where('filename', '==', filename).limit(1).stream()
+            docs = firebase_db.collection('generated_images_v2').where('filename', '==', filename).limit(1).stream()
             for doc in docs:
                 status['firebase'] = True
                 status['firebase_id'] = doc.id
                 break
+
+        if not status['firebase']:
+            safe_key = re.sub(r'[.$#\[\]/]', '_', filename)
+            idx = rtdb_get(f'generated_images_index/by_filename/{safe_key}') or {}
+            doc_id = idx.get('doc_id') if isinstance(idx, dict) else None
+            if doc_id:
+                node = rtdb_get(f'generated_images_v2/{doc_id}')
+                if node:
+                    status['firebase'] = True
+                    status['firebase_id'] = doc_id
     except Exception as e:
         logger.warning(f"[ImageInfo] Firebase presence check failed: {e}")
 
@@ -131,7 +141,8 @@ def save_image():
                 image_base64=image_base64,
                 prompt=metadata.get('prompt', ''),
                 negative_prompt=metadata.get('negative_prompt', ''),
-                metadata=metadata
+                metadata=metadata,
+                raw_legacy_payload=data,
             )
             if storage_result.get('success'):
                 cloud_url = storage_result.get('imgbb_url')
@@ -160,11 +171,14 @@ def save_image():
             }, f, ensure_ascii=False, indent=2)
         
         image_url = f"/storage/images/{filename}"
+        primary_url = drive_url or cloud_url or image_url
         
         return jsonify({
             'success': True,
             'filename': filename,
             'url': image_url,
+            'imageURL': primary_url,
+            'image_url': primary_url,
             'cloud_url': cloud_url,
             'drive_url': drive_url,
             'drive_file_id': drive_file_id,
@@ -521,6 +535,7 @@ def get_image_info():
         cloud_url = (mongo_doc or {}).get('cloud_url') or (mongo_doc or {}).get('url') or (local_payload or {}).get('cloud_url')
         drive_url = (mongo_doc or {}).get('drive_url') or (local_payload or {}).get('drive_url')
         local_url = f"/storage/images/{filename}" if filepath else None
+        primary_url = drive_url or cloud_url or local_url
 
         return jsonify({
             'success': True,
@@ -532,6 +547,7 @@ def get_image_info():
                 'local_url': local_url,
                 'cloud_url': cloud_url,
                 'drive_url': drive_url,
+                'imageURL': primary_url,
                 'share_url': drive_url or cloud_url or local_url,
                 'drive_folder_url': os.getenv('GOOGLE_DRIVE_FOLDER_URL', 'https://drive.google.com/drive/folders/11MN5m72gl84LsP1NMfBjeX9YAzsIlRxz?usp=sharing'),
             },
@@ -567,7 +583,8 @@ def upload_image_to_db():
             image_base64=image_b64,
             prompt=metadata.get('prompt', ''),
             negative_prompt=metadata.get('negative_prompt', ''),
-            metadata=metadata
+            metadata=metadata,
+            raw_legacy_payload=local_payload if isinstance(local_payload, dict) else {},
         )
 
         db_status = {
@@ -593,6 +610,7 @@ def upload_image_to_db():
         return jsonify({
             'success': True,
             'filename': filename,
+            'imageURL': result.get('drive_url') or result.get('imgbb_url') or f"/storage/images/{filename}",
             'cloud_url': result.get('imgbb_url'),
             'drive_url': result.get('drive_url'),
             'db_status': db_status,

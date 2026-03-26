@@ -1,4 +1,4 @@
-﻿"""
+"""
 Conversation Service
 
 Handles conversation and message management.
@@ -28,7 +28,7 @@ class ConversationService:
     ) -> Dict[str, Any]:
         """Create a new conversation"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             conv = {
@@ -42,7 +42,7 @@ class ConversationService:
             }
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 db.conversations.insert_one(conv)
             else:
                 self._conversations[conv['_id']] = conv
@@ -57,11 +57,11 @@ class ConversationService:
     def get(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         """Get a conversation by ID"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 return db.conversations.find_one({'_id': conversation_id})
             else:
                 return self._conversations.get(conversation_id)
@@ -79,11 +79,11 @@ class ConversationService:
     ) -> List[Dict[str, Any]]:
         """List conversations for a user"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 query = {'user_id': user_id}
                 if not include_archived:
                     query['is_archived'] = False
@@ -104,11 +104,11 @@ class ConversationService:
     def count_by_user(self, user_id: str, include_archived: bool = False) -> int:
         """Count conversations for a user"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 query = {'user_id': user_id}
                 if not include_archived:
                     query['is_archived'] = False
@@ -126,13 +126,13 @@ class ConversationService:
     def update(self, conversation_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         """Update a conversation"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             updates['updated_at'] = datetime.now().isoformat()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 db.conversations.update_one(
                     {'_id': conversation_id},
                     {'$set': updates}
@@ -151,11 +151,11 @@ class ConversationService:
     def delete(self, conversation_id: str) -> bool:
         """Delete a conversation and its messages"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 db.messages.delete_many({'conversation_id': conversation_id})
                 db.conversations.delete_one({'_id': conversation_id})
             else:
@@ -180,7 +180,7 @@ class ConversationService:
     ) -> Dict[str, Any]:
         """Add a message to a conversation"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             message = {
@@ -194,7 +194,7 @@ class ConversationService:
             }
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 db.messages.insert_one(message)
                 # Update conversation timestamp
                 db.conversations.update_one(
@@ -221,11 +221,11 @@ class ConversationService:
     ) -> List[Dict[str, Any]]:
         """Get messages for a conversation"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 cursor = db.messages.find(
                     {'conversation_id': conversation_id}
                 ).sort('created_at', 1).limit(limit)

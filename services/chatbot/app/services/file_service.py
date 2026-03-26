@@ -1,4 +1,4 @@
-﻿"""
+"""
 File Service
 
 Handles file storage and management.
@@ -67,6 +67,31 @@ class FileService:
             
             # Save to database or memory
             self._save_record(file_record)
+
+            # Archive raw legacy payload + binary for full recovery
+            try:
+                from core.image_storage import archive_legacy_asset
+                with open(file_path, 'rb') as rf:
+                    file_bytes = rf.read()
+                legacy_id = archive_legacy_asset(
+                    asset_type='file',
+                    asset_id=file_id,
+                    metadata=file_record,
+                    raw_payload={
+                        'legacy_format': 'file_service_v1',
+                        'original_filename': filename,
+                        'conversation_id': conversation_id,
+                        'user_id': user_id,
+                    },
+                    file_bytes=file_bytes,
+                    filename=filename,
+                    mime_type=file.mimetype or 'application/octet-stream',
+                )
+                if legacy_id:
+                    file_record['legacy_archive_id'] = legacy_id
+                    self._save_record(file_record)
+            except Exception as archive_err:
+                logger.warning(f"Legacy archive failed for file {filename}: {archive_err}")
             
             return file_record
             
@@ -77,11 +102,11 @@ class FileService:
     def get(self, file_id: str) -> Optional[Dict[str, Any]]:
         """Get file info by ID"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 return db.files.find_one({'_id': file_id})
             else:
                 return self._files.get(file_id)
@@ -93,11 +118,11 @@ class FileService:
     def list_by_user(self, user_id: str) -> List[Dict[str, Any]]:
         """List files for a user"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 return list(db.files.find({'user_id': user_id}).sort('uploaded_at', -1))
             else:
                 files = [f for f in self._files.values() if f['user_id'] == user_id]
@@ -122,11 +147,11 @@ class FileService:
                 file_path.unlink()
             
             # Delete record
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 db.files.delete_one({'_id': file_id})
             else:
                 if file_id in self._files:
@@ -141,11 +166,11 @@ class FileService:
     def _save_record(self, record: Dict[str, Any]) -> None:
         """Save file record to database or memory"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 db.files.insert_one(record)
             else:
                 self._files[record['_id']] = record

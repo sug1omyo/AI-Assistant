@@ -11,6 +11,10 @@ from ..controllers.conversation_controller import ConversationController
 import logging
 import json
 import os
+import base64
+import re
+from datetime import datetime
+from pathlib import Path
 
 legacy_bp = Blueprint('legacy', __name__)
 chat_controller = ChatController()
@@ -375,3 +379,109 @@ def status():
         'status': 'running',
         'models': models
     }), 200
+
+
+@legacy_bp.route('/api/db-health', methods=['GET'])
+def db_health():
+    """Check MongoDB health and key collection counts."""
+    try:
+        from ..extensions import get_db
+
+        db = get_db()
+        if db is None:
+            return jsonify({
+                'overall': 'degraded',
+                'backends': {'mongodb': {'status': 'disabled'}},
+                'checked_at': datetime.utcnow().isoformat() + 'Z'
+            }), 200
+
+        db.client.admin.command('ping')
+        result = {
+            'overall': 'ok',
+            'backends': {
+                'mongodb': {
+                    'status': 'ok',
+                    'database': db.name,
+                    'conversations': db.conversations.estimated_document_count(),
+                    'messages': db.messages.estimated_document_count(),
+                    'chat_logs': db.chat_logs.estimated_document_count()
+                }
+            },
+            'checked_at': datetime.utcnow().isoformat() + 'Z'
+        }
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Error in db health check: {e}")
+        return jsonify({
+            'overall': 'degraded',
+            'backends': {'mongodb': {'status': 'error', 'detail': 'connection failed'}},
+            'checked_at': datetime.utcnow().isoformat() + 'Z'
+        }), 200
+
+
+@legacy_bp.route('/api/gallery/upload-db', methods=['POST'])
+def legacy_upload_image_to_db():
+    """Compatibility endpoint for gallery upload-to-db actions."""
+    try:
+        data = request.get_json(silent=True) or {}
+        filename = str(data.get('filename', '')).strip()
+        if not filename or not re.match(r'^[a-zA-Z0-9_\-\.]+$', filename):
+            return jsonify({'error': 'Invalid filename'}), 400
+
+        try:
+            from routes.images import _load_local_image_record, get_session_id
+            from core.image_storage import store_generated_image
+        except Exception as e:
+            logger.error(f"Gallery upload import error: {e}")
+            return jsonify({'error': 'Gallery upload backend unavailable'}), 500
+
+        filepath, local_payload = _load_local_image_record(filename)
+        if not filepath:
+            return jsonify({'error': 'Image not found locally'}), 404
+
+        with open(filepath, 'rb') as file_handle:
+            image_b64 = base64.b64encode(file_handle.read()).decode('utf-8')
+
+        metadata = local_payload.get('metadata', local_payload if isinstance(local_payload, dict) else {})
+        metadata['filename'] = filename
+        metadata['session_id'] = metadata.get('session_id') or get_session_id()
+
+        result = store_generated_image(
+            image_base64=image_b64,
+            prompt=metadata.get('prompt', ''),
+            negative_prompt=metadata.get('negative_prompt', ''),
+            metadata=metadata,
+            raw_legacy_payload=local_payload if isinstance(local_payload, dict) else {},
+        )
+
+        db_status = {
+            'mongodb': bool(result.get('saved_to_mongodb')),
+            'firebase': bool(result.get('saved_to_firebase')),
+        }
+
+        meta_file = Path(filepath).with_suffix('.json')
+        merged_local = {
+            **(local_payload if isinstance(local_payload, dict) else {}),
+            'filename': filename,
+            'created_at': (local_payload or {}).get('created_at', datetime.now().isoformat()),
+            'cloud_url': result.get('imgbb_url') or (local_payload or {}).get('cloud_url'),
+            'drive_url': result.get('drive_url') or (local_payload or {}).get('drive_url'),
+            'drive_file_id': result.get('drive_file_id') or (local_payload or {}).get('drive_file_id'),
+            'db_status': db_status,
+            'metadata': metadata,
+        }
+        with open(meta_file, 'w', encoding='utf-8') as file_handle:
+            json.dump(merged_local, file_handle, ensure_ascii=False, indent=2)
+
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'imageURL': result.get('drive_url') or result.get('imgbb_url') or f"/storage/images/{filename}",
+            'cloud_url': result.get('imgbb_url'),
+            'drive_url': result.get('drive_url'),
+            'db_status': db_status,
+            'storage_result': result,
+        })
+    except Exception as e:
+        logger.error(f"Gallery upload-to-db failed: {e}")
+        return jsonify({'error': 'Failed to upload to database'}), 500

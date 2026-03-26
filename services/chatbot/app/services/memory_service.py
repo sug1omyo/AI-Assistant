@@ -1,4 +1,4 @@
-﻿"""
+"""
 Memory Service
 
 Handles AI memory/knowledge base management.
@@ -30,7 +30,7 @@ class MemoryService:
     ) -> Dict[str, Any]:
         """Create a new memory entry"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             memory = {
@@ -46,7 +46,7 @@ class MemoryService:
             }
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 db.memories.insert_one(memory)
             else:
                 self._memories[memory['_id']] = memory
@@ -60,11 +60,11 @@ class MemoryService:
     def get(self, memory_id: str) -> Optional[Dict[str, Any]]:
         """Get a memory by ID"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 return db.memories.find_one({'_id': memory_id})
             else:
                 return self._memories.get(memory_id)
@@ -81,11 +81,11 @@ class MemoryService:
     ) -> List[Dict[str, Any]]:
         """List memories for a user"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 query = {'user_id': user_id}
                 if category:
                     query['category'] = category
@@ -106,13 +106,13 @@ class MemoryService:
     def update(self, memory_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         """Update a memory"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             updates['updated_at'] = datetime.now().isoformat()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 db.memories.update_one({'_id': memory_id}, {'$set': updates})
                 return db.memories.find_one({'_id': memory_id})
             else:
@@ -128,11 +128,11 @@ class MemoryService:
     def delete(self, memory_id: str) -> bool:
         """Delete a memory"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 db.memories.delete_one({'_id': memory_id})
             else:
                 if memory_id in self._memories:
@@ -152,11 +152,11 @@ class MemoryService:
     ) -> List[Dict[str, Any]]:
         """Search memories by text or tags"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 
                 pipeline = [{'$match': {'user_id': user_id}}]
                 

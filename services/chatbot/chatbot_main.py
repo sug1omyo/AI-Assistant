@@ -47,8 +47,25 @@ from flask import Flask, send_from_directory, send_file, session, render_templat
 load_shared_env(__file__)
 # Import rate limiter and cache from root config
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from config.rate_limiter import get_gemini_key_with_rate_limit, wait_for_openai_rate_limit, get_rate_limit_stats
-from config.response_cache import get_cached_response, cache_response, get_all_cache_stats
+
+# Try to import rate limiter and cache (graceful fallback if not available)
+try:
+    from config.rate_limiter import get_gemini_key_with_rate_limit, wait_for_openai_rate_limit, get_rate_limit_stats
+    from config.response_cache import get_cached_response, cache_response, get_all_cache_stats
+except ImportError:
+    print("[WARN] Rate limiter/cache modules not available - using stubs")
+    def get_gemini_key_with_rate_limit(*args, **kwargs):
+        return os.getenv('GEMINI_API_KEY_1')
+    def wait_for_openai_rate_limit(*args, **kwargs):
+        pass
+    def get_rate_limit_stats(*args, **kwargs):
+        return {}
+    def get_cached_response(*args, **kwargs):
+        return None
+    def cache_response(*args, **kwargs):
+        pass
+    def get_all_cache_stats(*args, **kwargs):
+        return {}
 
 # MongoDB imports - import directly from files to avoid package conflict
 from bson import ObjectId
@@ -134,6 +151,16 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'skylight-ai-assistant-secret-key
 
 # Configure static folder for Storage
 app.static_folder = str(CHATBOT_DIR / 'static')
+
+# ==================== HTTP LOGGING SETUP ====================
+# Add comprehensive logging for all GET/POST requests
+try:
+    from core.http_logging import setup_http_logging, create_http_log_file
+    setup_http_logging(app)
+    create_http_log_file(app)
+    logger.info("✅ HTTP request/response logging enabled")
+except Exception as e:
+    logger.warning(f"⚠️  HTTP logging setup failed: {e}")
 
 # Import and register extensions
 from core.extensions import logger, register_monitor, LOCALMODELS_AVAILABLE, model_loader, CLOUD_UPLOAD_ENABLED
@@ -3396,6 +3423,41 @@ def save_generated_image():
             except Exception as cloud_error:
                 logger.warning(f"[Save Image] Ã¢Å¡Â Ã¯Â¸Â ImgBB upload failed: {cloud_error}")
         
+                
+        # Upload to Google Drive (only if GOOGLE_DRIVE_ENABLED=true in .env)
+        drive_file_id = None
+        drive_web_link = None
+        _gd_enabled = os.getenv('GOOGLE_DRIVE_ENABLED', 'false').lower() == 'true'
+        if _gd_enabled:
+            try:
+                from core.google_drive_service import GoogleDriveService
+                
+                drive_service = GoogleDriveService()
+                if drive_service._service is not None:
+                    gd_folder_id = os.getenv('GOOGLE_DRIVE_FOLDER_ID', '')
+                    if gd_folder_id:
+                        drive_service.set_folder_id(gd_folder_id)
+                        gd_metadata = {
+                            'prompt': metadata.get('prompt', ''),
+                            'model': metadata.get('model', ''),
+                            'sampler': metadata.get('sampler', ''),
+                            'steps': metadata.get('steps', ''),
+                            'cfg_scale': metadata.get('cfg_scale', ''),
+                            'seed': metadata.get('seed', ''),
+                        }
+                        drive_result = drive_service.upload_image(
+                            image_b64=base64_image,
+                            filename=filename,
+                            metadata=gd_metadata
+                        )
+                        if drive_result.get('success'):
+                            drive_file_id = drive_result.get('file_id')
+                            drive_web_link = drive_result.get('web_view_link')
+                            logger.info(f"[Save Image] Google Drive uploaded: {drive_web_link}")
+                        else:
+                            logger.warning(f"[Save Image] Google Drive upload failed: {drive_result.get('error')}")
+            except Exception as drive_error:
+                logger.warning(f"[Save Image] Google Drive error: {drive_error}")
         # Save metadata JSON alongside the PNG (for local gallery fallback)
         try:
             metadata_json = {

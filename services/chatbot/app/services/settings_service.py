@@ -1,4 +1,4 @@
-﻿"""
+"""
 Settings Service
 
 Handles user settings management.
@@ -37,11 +37,11 @@ class SettingsService:
     def get(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Get settings for a user"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 settings = db.user_settings.find_one({'user_id': user_id})
                 if settings:
                     return settings
@@ -58,7 +58,7 @@ class SettingsService:
     def update(self, user_id: str, settings: Dict[str, Any]) -> Dict[str, Any]:
         """Update user settings"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             current = self.get(user_id) or {'user_id': user_id, **self.DEFAULT_SETTINGS}
@@ -66,7 +66,7 @@ class SettingsService:
             current['updated_at'] = datetime.now().isoformat()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 db.user_settings.update_one(
                     {'user_id': user_id},
                     {'$set': current},
@@ -84,11 +84,11 @@ class SettingsService:
     def list_custom_prompts(self, user_id: str) -> List[Dict[str, Any]]:
         """List custom prompts for a user"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 settings = db.user_settings.find_one({'user_id': user_id})
                 return settings.get('custom_prompts', []) if settings else []
             else:
@@ -106,7 +106,7 @@ class SettingsService:
     ) -> Dict[str, Any]:
         """Create a new custom prompt"""
         try:
-            from ..extensions import get_mongodb
+            from ..extensions import get_mongodb, get_db
             client = get_mongodb()
             
             new_prompt = {
@@ -117,7 +117,7 @@ class SettingsService:
             }
             
             if client:
-                db = client.get_database('ai_assistant')
+                db = get_db()
                 db.user_settings.update_one(
                     {'user_id': user_id},
                     {'$push': {'custom_prompts': new_prompt}},

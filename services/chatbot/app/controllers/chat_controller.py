@@ -174,6 +174,13 @@ class ChatController:
                 }
             )
             
+            from ..extensions import get_mongodb, get_db
+            db = get_db()
+            if get_mongodb() and db is not None:
+                logger.info(f"[DB] Saved conversation {conversation_id} to MongoDB ({db.name})")
+            else:
+                logger.info(f"[DB] Saved conversation {conversation_id} to in-memory (MongoDB disconnected)")
+            
             # Cache the response (only for instant mode)
             if thinking_mode == 'instant':
                 self.cache_service.set(cache_key, response_text, ttl=3600)

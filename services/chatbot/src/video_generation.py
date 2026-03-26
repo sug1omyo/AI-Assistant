@@ -260,6 +260,23 @@ def download_video(video_id: str) -> Path:
     dest = VIDEO_STORAGE_DIR / f"{video_id}.mp4"
     content.stream_to_file(str(dest))
     logger.info(f"[Sora2] Video saved: {dest}")
+    try:
+        from core.image_storage import archive_legacy_asset
+        job_meta = get_job_status(video_id) or {}
+        with open(dest, 'rb') as vf:
+            legacy_id = archive_legacy_asset(
+                asset_type='video',
+                asset_id=video_id,
+                metadata=job_meta,
+                raw_payload={'legacy_format': 'sora2_video_file'},
+                file_bytes=vf.read(),
+                filename=dest.name,
+                mime_type='video/mp4',
+            )
+        if legacy_id:
+            logger.info(f"[Sora2] Video archived to Mongo legacy store: {legacy_id}")
+    except Exception as archive_err:
+        logger.warning(f"[Sora2] Video archive failed: {archive_err}")
     return dest
 
 
@@ -269,6 +286,22 @@ def download_thumbnail(video_id: str) -> Path:
     content = client.videos.download_content(video_id, variant="thumbnail")
     dest = VIDEO_STORAGE_DIR / f"{video_id}_thumb.jpg"
     content.stream_to_file(str(dest))
+    try:
+        from core.image_storage import archive_legacy_asset
+        with open(dest, 'rb') as tf:
+            legacy_id = archive_legacy_asset(
+                asset_type='video_thumbnail',
+                asset_id=f"{video_id}_thumb",
+                metadata={'video_id': video_id, 'variant': 'thumbnail'},
+                raw_payload={'legacy_format': 'sora2_thumbnail_file'},
+                file_bytes=tf.read(),
+                filename=dest.name,
+                mime_type='image/jpeg',
+            )
+        if legacy_id:
+            logger.info(f"[Sora2] Thumbnail archived to Mongo legacy store: {legacy_id}")
+    except Exception as archive_err:
+        logger.warning(f"[Sora2] Thumbnail archive failed: {archive_err}")
     return dest
 
 
@@ -345,3 +378,15 @@ def _ts(unix: int | None) -> str | None:
 def _save_meta(job: dict[str, Any]) -> None:
     path = VIDEO_STORAGE_DIR / f"{job['id']}.json"
     path.write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        from core.image_storage import archive_legacy_asset
+        archive_legacy_asset(
+            asset_type='video_job',
+            asset_id=str(job.get('id', 'unknown')),
+            metadata=job,
+            raw_payload={'legacy_format': 'sora2_job_json', 'job': job},
+            filename=path.name,
+            mime_type='application/json',
+        )
+    except Exception as archive_err:
+        logger.warning(f"[Sora2] Job metadata archive failed: {archive_err}")
