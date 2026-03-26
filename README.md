@@ -26,13 +26,14 @@ Nền tảng microservices tích hợp nhiều dịch vụ AI: chatbot (đa mô 
 | Voice (STT) | Whisper API — transcribe audio sang text |
 | OCR | Vision API — đọc nội dung ảnh/PDF |
 | RAG | MongoDB Atlas — lưu & tìm kiếm memory theo ngữ nghĩa |
+| Image Storage | ImgBB + MongoDB + Firebase RTDB cho ảnh được tạo bởi AI |
 | **Video AI** | **OpenAI Sora 2** — tạo video từ text (4/8/12s, 720p/1080p) |
 | Streaming | Server-Sent Events (SSE) |
 | Swagger UI | Tài liệu API tự động tại `/docs` |
 
 ### API Video (Sora 2)
 
-```
+```text
 POST /api/video/generate          # Gửi job (trả về ngay)
 POST /api/video/generate-sync     # Gửi job + chờ hoàn thành
 GET  /api/video/status/{id}       # Kiểm tra tiến độ (progress 0-100%)
@@ -116,11 +117,38 @@ DEEPSEEK_API_KEY=
 
 # Database
 MONGODB_URI=mongodb://localhost:27017
-MONGODB_DB=chatbot
+MONGODB_DB_NAME=chatbot_db
 
 # Shared env profile
 env=dev
 ```
+
+Biến thường dùng thêm cho chatbot:
+
+```env
+# Chọn database đích cho chat + image storage
+MONGODB_DB_NAME=chatbot_db
+
+# Optional X.509 auth cho MongoDB Atlas
+MONGODB_X509_ENABLED=false
+MONGODB_X509_URI=
+MONGODB_X509_CERT_PATH=
+
+# Firebase RTDB fallback cho gallery ảnh
+FIREBASE_RTDB_URL=
+FIREBASE_DB_SECRET=
+
+# Google Drive upload qua service account
+GOOGLE_DRIVE_ENABLED=false
+GOOGLE_DRIVE_SA_JSON_PATH=config/google-drive-sa.json
+GOOGLE_DRIVE_FOLDER_ID=
+```
+
+Lưu ý vận hành:
+
+- Chatbot app mới dùng `MONGODB_DB_NAME`; nếu không khai báo sẽ mặc định là `chatbot_db`.
+- Luồng image storage cũng dùng explicit DB name, không còn phụ thuộc default database trong connection string.
+- Google Drive bằng service account thường không upload được vào personal Drive do giới hạn quota; nên dùng Shared Drive hoặc tắt Drive upload.
 
 Cơ chế tải env: Mỗi service gọi `load_shared_env(__file__)` từ `services/shared_env.py` → tự tìm `app/config/.env_{env}` hoặc `app/config/.env`.
 
@@ -138,6 +166,7 @@ services/
   chatbot/              # Multi-model AI Chatbot (FastAPI)
     fastapi_app/        #   App factory, routers, models, dependencies
     src/                #   Core logic: chatbot, video_generation, OCR, STT
+    core/               #   Provider routing, image/chat storage, MongoDB/Firebase/Drive helpers
   stable-diffusion/     # Image generation (SDXL)
   edit-image/           # ComfyUI-based image editing
   mcp-server/           # Model Context Protocol server
@@ -148,7 +177,7 @@ private/           # Dữ liệu/submodule nội bộ
 
 ## Kiến trúc tích hợp
 
-```
+```text
 services/shared_env.py ← tất cả services load .env qua đây
          ↓
      app/config/
@@ -160,6 +189,33 @@ services/shared_env.py ← tất cả services load .env qua đây
          ├── rate_limiter.py     → Gemini/OpenAI rate limiting
          └── response_cache.py   → LLM response caching
 ```
+
+## Lưu trữ ảnh
+
+Luồng lưu ảnh hiện tại:
+
+1. Tạo ảnh qua provider router.
+2. Lưu file local trong chatbot storage.
+3. Upload ImgBB để lấy public URL.
+4. Ghi metadata vào MongoDB nếu kết nối được.
+5. Ghi thêm vào Firebase RTDB như fallback/index cho gallery.
+6. Nếu bật Google Drive và service account hợp lệ, thử upload thêm lên Drive.
+
+Các endpoint liên quan:
+
+```text
+POST /api/save-generated-image     # Lưu ảnh generated + upload cloud/db
+POST /api/gallery/upload-db        # Đồng bộ ảnh local từ gallery lên cloud/db
+GET  /api/image-gen/images/{id}    # Serve ảnh đã tạo
+GET  /api/image-gen/meta/{id}      # Metadata ảnh
+POST /api/image-gen/save/{id}      # Re-upload một ảnh đã có lên cloud/db
+```
+
+Ghi chú:
+
+- Nếu ImgBB thành công nhưng MongoDB lỗi, ảnh vẫn có thể có cloud URL nhưng `saved_to_mongodb=false`.
+- Nếu Firestore Admin SDK không có service account, hệ thống vẫn có thể lưu qua Firebase RTDB.
+- Google Drive là nhánh best-effort; lỗi Drive không chặn luồng lưu ảnh chính.
 
 ## Tài liệu liên quan
 
