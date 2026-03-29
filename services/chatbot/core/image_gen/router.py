@@ -101,7 +101,7 @@ class ImageGenerationRouter:
             )
 
         # ComfyUI (local) â€” always available as fallback
-        comfyui_url = os.getenv("COMFYUI_URL", os.getenv("SD_API_URL", "http://127.0.0.1:8189"))
+        comfyui_url = os.getenv("COMFYUI_URL", os.getenv("SD_API_URL", "http://127.0.0.1:8188"))
         self._providers["comfyui"] = ProviderConfig(
             provider=ComfyUIProvider(
                 base_url=comfyui_url,
@@ -412,3 +412,4 @@ class ImageGenerationRouter:
             candidates.sort(key=lambda c: c.priority, reverse=True)
 
         return candidates
+
