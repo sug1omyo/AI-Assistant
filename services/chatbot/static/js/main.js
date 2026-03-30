@@ -34,8 +34,8 @@ class ChatBotApp {
         window.chatManager = this.chatManager;
         window.chatApp = this;
         
-        // State — auto-enable all image tools on startup
-        this.activeTools = new Set(['image-generation', 'img2img']);
+        // State — no tools active by default
+        this.activeTools = new Set();
         this.conversationActive = false;
         this.currentAbortController = null;
         this.messageHistory = {}; // Store message versions: { messageId: [version1, version2, ...] }
@@ -95,89 +95,64 @@ class ChatBotApp {
         console.log('[App] Setting up file upload handler...');
         console.log('[App] fileInput element:', elements.fileInput);
         
-        // Setup file handling with AUTO-ANALYSIS
+        // Staged files waiting to be sent with the next message
+        this._stagedFiles = [];
+
+        // Setup file handling — STAGING MODE (files wait until user sends message)
         const newFileInput = this.fileHandler.setupFileInput(elements.fileInput, async (files) => {
-            console.log('[App] ===== FILE UPLOAD CALLBACK =====');
-            console.log('[App] Received files:', files.length, files);
-            
             try {
-                // Process NEW files only
-                const processedFiles = [];
                 for (let file of files) {
-                    console.log('[App] Processing file:', file.name);
                     try {
                         const fileData = await this.fileHandler.processFile(file);
-                        console.log('[App] Processed successfully:', fileData.name);
-                        processedFiles.push(fileData);
+                        this._stagedFiles.push(fileData);
                     } catch (error) {
-                        // Show error in chat instead of alert
-                        const errorTimestamp = this.uiUtils.formatTimestamp(new Date());
-                        const customPromptUsed = window.customPromptEnabled === true;
-                        this.messageRenderer.addMessage(
-                            elements.chatContainer,
-                            `❌ **Lỗi xử lý file "${file.name}":** ${error.message}`,
-                            false,
-                            'system',
-                            'error',
-                            errorTimestamp,
-                            null,
-                            customPromptUsed
-                        );
                         console.error('[App] File processing error:', error);
                     }
                 }
-                
-                if (processedFiles.length === 0) {
-                    console.log('[App] No files processed');
-                    newFileInput.value = '';
-                    return;
-                }
-                
-                console.log('[App] Adding', processedFiles.length, 'files to session');
-                // Add processed files to session
-                for (let fileData of processedFiles) {
-                    this.fileHandler.currentSessionFiles.push(fileData);
-                }
-                this.saveFilesToCurrentSession();
-                
-                // Show NEW files in chat with instructions
-                const timestamp = this.uiUtils.formatTimestamp(new Date());
-                this.messageRenderer.addFileMessage(elements.chatContainer, processedFiles, timestamp);
-                
-                // Show instruction message to user
-                const instructionTimestamp = this.uiUtils.formatTimestamp(new Date());
-                const customPromptUsed = window.customPromptEnabled === true;
-                this.messageRenderer.addMessage(
-                    elements.chatContainer,
-                    `✅ **Đã tải lên ${processedFiles.length} file.** Bạn có thể hỏi tôi về nội dung file bây giờ! 💬`,
-                    false,
-                    'system',
-                    'info',
-                    instructionTimestamp,
-                    null,
-                    customPromptUsed
-                );
-                
-                // Clear the input
                 newFileInput.value = '';
+                this._renderStagingArea();
             } catch (error) {
                 console.error('Upload error:', error);
-                // Show error in chat instead of alert
-                const errorTimestamp = this.uiUtils.formatTimestamp(new Date());
-                const customPromptUsed = window.customPromptEnabled === true;
-                this.messageRenderer.addMessage(
-                    elements.chatContainer,
-                    `❌ **Lỗi upload file:** ${error.message}`,
-                    false,
-                    'system',
-                    'error',
-                    errorTimestamp,
-                    null,
-                    customPromptUsed
-                );
                 newFileInput.value = '';
             }
         });
+
+        // Render staging previews above the textarea
+        this._renderStagingArea = () => {
+            const area = document.getElementById('fileStagingArea');
+            if (!area) return;
+            if (this._stagedFiles.length === 0) {
+                area.style.display = 'none';
+                area.innerHTML = '';
+                return;
+            }
+            area.style.display = 'flex';
+            area.innerHTML = this._stagedFiles.map((f, i) => {
+                const icon = f.type && f.type.startsWith('image/') ? '🖼️' : '📄';
+                return `<span class="file-staging__badge">${icon} ${f.name} <button class="file-staging__remove" data-idx="${i}" title="Remove">×</button></span>`;
+            }).join('');
+            area.querySelectorAll('.file-staging__remove').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const idx = parseInt(e.currentTarget.dataset.idx);
+                    this._stagedFiles.splice(idx, 1);
+                    this._renderStagingArea();
+                });
+            });
+        };
+
+        // Flush staged files into session when message is sent
+        const _originalSend = this.sendMessage ? this.sendMessage.bind(this) : null;
+        this._flushStagedFiles = () => {
+            if (this._stagedFiles.length === 0) return;
+            for (let fileData of this._stagedFiles) {
+                this.fileHandler.currentSessionFiles.push(fileData);
+            }
+            this.saveFilesToCurrentSession();
+            const timestamp = this.uiUtils.formatTimestamp(new Date());
+            this.messageRenderer.addFileMessage(elements.chatContainer, this._stagedFiles, timestamp);
+            this._stagedFiles = [];
+            this._renderStagingArea();
+        };
         
         // Update elements reference to use new file input
         if (newFileInput) {
@@ -551,6 +526,9 @@ class ChatBotApp {
      * Send message
      */
     async sendMessage() {
+        // Flush any staged files into the session before sending
+        if (this._flushStagedFiles) this._flushStagedFiles();
+
         const elements = this.uiUtils.elements;
         const formValues = this.uiUtils.getFormValues();
         let message = formValues.message.trim();

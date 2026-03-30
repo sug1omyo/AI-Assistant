@@ -312,13 +312,10 @@ def sd_preset_detail(preset_id):
 def sd_samplers():
     """Get samplers list"""
     try:
-        from src.utils.sd_client import get_sd_client
-        
-        sd_client = get_sd_client()
+        from src.utils.comfyui_client import get_comfyui_client
+        sd_client = get_comfyui_client()
         samplers = sd_client.get_samplers()
-        
         return jsonify({'success': True, 'samplers': samplers})
-        
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -328,9 +325,8 @@ def sd_samplers():
 def sd_loras():
     """Get LoRA models list"""
     try:
-        from src.utils.sd_client import get_sd_client
-        
-        sd_client = get_sd_client()
+        from src.utils.comfyui_client import get_comfyui_client
+        sd_client = get_comfyui_client()
         loras_raw = sd_client.get_loras()
         
         loras_simple = []
@@ -354,9 +350,8 @@ def sd_loras():
 def sd_vaes():
     """Get VAE models list"""
     try:
-        from src.utils.sd_client import get_sd_client
-        
-        sd_client = get_sd_client()
+        from src.utils.comfyui_client import get_comfyui_client
+        sd_client = get_comfyui_client()
         vaes_raw = sd_client.get_vaes()
         
         vae_names = []
@@ -434,7 +429,8 @@ def generate_image():
                 base64_image = base64.b64encode(image_bytes).decode('utf-8')
                 base64_images = [base64_image]
             else:
-                return jsonify({'error': 'Failed to generate image'}), 500
+                logger.error(f"[TEXT2IMG] generate_image returned None for prompt: {prompt[:80]}")
+                return jsonify({'error': 'ComfyUI failed to generate image. Check chatbot logs for details.'}), 500
         else:
             # Fallback to A1111 API
             result = sd_client.txt2img(**params)
@@ -1332,4 +1328,117 @@ def save_cost_log():
     if len(costs) > 200:
         _cost_log[sid] = costs[-200:]
     return jsonify({'success': True})
+
+
+# ============================================================================
+# IMAGE INTERROGATION (CLIP / WD Tagger)
+# ============================================================================
+
+@sd_bp.route('/sd-api/interrogate', methods=['POST'])
+@sd_bp.route('/api/sd-interrogate', methods=['POST'])
+def sd_interrogate():
+    """Extract tags/caption from an image using ComfyUI WD14 tagger or BLIP."""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        image_b64 = data.get('image', '')
+        if not image_b64:
+            return jsonify({'error': 'image field is required (base64)'}), 400
+
+        # Strip data URI prefix if present
+        if ',' in image_b64:
+            image_b64 = image_b64.split(',', 1)[1]
+
+        from src.utils.comfyui_client import get_comfyui_client
+        sd_client = get_comfyui_client()
+
+        if not sd_client.check_health():
+            return jsonify({'error': 'ComfyUI is not running'}), 503
+
+        # Upload image to ComfyUI
+        image_bytes = base64.b64decode(image_b64)
+        upload_result = sd_client._upload_image(image_bytes)
+        if not upload_result:
+            return jsonify({'error': 'Failed to upload image to ComfyUI'}), 500
+
+        input_image_name = upload_result.get('name')
+
+        # Try WD14 tagger workflow first, fallback to BLIP captioning
+        workflow = {
+            "1": {
+                "class_type": "LoadImage",
+                "inputs": {"image": input_image_name}
+            },
+            "2": {
+                "class_type": "WD14Tagger|pysssss",
+                "inputs": {
+                    "image": ["1", 0],
+                    "model": "wd-v1-4-moat-tagger-v2",
+                    "threshold": 0.35,
+                    "character_threshold": 0.85,
+                    "replace_underscore": True,
+                    "trailing_comma": False,
+                    "exclude_tags": "",
+                }
+            },
+            "3": {
+                "class_type": "ShowText|pysssss",
+                "inputs": {"text": ["2", 0]}
+            }
+        }
+
+        prompt_id = sd_client._queue_prompt(workflow)
+        caption = ''
+
+        if prompt_id:
+            output = sd_client._wait_for_prompt(prompt_id, timeout=60)
+            if output and isinstance(output, dict):
+                for node_output in output.values():
+                    for key in ('text', 'tags', 'caption'):
+                        val = node_output.get(key)
+                        if isinstance(val, list) and val:
+                            caption = val[0] if isinstance(val[0], str) else str(val[0])
+                            break
+                        elif isinstance(val, str) and val:
+                            caption = val
+                            break
+                    if caption:
+                        break
+
+        if not caption:
+            # Fallback: basic BLIP caption workflow
+            blip_workflow = {
+                "1": {
+                    "class_type": "LoadImage",
+                    "inputs": {"image": input_image_name}
+                },
+                "2": {
+                    "class_type": "BLIPCaption",
+                    "inputs": {
+                        "image": ["1", 0],
+                        "mode": "caption",
+                        "question": "Describe this image in detail",
+                    }
+                }
+            }
+            prompt_id2 = sd_client._queue_prompt(blip_workflow)
+            if prompt_id2:
+                output2 = sd_client._wait_for_prompt(prompt_id2, timeout=60)
+                if output2 and isinstance(output2, dict):
+                    for node_output in output2.values():
+                        caption = node_output.get('caption', '') or node_output.get('text', '')
+                        if isinstance(caption, list):
+                            caption = caption[0] if caption else ''
+                        if caption:
+                            break
+
+        if not caption:
+            return jsonify({'error': 'No interrogation nodes available in ComfyUI (install WD14 Tagger or BLIP node)'}), 422
+
+        logger.info(f"[Interrogate] Result: {caption[:80]}")
+        return jsonify({'success': True, 'caption': caption})
+
+    except Exception as e:
+        import traceback
+        logger.error(f"[Interrogate] Error: {e}\n{traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
 

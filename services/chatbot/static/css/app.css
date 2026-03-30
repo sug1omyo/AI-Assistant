@@ -1332,7 +1332,7 @@ body.light-mode .message__content pre {
   padding: 0 14px;
 }
 .thinking-content--open {
-  max-height: 400px;
+  max-height: 600px;
   opacity: 1;
   padding: 0 14px 12px;
   overflow-y: auto;
@@ -1348,22 +1348,49 @@ body.light-mode .message__content pre {
 .thinking-steps {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 .thinking-step {
   font-size: 13px;
   line-height: 1.6;
-  padding: 4px 8px;
-  border-radius: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
   transition: all 0.3s ease;
+}
+.thinking-step__title {
+  font-weight: 700;
+  font-size: 13.5px;
+  margin-bottom: 2px;
+  line-height: 1.4;
+}
+.thinking-step__desc {
+  font-weight: 400;
+  font-size: 13px;
+  color: inherit;
+  opacity: 0.85;
+  line-height: 1.55;
 }
 .thinking-step--active {
   color: #7c6cf0;
   background: rgba(124, 108, 240, 0.06);
   animation: stepFadeIn 0.4s ease forwards;
 }
+.thinking-step--active .thinking-step__title {
+  color: #7c6cf0;
+}
+.thinking-step--active .thinking-step__desc {
+  color: #9b8ff5;
+}
 .thinking-step--done {
   color: var(--text-secondary);
+}
+.thinking-step--done .thinking-step__title {
+  color: var(--text-primary);
+  opacity: 0.8;
+}
+.thinking-step--done .thinking-step__desc {
+  color: var(--text-secondary);
+  opacity: 0.7;
 }
 .thinking-step--reasoning {
   color: #a78bfa;
@@ -3212,6 +3239,46 @@ body.light-mode .message__content pre {
 /* Fork option highlight */
 .message-more-popup .option-item[data-action="fork"] {
   color: var(--accent, #007bff);
+}
+
+/* ── File Staging Area ── */
+.file-staging {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 12px 2px;
+  align-items: center;
+}
+
+.file-staging__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-secondary, #2a2a2a);
+  border: 1px solid var(--border, #444);
+  border-radius: 16px;
+  padding: 3px 10px 3px 8px;
+  font-size: 12px;
+  color: var(--text-primary, #eee);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-staging__remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted, #888);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 0 0 2px;
+  flex-shrink: 0;
+}
+
+.file-staging__remove:hover {
+  color: var(--error, #e55);
 }
 .message-more-popup .option-item[data-action="fork"]:hover {
   background: color-mix(in srgb, var(--accent, #007bff) 12%, transparent);

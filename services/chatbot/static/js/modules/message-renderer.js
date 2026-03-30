@@ -440,8 +440,9 @@ export class MessageRenderer {
     
     /**
      * Add a live thinking step to the thinking container
+     * Supports structured format: **Title**\nDescription
      * @param {HTMLElement} container - thinking container
-     * @param {string} stepText - step text content
+     * @param {string} stepText - step text content (may contain **bold** markers)
      * @param {boolean} isReasoningChunk - if true, append to existing reasoning block
      */
     addThinkingStep(container, stepText, isReasoningChunk = false) {
@@ -468,7 +469,25 @@ export class MessageRenderer {
             
             const step = document.createElement('div');
             step.className = 'thinking-step thinking-step--active';
-            step.textContent = stepText;
+            
+            // Parse **Title**\nDescription format
+            const boldMatch = stepText.match(/^\*\*(.+?)\*\*\n?([\s\S]*)$/);
+            if (boldMatch) {
+                const titleEl = document.createElement('div');
+                titleEl.className = 'thinking-step__title';
+                titleEl.textContent = boldMatch[1];
+                step.appendChild(titleEl);
+                
+                if (boldMatch[2] && boldMatch[2].trim()) {
+                    const descEl = document.createElement('div');
+                    descEl.className = 'thinking-step__desc';
+                    descEl.textContent = boldMatch[2].trim();
+                    step.appendChild(descEl);
+                }
+            } else {
+                step.textContent = stepText;
+            }
+            
             stepsContainer.appendChild(step);
         }
         

@@ -397,3 +397,31 @@ def recommend_model():
         'recommendations': recommendations,
         'default': recommendations[0]['id'] if recommendations else 'grok',
     })
+
+
+@models_bp.route('/api/local-models-status', methods=['GET'])
+def local_models_status():
+    """Check which local models are available and loaded"""
+    try:
+        # Try to import local model loader
+        try:
+            from core.model_loader import model_loader
+            LOCALMODELS_AVAILABLE = True
+        except ImportError:
+            LOCALMODELS_AVAILABLE = False
+
+        if not LOCALMODELS_AVAILABLE:
+            return jsonify({
+                'available': False,
+                'error': 'Local models not available. Install: pip install torch transformers accelerate'
+            })
+
+        status = model_loader.get_available_models()
+        return jsonify({
+            'available': True,
+            'models': status
+        })
+
+    except Exception as e:
+        logger.error(f"[Local Model Status] Error: {str(e)}")
+        return jsonify({'available': False, 'error': 'Failed to retrieve local model status'}), 500

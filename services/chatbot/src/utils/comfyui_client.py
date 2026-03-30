@@ -471,14 +471,21 @@ class ComfyUIClient:
             # Wait for completion
             output = self._wait_for_prompt(prompt_id, timeout=300)
             if not output:
+                logger.error(f"ComfyUI prompt {prompt_id} returned no output (timeout or execution error)")
                 return None
-            
+            if 'error' in output:
+                logger.error(f"ComfyUI prompt {prompt_id} execution error: {output['error']}")
+                return None
+
             # Get the image
             image_data = self._get_image(output)
+            if image_data is None:
+                logger.error(f"ComfyUI _get_image returned None for outputs: {list(output.keys())}")
             return image_data
             
         except Exception as e:
-            logger.error(f"Error generating image: {e}")
+            import traceback
+            logger.error(f"Error generating image: {e}\n{traceback.format_exc()}")
             return None
     
     def _queue_prompt(self, workflow: Dict) -> Optional[str]:
@@ -494,8 +501,18 @@ class ComfyUIClient:
                 timeout=30
             )
             if response.status_code == 200:
-                return response.json().get('prompt_id')
-            return None
+                result = response.json()
+                prompt_id = result.get('prompt_id')
+                if not prompt_id:
+                    logger.error(f"ComfyUI /prompt returned no prompt_id: {result}")
+                return prompt_id
+            else:
+                try:
+                    body = response.json()
+                except Exception:
+                    body = response.text
+                logger.error(f"ComfyUI /prompt returned {response.status_code}: {body}")
+                return None
         except Exception as e:
             logger.error(f"Error queuing prompt: {e}")
             return None
