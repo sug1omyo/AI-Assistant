@@ -562,10 +562,15 @@ class ChatBotApp {
             return;
         }
 
-        // ── Image Generation V2 Auto-Detect ──────────────────
-        // If message looks like an image request, generate inline via multi-provider
-        if (message && ImageGenV2.isImageRequest(message)) {
-            console.log('[App] Image generation intent detected, routing to V2');
+        // Get active tools early — needed for routing
+        const activeTools = window.getActiveTools ? window.getActiveTools() : Array.from(this.activeTools);
+
+        // ── Image Generation V2 — Tool-aware routing ─────────
+        // Route to image gen if: (1) tool is ON, OR (2) message looks like an image request
+        const imageGenToolActive = activeTools.includes('image-generation');
+        const isImageIntent = message && (imageGenToolActive || ImageGenV2.isImageRequest(message));
+        if (isImageIntent) {
+            console.log('[App] Image generation routing:', imageGenToolActive ? 'tool active' : 'intent detected');
             const timestamp = this.uiUtils.formatTimestamp(new Date());
             this.messageRenderer.addMessage(
                 elements.chatContainer, message, true,
@@ -629,7 +634,93 @@ class ChatBotApp {
             await this.saveCurrentSession(true);  // Persist image message before any session switch
             return;  // Don't send to chat API
         }
-        // ── End Image Gen V2 Auto-Detect ─────────────────────
+        // ── End Image Gen V2 ─────────────────────────────────
+
+        // ── Img2Img Tool — route to img2img API when active ──
+        const img2imgToolActive = activeTools.includes('img2img');
+        if (img2imgToolActive && message) {
+            // Find the last generated image in the conversation to use as source
+            const allImages = elements.chatContainer.querySelectorAll('.igv2-chat-image img, .generated-preview img, .message img[src*="/api/image-gen/"], .message img[src*="/storage/images/"]');
+            const lastImg = allImages.length > 0 ? allImages[allImages.length - 1] : null;
+            
+            if (lastImg) {
+                console.log('[App] Img2Img tool active, using last image as source');
+                const timestamp = this.uiUtils.formatTimestamp(new Date());
+                this.messageRenderer.addMessage(
+                    elements.chatContainer, message, true,
+                    formValues.model, formValues.context, timestamp
+                );
+                this.uiUtils.clearInput();
+
+                this.messageRenderer.addMessage(
+                    elements.chatContainer,
+                    '🖼️ Đang chuyển đổi ảnh (Img2Img)...',
+                    false, formValues.model, formValues.context,
+                    this.uiUtils.formatTimestamp(new Date())
+                );
+
+                try {
+                    // Fetch source image as base64
+                    const imgResp = await fetch(lastImg.src);
+                    const blob = await imgResp.blob();
+                    const base64 = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(reader.result.split(',')[1]);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(blob);
+                    });
+
+                    const result = await this.apiService.generateImg2Img({
+                        init_images: [base64],
+                        prompt: message,
+                        negative_prompt: 'bad quality, blurry, nsfw, nude',
+                        denoising_strength: 0.6,
+                        steps: 28,
+                        width: 512,
+                        height: 512,
+                    });
+
+                    // Remove loading message
+                    const lastAssistant = elements.chatContainer.querySelector('.message.assistant:last-child');
+                    if (lastAssistant) lastAssistant.remove();
+
+                    if (result.images && result.images.length > 0) {
+                        const imgSrc = result.images[0].startsWith('data:')
+                            ? result.images[0]
+                            : `data:image/png;base64,${result.images[0]}`;
+                        this.messageRenderer.addMessage(
+                            elements.chatContainer,
+                            `<div class="igv2-chat-image"><img src="${imgSrc}" alt="Img2Img Result"><div class="igv2-chat-meta">🖼️ Img2Img | Prompt: ${message.substring(0, 80)}</div></div>`,
+                            false, formValues.model, formValues.context,
+                            this.uiUtils.formatTimestamp(new Date())
+                        );
+                    } else {
+                        this.messageRenderer.addMessage(
+                            elements.chatContainer,
+                            `❌ Img2Img thất bại: ${result.error || 'Không nhận được ảnh'}`,
+                            false, formValues.model, formValues.context,
+                            this.uiUtils.formatTimestamp(new Date())
+                        );
+                    }
+                } catch (e) {
+                    const lastAssistant = elements.chatContainer.querySelector('.message.assistant:last-child');
+                    if (lastAssistant) lastAssistant.remove();
+                    this.messageRenderer.addMessage(
+                        elements.chatContainer,
+                        `❌ Img2Img lỗi: ${e.message}`,
+                        false, formValues.model, formValues.context,
+                        this.uiUtils.formatTimestamp(new Date())
+                    );
+                }
+
+                elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+                await this.saveCurrentSession(true);
+                return;
+            }
+            // No source image found → fall through to normal chat
+            console.log('[App] Img2Img active but no source image found, falling through to chat');
+        }
+        // ── End Img2Img ──────────────────────────────────────
         
         // Handle Auto mode - decide if deep thinking is needed
         let deepThinking = formValues.deepThinking;
@@ -649,8 +740,7 @@ class ChatBotApp {
             console.log('[App] Auto-enabled Deep Thinking due to attached files');
         }
         
-        // Get active tools from the new tools menu
-        const activeTools = window.getActiveTools ? window.getActiveTools() : Array.from(this.activeTools);
+        // activeTools already declared above (before image gen routing)
         
         // Include MCP context if enabled
         const mcpContextStr = this.getMcpContextString ? this.getMcpContextString() : '';
@@ -709,16 +799,10 @@ class ChatBotApp {
             elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
         }
         
-        // If deep thinking is enabled, add thinking container with loading state
-        let thinkingContainer = null;
-        if (deepThinking) {
-            const thinkingSection = this.messageRenderer.createThinkingSection(null, true);
-            elements.chatContainer.appendChild(thinkingSection);
-            thinkingContainer = thinkingSection;
-            
-            // Scroll to bottom to show thinking
-            elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
-        }
+        // Always show thinking container with live animation (for ALL messages)
+        let thinkingContainer = this.messageRenderer.createThinkingSection(null, true);
+        elements.chatContainer.appendChild(thinkingContainer);
+        elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
         
         // Clear input (but keep files attached for this session)
         this.uiUtils.clearInput();
@@ -735,34 +819,131 @@ class ChatBotApp {
             
             // Get agent config if enabled
             const agentConfig = window.getAgentConfig ? window.getAgentConfig() : null;
-            
-            // Send to API with abort signal
-            const data = await this.apiService.sendMessage(
-                message,
-                formValues.model,
-                formValues.context,
-                activeTools,
-                deepThinking,
-                history,
-                this.fileHandler.getFiles(), // Empty for now, all handled in message
-                selectedMemories,
-                this.currentAbortController.signal,
-                agentConfig ? agentConfig.systemPrompt : '',  // System prompt
-                agentConfig  // Full agent config for advanced parameters
-            );
-            
-            // Add response to chat with version support
+
+            // ── Use SSE streaming for live thinking + response ──
+            let fullResponse = '';
+            let thinkingSteps = [];
+            let thinkingData = {};
+            let streamFailed = false;
+
+            // Prepare streaming message div for progressive rendering
             const responseTimestamp = this.uiUtils.formatTimestamp(new Date());
-            const responseContent = data.error ? `❌ **Lỗi:** ${data.error}` : data.response;
-            
-            // If image loading placeholder exists, replace it with the actual response
+            const streamMsgDiv = document.createElement('div');
+            streamMsgDiv.className = 'message assistant';
+            streamMsgDiv.dataset.timestamp = responseTimestamp;
+            streamMsgDiv.dataset.model = formValues.model || '';
+            streamMsgDiv.style.display = 'none'; // Hidden until first chunk arrives
+            const streamAvatar = document.createElement('div');
+            streamAvatar.className = 'message__avatar';
+            streamAvatar.textContent = this.messageRenderer.modelIcons[formValues.model] || '🤖';
+            streamMsgDiv.appendChild(streamAvatar);
+            const streamBody = document.createElement('div');
+            streamBody.className = 'message__body';
+            const streamContentDiv = document.createElement('div');
+            streamContentDiv.className = 'message-content';
+            const streamTextDiv = document.createElement('div');
+            streamTextDiv.className = 'message-text streaming-cursor';
+            streamContentDiv.appendChild(streamTextDiv);
+            streamBody.appendChild(streamContentDiv);
+            streamMsgDiv.appendChild(streamBody);
+            elements.chatContainer.appendChild(streamMsgDiv);
+
+            try {
+                await this.apiService.sendStreamMessage(
+                    {
+                        message: message,
+                        model: formValues.model,
+                        context: formValues.context,
+                        deepThinking: deepThinking,
+                        thinkingMode: thinkingMode,
+                        history: history,
+                        memories: selectedMemories,
+                        customPrompt: agentConfig ? agentConfig.systemPrompt : '',
+                    },
+                    this.currentAbortController.signal,
+                    {
+                        onThinkingStart: (data) => {
+                            // Thinking already visible
+                        },
+                        onThinking: (data) => {
+                            thinkingSteps.push(data.step);
+                            this.messageRenderer.addThinkingStep(
+                                thinkingContainer, data.step, !!data.is_reasoning_chunk
+                            );
+                            elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+                        },
+                        onThinkingEnd: (data) => {
+                            thinkingData = data;
+                            this.messageRenderer.finalizeThinking(thinkingContainer, data);
+                        },
+                        onChunk: (data) => {
+                            // Show the streaming message on first chunk
+                            if (streamMsgDiv.style.display === 'none') {
+                                streamMsgDiv.style.display = '';
+                            }
+                            fullResponse += data.content;
+                            // Progressive markdown rendering
+                            if (typeof marked !== 'undefined') {
+                                const rawHtml = marked.parse(fullResponse);
+                                streamTextDiv.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml;
+                            } else {
+                                streamTextDiv.textContent = fullResponse;
+                            }
+                            elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+                        },
+                        onComplete: (data) => {
+                            fullResponse = data.response || fullResponse;
+                        },
+                        onError: (data) => {
+                            console.error('[Stream] Error:', data.error);
+                            streamFailed = true;
+                        },
+                    }
+                );
+            } catch (streamErr) {
+                if (streamErr.name === 'AbortError') throw streamErr;
+                console.warn('[Stream] SSE failed, falling back to regular POST:', streamErr.message);
+                streamFailed = true;
+            }
+
+            // ── Fallback to regular POST if streaming failed ──
+            if (streamFailed) {
+                // Clean up streaming elements
+                streamMsgDiv.remove();
+                
+                const data = await this.apiService.sendMessage(
+                    message,
+                    formValues.model,
+                    formValues.context,
+                    activeTools,
+                    deepThinking,
+                    history,
+                    this.fileHandler.getFiles(),
+                    selectedMemories,
+                    this.currentAbortController.signal,
+                    agentConfig ? agentConfig.systemPrompt : '',
+                    agentConfig
+                );
+                fullResponse = data.error ? `❌ **Lỗi:** ${data.error}` : data.response;
+                
+                // Update thinking with data from non-streaming response
+                if (data.thinking_process) {
+                    this.messageRenderer.updateThinkingContent(thinkingContainer, data.thinking_process);
+                } else {
+                    this.messageRenderer.finalizeThinking(thinkingContainer, { summary: 'Hoàn thành' });
+                }
+            }
+
+            // ── Finalize response display ──
+            const responseContent = fullResponse;
+
+            // Handle image response
             const isImageResponse = responseContent && (responseContent.includes('Image Generated') || responseContent.includes('generated-preview') || responseContent.includes('Image Generation Failed'));
             if (imageLoadingPlaceholder && isImageResponse) {
-                // Replace the loading placeholder with the actual image result
                 const resultDiv = document.createElement('div');
                 resultDiv.className = 'message assistant';
                 resultDiv.dataset.timestamp = responseTimestamp;
-                resultDiv.dataset.model = data.model || formValues.model || '';
+                resultDiv.dataset.model = formValues.model || '';
                 const avatarDiv = document.createElement('div');
                 avatarDiv.className = 'message__avatar';
                 avatarDiv.textContent = '🤖';
@@ -781,61 +962,63 @@ class ChatBotApp {
                 }
                 contentDiv.appendChild(textDiv);
                 bodyDiv.appendChild(contentDiv);
-                // Add action buttons 
                 this.messageRenderer.addMessageButtons(contentDiv, responseContent, false, resultDiv);
                 resultDiv.appendChild(bodyDiv);
                 
                 imageLoadingPlaceholder.replaceWith(resultDiv);
-                // Refresh Lucide icons
                 if (window.lucide) lucide.createIcons({ nodes: [resultDiv] });
+                // Remove the streaming div since we replaced with image
+                streamMsgDiv.remove();
                 elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
-                // Skip normal addMessage flow for image responses
             } else {
-                // Remove image loading placeholder if response is not image-related
                 if (imageLoadingPlaceholder) imageLoadingPlaceholder.remove();
-            
-            // If deep thinking was enabled and we have thinking_process
-            if (formValues.deepThinking && data.thinking_process && thinkingContainer) {
-                // Update thinking container with actual thinking process
-                this.messageRenderer.updateThinkingContent(thinkingContainer, data.thinking_process);
-            } else if (thinkingContainer) {
-                // Remove thinking container if no thinking process returned
-                thinkingContainer.remove();
+                
+                // Remove streaming cursor class and finalize the streamed message
+                streamTextDiv.classList.remove('streaming-cursor');
+                
+                // If streaming was used, the streamMsgDiv already has content.
+                // Re-render final markdown cleanly and add buttons.
+                if (!streamFailed && streamMsgDiv.style.display !== 'none') {
+                    if (typeof marked !== 'undefined') {
+                        const rawHtml = marked.parse(responseContent);
+                        streamTextDiv.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml;
+                    }
+                    // Highlight code blocks
+                    if (typeof hljs !== 'undefined') {
+                        streamTextDiv.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+                    }
+                    // Add action buttons to streaming message
+                    this.messageRenderer.addMessageButtons(streamContentDiv, responseContent, false, streamMsgDiv);
+                    if (window.lucide) lucide.createIcons({ nodes: [streamMsgDiv] });
+                } else if (streamFailed) {
+                    // Non-streaming fallback: use addMessage
+                    const agentConfigForDisplay = window.getAgentConfig ? window.getAgentConfig() : null;
+                    this.messageRenderer.addMessage(
+                        elements.chatContainer,
+                        responseContent,
+                        false,
+                        formValues.model,
+                        formValues.context,
+                        responseTimestamp,
+                        thinkingData.steps || null,
+                        customPromptUsed,
+                        agentConfigForDisplay
+                    );
+                }
             }
             
-            // Check if custom prompt is being used
-            const customPromptUsed = window.customPromptEnabled === true;
-            
-            // Get agent config for display
-            const agentConfigForDisplay = window.getAgentConfig ? window.getAgentConfig() : null;
-            
-            const responseMsg = this.messageRenderer.addMessage(
-                elements.chatContainer,
-                responseContent,
-                false,
-                formValues.model,
-                formValues.context,
-                responseTimestamp,
-                data.thinking_process || null,
-                customPromptUsed,
-                agentConfigForDisplay
-            );
-            
             // Update the latest version with the new response
-            // Find the user message with messageId
             const userMessages = elements.chatContainer.querySelectorAll('.message.user[data-message-id]');
             if (userMessages.length > 0) {
                 const lastUserMsg = userMessages[userMessages.length - 1];
                 const messageId = lastUserMsg.dataset.messageId;
                 
                 if (messageId) {
-                    // Get history and update last version's response
-                    const history = this.messageRenderer.getMessageHistory(messageId);
-                    if (history.length > 0) {
-                        const lastVersion = history[history.length - 1];
+                    const msgHistory = this.messageRenderer.getMessageHistory(messageId);
+                    if (msgHistory.length > 0) {
+                        const lastVersion = msgHistory[msgHistory.length - 1];
                         lastVersion.assistantResponse = responseContent;
                         
-                        // Save to chatManager
                         if (window.chatManager) {
                             const session = window.chatManager.getCurrentSession();
                             if (session && session.messageVersions && session.messageVersions[messageId]) {
@@ -864,18 +1047,19 @@ class ChatBotApp {
             
             // Save session with updated timestamp (new message)
             this.saveCurrentSession(true);
+
+            // Auto-generate title from latest user message (fire-and-forget)
+            this.autoGenerateTitleIfNeeded(formValues.message.trim());
             
             // Log to Firebase (async, non-blocking)
-            if (window.logChatToFirebase && !data.error) {
-                window.logChatToFirebase(message, formValues.model, data.response, []);
+            if (window.logChatToFirebase && !streamFailed) {
+                window.logChatToFirebase(message, formValues.model, fullResponse, []);
             }
             
             // Make images clickable (with retry for dynamically loaded images)
             const makeClickable = () => this.messageRenderer.makeImagesClickable((img) => this.openImagePreview(img));
             setTimeout(makeClickable, 100);
-            setTimeout(makeClickable, 500);  // Retry after 500ms for slower rendering
-            
-            } // end else (non-image response path)
+            setTimeout(makeClickable, 500);
             
         } catch (error) {
             // Remove thinking container if error
@@ -888,10 +1072,9 @@ class ChatBotApp {
             // Check if it was aborted by user
             if (error.name === 'AbortError') {
                 console.log('Generation stopped by user');
-                // Don't show error message, user intentionally stopped
             } else {
                 const errorTimestamp = this.uiUtils.formatTimestamp(new Date());
-                const customPromptUsed = window.customPromptEnabled === true;
+                const customPromptUsed2 = window.customPromptEnabled === true;
                 this.messageRenderer.addMessage(
                     elements.chatContainer,
                     `❌ **Lỗi kết nối:** ${error.message}`,
@@ -900,9 +1083,8 @@ class ChatBotApp {
                     formValues.context,
                     errorTimestamp,
                     null,
-                    customPromptUsed
+                    customPromptUsed2
                 );
-                // Save session with updated timestamp (new message even if error)
                 this.saveCurrentSession(true);
             }
         } finally {
@@ -1919,6 +2101,30 @@ class ChatBotApp {
         });
         
         return parts.join('\n\n---\n\n');
+    }
+
+    /**
+     * Auto-generate conversation title using qwen2.5:0.5b via Ollama
+     * Triggers only when the title is still the default placeholder
+     * @param {string} rawUserMessage - The latest user message (before any context injection)
+     */
+    async autoGenerateTitleIfNeeded(rawUserMessage) {
+        const session = this.chatManager.getCurrentSession();
+        if (!session) return;
+        const lang = localStorage.getItem('chatbot_language') || 'vi';
+        const defaults = ['Cuộc trò chuyện mới', 'New conversation', 'Untitled'];
+        if (!defaults.includes(session.title)) return; // already has a meaningful title
+        try {
+            const title = await this.chatManager.generateTitle(rawUserMessage);
+            if (title && !defaults.includes(title)) {
+                session.title = title;
+                await this.chatManager.saveSessions();
+                this.renderChatList();
+                console.log('[AutoTitle] Title set to:', title);
+            }
+        } catch (e) {
+            console.error('[AutoTitle] Error:', e);
+        }
     }
 }
 

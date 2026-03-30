@@ -338,8 +338,16 @@ class OpenAICompatibleChat(BaseModelChat):
             stream=True
         )
         for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
+            if chunk.choices:
+                delta = chunk.choices[0].delta
+                # Capture reasoning_content from models that support it
+                # (Grok, DeepSeek R1, etc.)
+                reasoning = getattr(delta, 'reasoning_content', None)
+                if reasoning:
+                    from core.thinking_generator import REASONING_PREFIX
+                    yield f'{REASONING_PREFIX}{reasoning}'
+                if delta.content:
+                    yield delta.content
 
 
 class QwenChat(BaseModelChat):
@@ -393,7 +401,12 @@ class QwenChat(BaseModelChat):
                             try:
                                 import json
                                 chunk = json.loads(data)
-                                content = chunk.get('choices', [{}])[0].get('delta', {}).get('content', '')
+                                delta = chunk.get('choices', [{}])[0].get('delta', {})
+                                reasoning = delta.get('reasoning_content', '')
+                                if reasoning:
+                                    from core.thinking_generator import REASONING_PREFIX
+                                    yield f'{REASONING_PREFIX}{reasoning}'
+                                content = delta.get('content', '')
                                 if content:
                                     yield content
                             except Exception:

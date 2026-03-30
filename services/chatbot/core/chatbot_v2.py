@@ -346,7 +346,8 @@ class ChatbotAgent:
         try:
             full_response = ""
             for chunk in handler.chat(ctx, get_system_prompts, stream=True):
-                full_response += chunk
+                if chunk and not chunk.startswith('\x02REASON\x03'):
+                    full_response += chunk
                 yield chunk
             
             # Save to history after streaming completes

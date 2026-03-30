@@ -384,29 +384,9 @@ try {
                                             <span class="tools-grid__icon"><i data-lucide="telescope" class="lucide"></i></span>
                                             <span class="tools-grid__label">Research</span>
                                         </button>
-                                        <button class="tools-grid__item" id="codeInterpreterBtn" title="Code Interpreter">
-                                            <span class="tools-grid__icon"><i data-lucide="terminal" class="lucide"></i></span>
-                                            <span class="tools-grid__label">Code</span>
-                                        </button>
-                                        <button class="tools-grid__item" id="translatorBtn" title="Translator">
-                                            <span class="tools-grid__icon"><i data-lucide="languages" class="lucide"></i></span>
-                                            <span class="tools-grid__label">Translate</span>
-                                        </button>
-                                        <button class="tools-grid__item" id="webScraperBtn" title="Web Scraper">
-                                            <span class="tools-grid__icon"><i data-lucide="globe" class="lucide"></i></span>
-                                            <span class="tools-grid__label">Scraper</span>
-                                        </button>
-                                        <button class="tools-grid__item" id="pdfAnalyzerBtn" title="PDF Analyzer">
-                                            <span class="tools-grid__icon"><i data-lucide="file-text" class="lucide"></i></span>
-                                            <span class="tools-grid__label">PDF</span>
-                                        </button>
                                         <button class="tools-grid__item" id="githubBtn" title="GitHub">
                                             <span class="tools-grid__icon"><i data-lucide="github" class="lucide"></i></span>
                                             <span class="tools-grid__label">GitHub</span>
-                                        </button>
-                                        <button class="tools-grid__item" id="memoryManagerBtn" title="Memory Manager">
-                                            <span class="tools-grid__icon"><i data-lucide="database" class="lucide"></i></span>
-                                            <span class="tools-grid__label">Memory</span>
                                         </button>
                                         <button class="tools-grid__item" id="configAgentBtn" title="Config Agent">
                                             <span class="tools-grid__icon"><i data-lucide="settings" class="lucide"></i></span>
@@ -1466,16 +1446,11 @@ try {
 
         // All toggle-able tools
         const toolBindings = [
-            { id: 'googleSearchBtn', tool: 'google-search' },
-            { id: 'githubBtn', tool: 'github' },
             { id: 'imageGenToolBtn', tool: 'image-generation' },
             { id: 'img2imgToolBtn', tool: 'img2img' },
+            { id: 'googleSearchBtn', tool: 'google-search' },
+            { id: 'githubBtn', tool: 'github' },
             { id: 'deepResearchToolBtn', tool: 'deep-research' },
-            { id: 'codeInterpreterBtn', tool: 'code-interpreter' },
-            { id: 'pdfAnalyzerBtn', tool: 'pdf-analyzer' },
-            { id: 'translatorBtn', tool: 'translator' },
-            { id: 'webScraperBtn', tool: 'web-scraper' },
-            { id: 'memoryManagerBtn', tool: 'memory-manager' },
         ];
         toolBindings.forEach(({ id, tool }) => {
             const el = document.getElementById(id);
@@ -1520,9 +1495,8 @@ try {
         display.innerHTML = '';
         if (activeTools.size === 0) return;
         const icons = {
-            'google-search': '🔍', 'github': '📦', 'image-generation': '🎨',
-            'img2img': '🖼️', 'deep-research': '🔬', 'code-interpreter': '💻',
-            'pdf-analyzer': '📄', 'translator': '🌐', 'web-scraper': '🌍', 'memory-manager': '🧠'
+            'image-generation': '🎨', 'img2img': '🖼️',
+            'google-search': '🔍', 'github': '📦', 'deep-research': '🔬'
         };
         activeTools.forEach(tool => {
             const badge = document.createElement('span');

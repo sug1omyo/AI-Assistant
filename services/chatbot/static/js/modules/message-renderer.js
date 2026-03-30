@@ -341,74 +341,95 @@ export class MessageRenderer {
     }
     
     /**
-     * Create thinking process section (collapsible)
+     * Create thinking process section (collapsible, with live animation)
      */
     createThinkingSection(thinkingProcess, isLoading = false) {
         const container = document.createElement('div');
         container.className = 'thinking-container';
         if (isLoading) {
             container.dataset.loading = 'true';
+            container.classList.add('thinking--loading');
         }
         
         const header = document.createElement('div');
         header.className = 'thinking-header';
         
+        const headerLeft = document.createElement('div');
+        headerLeft.className = 'thinking-header__left';
+        
         const icon = document.createElement('span');
         icon.className = 'thinking-icon';
-        icon.textContent = isLoading ? '⏳' : '🧠';
+        icon.innerHTML = isLoading
+            ? '<span class="thinking-icon__pulse"></span>'
+            : '🧠';
         
         const title = document.createElement('span');
         title.className = 'thinking-title';
-        title.textContent = isLoading ? 'Thinking...' : 'Thought Process';
+        title.textContent = isLoading ? 'Đang suy nghĩ...' : 'Quá trình suy nghĩ';
         
         const badge = document.createElement('span');
-        badge.className = 'thinking-badge';
-        badge.textContent = isLoading ? 'Analyzing' : 'Complete';
-        badge.style.cssText = `
-            font-size: 10px;
-            padding: 2px 8px;
-            border-radius: 10px;
-            background: ${isLoading ? 'rgba(102, 126, 234, 0.2)' : 'rgba(16, 185, 129, 0.2)'};
-            color: ${isLoading ? '#667eea' : '#10b981'};
-            font-weight: 600;
-            margin-left: 8px;
-        `;
+        badge.className = 'thinking-badge' + (isLoading ? ' thinking-badge--loading' : ' thinking-badge--done');
+        badge.textContent = isLoading ? 'Đang phân tích' : 'Hoàn thành';
+        
+        const timer = document.createElement('span');
+        timer.className = 'thinking-timer';
+        timer.textContent = '';
+        
+        // Live timer when loading
+        if (isLoading) {
+            const startTime = Date.now();
+            container._timerInterval = setInterval(() => {
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                timer.textContent = elapsed + 's';
+            }, 100);
+        }
+        
+        headerLeft.appendChild(icon);
+        headerLeft.appendChild(title);
+        headerLeft.appendChild(badge);
+        headerLeft.appendChild(timer);
         
         const toggle = document.createElement('span');
-        toggle.className = 'thinking-toggle';
-        toggle.textContent = '▼';
+        toggle.className = 'thinking-toggle-arrow';
+        toggle.innerHTML = '&#9660;';  // ▼
         
-        header.appendChild(icon);
-        header.appendChild(title);
-        header.appendChild(badge);
+        header.appendChild(headerLeft);
         header.appendChild(toggle);
         
         const content = document.createElement('div');
-        content.className = 'thinking-content';
+        content.className = 'thinking-content thinking-content--open';
+        
+        const stepsContainer = document.createElement('div');
+        stepsContainer.className = 'thinking-steps';
+        content.appendChild(stepsContainer);
         
         if (isLoading) {
-            content.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 10px; color: #667eea;">
-                    <span style="animation: pulse 1.5s infinite;">🔍</span>
-                    <span>Analyzing the problem and generating response...</span>
-                </div>
-                <div style="margin-top: 8px; font-size: 12px; color: #888;">
-                    The AI is thinking deeply about your request. This may take a moment for complex queries.
-                </div>
-            `;
+            // Will be populated by live thinking events
         } else if (thinkingProcess) {
-            // Parse thinking process
             if (typeof thinkingProcess === 'string') {
-                content.textContent = thinkingProcess;
+                const pre = document.createElement('pre');
+                pre.className = 'thinking-steps__pre';
+                pre.textContent = thinkingProcess;
+                stepsContainer.appendChild(pre);
+            } else if (Array.isArray(thinkingProcess)) {
+                thinkingProcess.forEach(step => {
+                    const stepEl = document.createElement('div');
+                    stepEl.className = 'thinking-step thinking-step--done';
+                    stepEl.textContent = step;
+                    stepsContainer.appendChild(stepEl);
+                });
             } else {
-                content.textContent = JSON.stringify(thinkingProcess, null, 2);
+                stepsContainer.textContent = JSON.stringify(thinkingProcess, null, 2);
             }
         }
         
         // Toggle functionality
+        let collapsed = false;
         header.addEventListener('click', () => {
-            header.classList.toggle('collapsed');
-            content.classList.toggle('collapsed');
+            collapsed = !collapsed;
+            content.classList.toggle('thinking-content--open', !collapsed);
+            content.classList.toggle('thinking-content--collapsed', collapsed);
+            toggle.style.transform = collapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
         });
         
         container.appendChild(header);
@@ -418,47 +439,135 @@ export class MessageRenderer {
     }
     
     /**
-     * Update thinking process content
+     * Add a live thinking step to the thinking container
+     * @param {HTMLElement} container - thinking container
+     * @param {string} stepText - step text content
+     * @param {boolean} isReasoningChunk - if true, append to existing reasoning block
+     */
+    addThinkingStep(container, stepText, isReasoningChunk = false) {
+        const stepsContainer = container.querySelector('.thinking-steps');
+        if (!stepsContainer) return;
+        
+        if (isReasoningChunk) {
+            // Accumulate into existing reasoning block
+            let reasoningBlock = stepsContainer.querySelector('.thinking-step--reasoning');
+            if (!reasoningBlock) {
+                reasoningBlock = document.createElement('div');
+                reasoningBlock.className = 'thinking-step thinking-step--active thinking-step--reasoning';
+                reasoningBlock.textContent = '';
+                stepsContainer.appendChild(reasoningBlock);
+            }
+            reasoningBlock.textContent += stepText;
+        } else {
+            // Mark previous step as done
+            const prevSteps = stepsContainer.querySelectorAll('.thinking-step--active:not(.thinking-step--reasoning)');
+            prevSteps.forEach(s => {
+                s.classList.remove('thinking-step--active');
+                s.classList.add('thinking-step--done');
+            });
+            
+            const step = document.createElement('div');
+            step.className = 'thinking-step thinking-step--active';
+            step.textContent = stepText;
+            stepsContainer.appendChild(step);
+        }
+        
+        // Auto-scroll the thinking content
+        const content = container.querySelector('.thinking-content');
+        if (content) {
+            content.scrollTop = content.scrollHeight;
+        }
+    }
+    
+    /**
+     * Finalize thinking section - stop timer, update UI
+     */
+    finalizeThinking(container, data = {}) {
+        // Stop timer
+        if (container._timerInterval) {
+            clearInterval(container._timerInterval);
+            container._timerInterval = null;
+        }
+        
+        container.classList.remove('thinking--loading');
+        container.removeAttribute('data-loading');
+        
+        const icon = container.querySelector('.thinking-icon');
+        const title = container.querySelector('.thinking-title');
+        const badge = container.querySelector('.thinking-badge');
+        const timer = container.querySelector('.thinking-timer');
+        
+        if (icon) icon.innerHTML = '🧠';
+        if (title) title.textContent = data.summary || 'Quá trình suy nghĩ';
+        if (badge) {
+            badge.textContent = 'Hoàn thành';
+            badge.className = 'thinking-badge thinking-badge--done';
+        }
+        if (timer && data.duration_ms) {
+            timer.textContent = (data.duration_ms / 1000).toFixed(1) + 's';
+        }
+        
+        // Mark all steps as done
+        const steps = container.querySelectorAll('.thinking-step--active');
+        steps.forEach(s => {
+            s.classList.remove('thinking-step--active');
+            s.classList.add('thinking-step--done');
+        });
+        
+        // Auto-collapse after a short delay to show the response
+        setTimeout(() => {
+            const content = container.querySelector('.thinking-content');
+            const toggle = container.querySelector('.thinking-toggle-arrow');
+            if (content) {
+                content.classList.remove('thinking-content--open');
+                content.classList.add('thinking-content--collapsed');
+            }
+            if (toggle) toggle.style.transform = 'rotate(-90deg)';
+        }, 1500);
+    }
+    
+    /**
+     * Update thinking process content (for non-streaming fallback)
      */
     updateThinkingContent(container, thinkingProcess) {
-        const content = container.querySelector('.thinking-content');
-        const header = container.querySelector('.thinking-header');
-        const title = header.querySelector('.thinking-title');
-        const icon = header.querySelector('.thinking-icon');
-        const badge = header.querySelector('.thinking-badge');
+        // Stop any running timer
+        if (container._timerInterval) {
+            clearInterval(container._timerInterval);
+            container._timerInterval = null;
+        }
         
-        if (content && title) {
-            // Update icon and title
-            if (icon) icon.textContent = '🧠';
-            title.textContent = 'Thought Process';
-            
-            // Update badge
-            if (badge) {
-                badge.textContent = 'Complete';
-                badge.style.background = 'rgba(16, 185, 129, 0.2)';
-                badge.style.color = '#10b981';
-            }
-            
-            // Update content
+        container.classList.remove('thinking--loading');
+        container.removeAttribute('data-loading');
+        
+        const icon = container.querySelector('.thinking-icon');
+        const title = container.querySelector('.thinking-title');
+        const badge = container.querySelector('.thinking-badge');
+        
+        if (icon) icon.innerHTML = '🧠';
+        if (title) title.textContent = 'Quá trình suy nghĩ';
+        if (badge) {
+            badge.textContent = 'Hoàn thành';
+            badge.className = 'thinking-badge thinking-badge--done';
+        }
+        
+        const stepsContainer = container.querySelector('.thinking-steps');
+        if (stepsContainer) {
+            stepsContainer.innerHTML = '';
             if (typeof thinkingProcess === 'string') {
-                // Format thinking process nicely
-                const formatted = thinkingProcess
-                    .split('\n')
-                    .map(line => {
-                        if (line.trim().startsWith('Step') || line.trim().startsWith('Analysis')) {
-                            return `<strong style="color: #667eea;">${line}</strong>`;
-                        }
-                        return line;
-                    })
-                    .join('\n');
-                content.innerHTML = `<pre style="white-space: pre-wrap; margin: 0; font-family: inherit;">${thinkingProcess}</pre>`;
+                const pre = document.createElement('pre');
+                pre.className = 'thinking-steps__pre';
+                pre.textContent = thinkingProcess;
+                stepsContainer.appendChild(pre);
+            } else if (Array.isArray(thinkingProcess)) {
+                thinkingProcess.forEach(step => {
+                    const stepEl = document.createElement('div');
+                    stepEl.className = 'thinking-step thinking-step--done';
+                    stepEl.textContent = step;
+                    stepsContainer.appendChild(stepEl);
+                });
             } else {
-                content.textContent = JSON.stringify(thinkingProcess, null, 2);
+                stepsContainer.textContent = JSON.stringify(thinkingProcess, null, 2);
             }
-            
-            // Remove loading state
-            container.removeAttribute('data-loading');
-            container.style.animation = 'none';
         }
     }
 

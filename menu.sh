@@ -443,9 +443,6 @@ deploy_chatbot() {
         git pull origin master 2>/dev/null || true
     fi
     
-    # Install/update dependencies
-    pip install -r requirements.txt --quiet 2>/dev/null || true
-    
     # Restart service
     stop_service "chatbot"
     sleep 2

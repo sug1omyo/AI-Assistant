@@ -21,6 +21,7 @@ from core.config import MEMORY_DIR
 from core.extensions import MONGODB_ENABLED, logger
 from core.chatbot import get_chatbot
 from core.tools import google_search_tool, github_search_tool
+from core.private_logger import log_chat, log_interaction
 
 # Check MCP availability
 MCP_AVAILABLE = False
@@ -214,6 +215,21 @@ def chat():
         # Return tool results if any
         if tool_results:
             combined_results = "\n\n---\n\n".join(tool_results)
+            # Private log for tool interactions
+            log_chat(
+                session_id=session.get('session_id', ''),
+                user_message=message,
+                assistant_response=combined_results[:2000],
+                model='tools',
+                context=context,
+                language=language,
+                tools=tools,
+            )
+            log_interaction('tool_call', {
+                'tools': tools,
+                'message': message[:300],
+                'result_length': len(combined_results),
+            }, session_id=session.get('session_id', ''))
             return jsonify({
                 'response': combined_results,
                 'model': 'tools',
@@ -269,6 +285,19 @@ def chat():
             'context': context,
             'latency_ms': round((time.time() - _t0) * 1000, 1),
         })
+
+        # ── Private local log (non-blocking) ──
+        log_chat(
+            session_id=session.get('session_id', ''),
+            user_message=message,
+            assistant_response=response,
+            model=model,
+            context=context,
+            language=language,
+            tools=tools,
+            latency_ms=round((time.time() - _t0) * 1000, 1),
+            thinking_process=thinking_process,
+        )
         
         return jsonify({
             'response': response,
@@ -342,6 +371,58 @@ def health_databases():
 
     overall_ok = result['mongodb']['ok'] and result['firebase_rtdb']['ok']
     return jsonify({'ok': overall_ok, **result}), (200 if overall_ok else 503)
+
+
+@main_bp.route('/api/generate-title', methods=['POST'])
+def generate_title():
+    """Generate a concise conversation title using Ollama qwen2.5:0.5b (lightest local model)."""
+    import requests as _req
+
+    data = request.get_json(silent=True) or {}
+    raw_message = data.get('message', '')
+    if not isinstance(raw_message, str):
+        raw_message = ''
+    # Sanitize and truncate input
+    user_message = raw_message.strip()[:200]
+    language = str(data.get('language', 'vi')).strip()
+
+    if not user_message:
+        return jsonify({'error': 'message is required'}), 400
+
+    if language == 'en':
+        prompt = (
+            'Generate a concise 3-5 word English title for this conversation. '
+            'Return ONLY the title text, no quotes, no explanation:\n'
+            f'"{user_message}"'
+        )
+    else:
+        prompt = (
+            'Tạo tiêu đề ngắn gọn 3-7 từ tiếng Việt cho cuộc trò chuyện này. '
+            'Chỉ trả về tiêu đề, không giải thích, không ngoặc kép:\n'
+            f'"{user_message}"'
+        )
+
+    try:
+        resp = _req.post(
+            'http://localhost:11434/api/generate',
+            json={
+                'model': 'qwen2.5:0.5b',
+                'prompt': prompt,
+                'stream': False,
+                'options': {'temperature': 0.7, 'num_predict': 20}
+            },
+            timeout=10
+        )
+        resp.raise_for_status()
+        title = resp.json().get('response', '').strip().replace('"', '').replace("'", '').strip()
+        if title:
+            return jsonify({'title': title})
+    except Exception as e:
+        logger.warning(f'[generate-title] Ollama unavailable: {e}')
+
+    # Fallback: truncate the raw message
+    fallback = user_message[:40] + ('...' if len(user_message) > 40 else '')
+    return jsonify({'title': fallback})
 
 
 def _handle_image_generation_tool(chatbot, message, model):

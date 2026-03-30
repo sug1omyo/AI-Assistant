@@ -403,41 +403,28 @@ export class ChatManager {
     }
 
     /**
-     * Generate title using Gemini
+     * Generate title using Ollama qwen2.5:0.5b (lightest local model, 398MB)
      */
-    async generateTitle(firstMessage) {
+    async generateTitle(userMessage) {
         try {
-            // Get current language from localStorage
             const currentLang = localStorage.getItem('chatbot_language') || 'vi';
-            const languageInstruction = currentLang === 'en' 
-                ? 'Generate a concise 3-5 word English title for this conversation. Only return the title, nothing else:'
-                : 'Generate a concise 3-5 word Vietnamese title for this conversation. Only return the title, nothing else:';
-            
-            const response = await fetch('/chat', {
+            const response = await fetch('/api/generate-title', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    message: `${languageInstruction} "${firstMessage.substring(0, 100)}"`,
-                    model: 'grok',
-                    context: 'casual',
-                    tools: [],
-                    deep_thinking: false,
+                    message: userMessage.substring(0, 200),
                     language: currentLang
                 })
             });
-            
             const data = await response.json();
-            if (data.response) {
-                return data.response.trim().replace(/['"]/g, '');
+            if (data.title) {
+                return data.title.trim();
             }
         } catch (error) {
-            console.error('Failed to generate title:', error);
+            console.error('[AutoTitle] Failed to generate title:', error);
         }
-        
-        // Fallback: use first few words
-        return firstMessage.substring(0, 30) + (firstMessage.length > 30 ? '...' : '');
+        // Fallback: truncate message
+        return userMessage.substring(0, 40) + (userMessage.length > 40 ? '...' : '');
     }
 
     /**

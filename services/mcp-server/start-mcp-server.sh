@@ -18,13 +18,13 @@ fi
 # Check MCP package
 echo "[INFO] Checking MCP SDK..."
 if ! python3 -c "import mcp" &> /dev/null; then
-    echo "[WARN] MCP SDK not installed!"
-    echo "[INFO] Installing MCP SDK..."
-    pip3 install "mcp[cli]"
-    if [ $? -ne 0 ]; then
-        echo "[ERROR] Failed to install MCP SDK!"
-        exit 1
-    fi
+    echo ""
+    echo "[ERROR] MCP SDK is not installed!"
+    echo "[INFO] Please run the following command manually:"
+    echo ""
+    echo "    pip install 'mcp[cli]>=1.0.0'"
+    echo ""
+    exit 1
 fi
 
 echo "[INFO] Starting MCP Server..."

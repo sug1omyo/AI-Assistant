@@ -36,15 +36,14 @@ echo.
 echo Checking MCP SDK...
 python -c "import mcp" >nul 2>&1
 if errorlevel 1 (
-    echo [WARN] MCP SDK not found in environment
-    echo [INFO] Installing MCP SDK...
-    pip install "mcp[cli]>=1.0.0"
-    if errorlevel 1 (
-        echo [ERROR] Failed to install MCP SDK!
-        pause
-        exit /b 1
-    )
-    echo [OK] MCP SDK installed successfully
+    echo.
+    echo [ERROR] MCP SDK is not installed!
+    echo [INFO] Please run the following command manually:
+    echo.
+    echo     pip install "mcp[cli]>=1.0.0"
+    echo.
+    pause
+    exit /b 1
 )
 
 echo.

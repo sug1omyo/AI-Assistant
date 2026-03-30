@@ -23,6 +23,7 @@ from core.extensions import (
     ConversationDB, logger
 )
 from core.db_helpers import get_user_id_from_session
+from core.private_logger import log_image_generation
 
 # Import model presets - use direct file import to avoid path conflicts
 try:
@@ -532,6 +533,16 @@ def img2img():
             if MONGODB_ENABLED and saved_filenames:
                 _save_image_to_mongodb(saved_filenames, cloud_urls, prompt, params, 'img2img')
         
+        # Private logging
+        for img_b64 in base64_images:
+            log_image_generation(
+                prompt=prompt, provider='comfyui', model='stable-diffusion',
+                image_data=img_b64, session_id=session.get('conversation_id', ''),
+                mode='img2img',
+                extra={'denoising_strength': params.get('denoising_strength'),
+                       'steps': params.get('steps'), 'cfg_scale': params.get('cfg_scale')},
+            )
+
         return jsonify({
             'success': True,
             'image': base64_images[0] if base64_images else None,

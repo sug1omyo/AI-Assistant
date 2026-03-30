@@ -89,17 +89,25 @@ def _spawn_background_process(command: list[str], cwd: Path, log_name: str) -> b
 
 
 def _spawn_windows_terminal(command_line: str, cwd: Path, title: str) -> bool:
+    import tempfile
     try:
-        wrapped_command = (
-            f'{command_line} '
-            '& echo. '
-            '& echo ================================================== '
-            '& echo Process exited. Press any key to close this window. '
-            '& echo ================================================== '
-            '& pause'
-        )
+        bat_lines = [
+            '@echo off',
+            command_line,
+            'echo.',
+            'echo ==================================================',
+            'echo Process exited. Press any key to close this window.',
+            'echo ==================================================',
+            'pause',
+        ]
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.bat', delete=False, encoding='utf-8'
+        ) as f:
+            f.write('\n'.join(bat_lines) + '\n')
+            bat_path = Path(f.name)
+
         subprocess.Popen(
-            ['cmd.exe', '/c', 'start', title, 'cmd.exe', '/k', wrapped_command],
+            f'cmd.exe /c start "{title}" cmd.exe /k "{bat_path}"',
             cwd=str(cwd),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

@@ -27,6 +27,7 @@ from core.image_gen import (
     ImageGenerationRouter, SessionManager, ImageStorage,
     QualityMode, STYLE_PRESETS,
 )
+from core.private_logger import log_image_generation
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +246,17 @@ def generate_image():
     if result.cost_usd > 0:
         _log_cost('generate', result.provider, result.model, result.cost_usd)
 
+    # Private logging
+    for s in saved_images:
+        if not s.get('error'):
+            log_image_generation(
+                prompt=prompt, provider=result.provider, model=result.model,
+                image_url=s.get('url', ''), image_path=s.get('local_path', ''),
+                session_id=conversation_id, mode='txt2img',
+                extra={'prompt_used': result.prompt_used, 'cost_usd': result.cost_usd,
+                       'latency_ms': result.latency_ms, 'style': data.get('style')},
+            )
+
     return jsonify({
         "success": True,
         "images": [
@@ -366,6 +378,17 @@ def edit_image():
     # Log cost
     if result.cost_usd > 0:
         _log_cost('edit', result.provider, result.model, result.cost_usd)
+
+    # Private logging
+    for s in saved_images:
+        if not s.get('error'):
+            log_image_generation(
+                prompt=prompt, provider=result.provider, model=result.model,
+                image_url=s.get('url', ''), image_path=s.get('local_path', ''),
+                session_id=conversation_id, mode='img2img_edit',
+                extra={'prompt_used': result.prompt_used, 'cost_usd': result.cost_usd,
+                       'latency_ms': result.latency_ms, 'is_edit': True},
+            )
 
     return jsonify({
         "success": True,

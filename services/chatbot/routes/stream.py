@@ -1,8 +1,12 @@
 ﻿"""
 Streaming routes: /chat/stream - SSE endpoint for real-time chat responses
+
+Supports live thinking display (like ChatGPT) with real-time reasoning steps
+streamed before the actual response.
 """
 import json
 import uuid
+import time
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -18,6 +22,10 @@ from core.config import MEMORY_DIR
 from core.extensions import MONGODB_ENABLED, logger
 from core.chatbot_v2 import get_chatbot
 from core.streaming import StreamingChatHandler, StreamEvent
+from core.thinking_generator import (
+    generate_thinking_steps, detect_category,
+    generate_thinking_summary, REASONING_PREFIX
+)
 
 # Check MCP availability
 MCP_AVAILABLE = False
@@ -119,6 +127,8 @@ def chat_stream():
         # Create streaming generator
         def generate_stream():
             try:
+                thinking_start = time.time()
+                
                 # Send metadata
                 yield StreamEvent(
                     event="metadata",
@@ -131,8 +141,53 @@ def chat_stream():
                     })
                 ).format()
                 
+                # ── Thinking Phase ──
+                # Generate and stream thinking steps (like ChatGPT's thinking)
+                category = detect_category(message)
+                thinking_steps_text = []
+                
+                yield StreamEvent(
+                    event="thinking_start",
+                    data=json.dumps({
+                        "category": category,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                ).format()
+                
+                for step in generate_thinking_steps(
+                    message=message,
+                    language=language,
+                    context=context,
+                    deep_thinking=deep_thinking
+                ):
+                    thinking_steps_text.append(step.text)
+                    yield StreamEvent(
+                        event="thinking",
+                        data=json.dumps({
+                            "step": step.text,
+                            "category": step.category,
+                        })
+                    ).format()
+                    # Small delay for natural animation feel
+                    time.sleep(step.duration_ms / 1000.0)
+                
+                thinking_duration = round((time.time() - thinking_start) * 1000)
+                thinking_summary = generate_thinking_summary(message, category, language)
+                
+                yield StreamEvent(
+                    event="thinking_end",
+                    data=json.dumps({
+                        "summary": thinking_summary,
+                        "steps": thinking_steps_text,
+                        "category": category,
+                        "duration_ms": thinking_duration,
+                    })
+                ).format()
+                
+                # ── Response Phase ──
                 full_response = ""
                 chunk_count = 0
+                has_model_reasoning = False
                 
                 # Get streaming response from chatbot
                 for chunk in chatbot.chat_stream(
@@ -146,15 +201,38 @@ def chat_stream():
                     custom_prompt=custom_prompt
                 ):
                     if chunk:
-                        full_response += chunk
-                        chunk_count += 1
-                        yield StreamEvent(
-                            event="chunk",
-                            data=json.dumps({
-                                "content": chunk,
-                                "chunk_index": chunk_count
-                            })
-                        ).format()
+                        # Check if this is model reasoning content
+                        if chunk.startswith(REASONING_PREFIX):
+                            reasoning_text = chunk[len(REASONING_PREFIX):]
+                            if reasoning_text:
+                                if not has_model_reasoning:
+                                    has_model_reasoning = True
+                                    # Signal that real model reasoning is starting
+                                    yield StreamEvent(
+                                        event="thinking",
+                                        data=json.dumps({
+                                            "step": "🧠 Suy luận từ mô hình AI:" if language == 'vi' else "🧠 AI model reasoning:",
+                                            "category": "model_reasoning",
+                                        })
+                                    ).format()
+                                yield StreamEvent(
+                                    event="thinking",
+                                    data=json.dumps({
+                                        "step": reasoning_text,
+                                        "category": "model_reasoning",
+                                        "is_reasoning_chunk": True,
+                                    })
+                                ).format()
+                        else:
+                            full_response += chunk
+                            chunk_count += 1
+                            yield StreamEvent(
+                                event="chunk",
+                                data=json.dumps({
+                                    "content": chunk,
+                                    "chunk_index": chunk_count
+                                })
+                            ).format()
                 
                 # Send complete event
                 yield StreamEvent(
@@ -165,6 +243,9 @@ def chat_stream():
                         "context": context,
                         "deep_thinking": deep_thinking,
                         "total_chunks": chunk_count,
+                        "thinking_summary": thinking_summary,
+                        "thinking_steps": thinking_steps_text,
+                        "thinking_duration_ms": thinking_duration,
                         "timestamp": datetime.now().isoformat()
                     })
                 ).format()

@@ -92,6 +92,107 @@ export class APIService {
     }
 
     /**
+     * Send chat message via SSE streaming with live thinking display
+     * 
+     * @param {Object} params - Message parameters
+     * @param {AbortSignal} abortSignal - Abort signal for cancellation
+     * @param {Object} callbacks - Event callbacks: onThinkingStart, onThinking, onThinkingEnd, onChunk, onComplete, onError
+     * @returns {Promise<Object>} Final complete response data
+     */
+    async sendStreamMessage(params, abortSignal = null, callbacks = {}) {
+        const language = localStorage.getItem('chatbot_language') || 'vi';
+        let thinkingMode = params.thinkingMode;
+        if (!thinkingMode && window.getThinkingMode) {
+            thinkingMode = window.getThinkingMode();
+        }
+        thinkingMode = thinkingMode || 'instant';
+
+        const body = {
+            message: params.message,
+            model: params.model || 'grok',
+            context: params.context || 'casual',
+            deep_thinking: params.deepThinking || false,
+            thinking_mode: thinkingMode,
+            history: params.history || [],
+            memory_ids: params.memories || [],
+            mcp_selected_files: window.mcpController ? window.mcpController.getSelectedFilePaths() : [],
+            language: language,
+            custom_prompt: params.customPrompt || '',
+        };
+
+        const response = await fetch('/chat/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: abortSignal,
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let result = null;
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // keep incomplete line
+
+                let currentEvent = 'message';
+                for (const line of lines) {
+                    if (line.startsWith('event: ')) {
+                        currentEvent = line.slice(7).trim();
+                    } else if (line.startsWith('data: ')) {
+                        const dataStr = line.slice(6);
+                        try {
+                            const data = JSON.parse(dataStr);
+                            switch (currentEvent) {
+                                case 'thinking_start':
+                                    if (callbacks.onThinkingStart) callbacks.onThinkingStart(data);
+                                    break;
+                                case 'thinking':
+                                    if (callbacks.onThinking) callbacks.onThinking(data);
+                                    break;
+                                case 'thinking_end':
+                                    if (callbacks.onThinkingEnd) callbacks.onThinkingEnd(data);
+                                    break;
+                                case 'chunk':
+                                    if (callbacks.onChunk) callbacks.onChunk(data);
+                                    break;
+                                case 'complete':
+                                    result = data;
+                                    if (callbacks.onComplete) callbacks.onComplete(data);
+                                    break;
+                                case 'error':
+                                    if (callbacks.onError) callbacks.onError(data);
+                                    break;
+                            }
+                        } catch (e) {
+                            // Skip invalid JSON
+                        }
+                        currentEvent = 'message'; // reset
+                    }
+                }
+            }
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                console.log('[SSE] Stream aborted by user');
+            } else {
+                throw e;
+            }
+        }
+
+        return result || {};
+    }
+
+    /**
      * Check local models status
      */
     async checkLocalModelsStatus() {
