@@ -1552,6 +1552,18 @@ def chat():
         
         # Handle tools
         tool_results = []
+
+        # ── Auto web search: trigger even without explicit google-search tool ──
+        _auto_search_done = False
+        if not tools or 'google-search' not in tools:
+            from routes.stream import _needs_web_search, _run_web_search
+            if _needs_web_search(message, tools or []):
+                logger.info(f"[TOOLS] Auto web search triggered for: {message[:60]}")
+                _auto_result = _run_web_search(message)
+                if _auto_result:
+                    tool_results.append(_auto_result)
+                    _auto_search_done = True
+
         if tools and len(tools) > 0:
             logger.info(f"[TOOLS] Active tools: {tools}")
             
@@ -1565,6 +1577,56 @@ def chat():
                 github_result = github_search_tool(message)
                 tool_results.append(f"## Ã°Å¸Ââ„¢ GitHub Search Results\n\n{github_result}")
             
+            if 'saucenao' in tools:
+                import re as _re
+                _img_urls = _re.findall(r'https?://\S+\.(?:jpg|jpeg|png|gif|webp)\S*', message, _re.IGNORECASE)
+                if _img_urls:
+                    logger.info(f"[TOOLS] Running SauceNAO for: {_img_urls[0][:80]}")
+                    from core.tools import saucenao_search_tool
+                    _sauce_result = saucenao_search_tool(image_url=_img_urls[0])
+                    tool_results.append(_sauce_result)
+                elif images:
+                    import base64 as _b64
+                    _first_img = images[0]
+                    if ',' in _first_img:
+                        _first_img = _first_img.split(',', 1)[1]
+                    _img_bytes = _b64.b64decode(_first_img)
+                    logger.info(f"[TOOLS] Running SauceNAO for uploaded image ({len(_img_bytes)} bytes)")
+                    from core.tools import saucenao_search_tool
+                    _sauce_result = saucenao_search_tool(image_data=_img_bytes)
+                    tool_results.append(_sauce_result)
+                else:
+                    tool_results.append("⚠️ SauceNAO: Cần đính kèm ảnh hoặc gửi URL ảnh để tìm kiếm nguồn gốc.")
+
+            # ── SerpAPI — Google Lens / Reverse Image ──
+            if 'serpapi-reverse-image' in tools:
+                import re as _re
+                _img_urls = _re.findall(r'https?://\S+\.(?:jpg|jpeg|png|gif|webp)\S*', message, _re.IGNORECASE)
+                if _img_urls:
+                    logger.info(f"[TOOLS] Running Google Lens for: {_img_urls[0][:80]}")
+                    from core.tools import serpapi_reverse_image
+                    tool_results.append(serpapi_reverse_image(_img_urls[0]))
+                else:
+                    tool_results.append("⚠️ Google Lens: Cần gửi URL ảnh (http/https) trong tin nhắn.")
+
+            # ── SerpAPI — Bing Search ──
+            if 'serpapi-bing' in tools:
+                logger.info(f"[TOOLS] Running Bing Search")
+                from core.tools import serpapi_web_search
+                tool_results.append(serpapi_web_search(message, engine='bing'))
+
+            # ── SerpAPI — Baidu Search ──
+            if 'serpapi-baidu' in tools:
+                logger.info(f"[TOOLS] Running Baidu Search")
+                from core.tools import serpapi_web_search
+                tool_results.append(serpapi_web_search(message, engine='baidu'))
+
+            # ── SerpAPI — Image Search ──
+            if 'serpapi-images' in tools:
+                logger.info(f"[TOOLS] Running SerpAPI Image Search")
+                from core.tools import serpapi_image_search
+                tool_results.append(serpapi_image_search(message))
+
             if 'image-generation' in tools:
                 # â”€â”€ Auto-detect if user actually wants to generate/edit an image â”€â”€
                 _img_keywords_vi = ['váº½', 'táº¡o áº£nh', 'táº¡o hÃ¬nh', 'sinh áº£nh', 'gen áº£nh', 'táº¡o má»™t', 'váº½ cho',

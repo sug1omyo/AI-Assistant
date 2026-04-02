@@ -220,13 +220,6 @@ try {
                     <div id="thinkingModeDropdown" class="model-dropdown hidden" style="right: 0; left: auto; min-width: 260px; top: calc(100% + 4px);">
                         <div class="model-dropdown__group">
                             <div class="model-dropdown__group-label">Thinking Mode</div>
-                            <div class="thinking-mode-option model-dropdown__item" data-mode="auto" data-icon="cpu" data-label="Auto">
-                                <span class="model-dropdown__item-icon"><i data-lucide="cpu" class="lucide"></i></span>
-                                <div class="model-dropdown__item-info">
-                                    <div class="model-dropdown__item-name">Auto</div>
-                                    <div class="model-dropdown__item-desc">Tự quyết định thời gian suy nghĩ</div>
-                                </div>
-                            </div>
                             <div class="thinking-mode-option model-dropdown__item active" data-mode="instant" data-icon="zap" data-label="Instant">
                                 <span class="model-dropdown__item-icon"><i data-lucide="zap" class="lucide"></i></span>
                                 <div class="model-dropdown__item-info">
@@ -234,26 +227,11 @@ try {
                                     <div class="model-dropdown__item-desc">Trả lời tức thời</div>
                                 </div>
                             </div>
-                            <div class="thinking-mode-option model-dropdown__item" data-mode="thinking" data-icon="brain" data-label="Thinking">
-                                <span class="model-dropdown__item-icon"><i data-lucide="brain" class="lucide"></i></span>
-                                <div class="model-dropdown__item-info">
-                                    <div class="model-dropdown__item-name">Thinking</div>
-                                    <div class="model-dropdown__item-desc">Phân tích kỹ lưỡng</div>
-                                </div>
-                            </div>
-                            <div class="thinking-mode-option model-dropdown__item" data-mode="deep" data-icon="rocket" data-label="Deep">
-                                <span class="model-dropdown__item-icon"><i data-lucide="rocket" class="lucide"></i></span>
-                                <div class="model-dropdown__item-info">
-                                    <div class="model-dropdown__item-name">Deep Reasoning</div>
-                                    <div class="model-dropdown__item-desc">Coordinated reasoning — Pro</div>
-                                </div>
-                                <span class="model-dropdown__item-badge pro">Pro</span>
-                            </div>
-                            <div class="thinking-mode-option model-dropdown__item" data-mode="multi-thinking" data-icon="layers" data-label="Multi-Think">
+                            <div class="thinking-mode-option model-dropdown__item" data-mode="multi-thinking" data-icon="layers" data-label="4-Agents">
                                 <span class="model-dropdown__item-icon"><i data-lucide="layers" class="lucide"></i></span>
                                 <div class="model-dropdown__item-info">
-                                    <div class="model-dropdown__item-name">Multi-Thinking</div>
-                                    <div class="model-dropdown__item-desc">Đa mô hình suy luận song song</div>
+                                    <div class="model-dropdown__item-name">4-Agents</div>
+                                    <div class="model-dropdown__item-desc">4 agents tham gia trả lời</div>
                                 </div>
                                 <span class="model-dropdown__item-badge pro">Pro</span>
                             </div>
@@ -388,6 +366,26 @@ try {
                                             <span class="tools-grid__icon"><i data-lucide="github" class="lucide"></i></span>
                                             <span class="tools-grid__label">GitHub</span>
                                         </button>
+                                        <button class="tools-grid__item" id="saucenaoBtn" title="SauceNAO Reverse Image Search">
+                                            <span class="tools-grid__icon"><i data-lucide="scan-search" class="lucide"></i></span>
+                                            <span class="tools-grid__label">SauceNAO</span>
+                                        </button>
+                                        <button class="tools-grid__item" id="googleLensBtn" title="Google Lens — Reverse Image (SerpAPI)">
+                                            <span class="tools-grid__icon"><i data-lucide="camera" class="lucide"></i></span>
+                                            <span class="tools-grid__label">Lens</span>
+                                        </button>
+                                        <button class="tools-grid__item" id="serpapiBingBtn" title="Bing Search (SerpAPI)">
+                                            <span class="tools-grid__icon"><i data-lucide="globe" class="lucide"></i></span>
+                                            <span class="tools-grid__label">Bing</span>
+                                        </button>
+                                        <button class="tools-grid__item" id="serpapiBaiduBtn" title="Baidu Search (SerpAPI)">
+                                            <span class="tools-grid__icon"><i data-lucide="search-code" class="lucide"></i></span>
+                                            <span class="tools-grid__label">Baidu</span>
+                                        </button>
+                                        <button class="tools-grid__item" id="serpapiImagesBtn" title="Google Images Search (SerpAPI)">
+                                            <span class="tools-grid__icon"><i data-lucide="image" class="lucide"></i></span>
+                                            <span class="tools-grid__label">Img Search</span>
+                                        </button>
                                         <button class="tools-grid__item" id="configAgentBtn" title="Config Agent">
                                             <span class="tools-grid__icon"><i data-lucide="settings" class="lucide"></i></span>
                                             <span class="tools-grid__label">Agent</span>
@@ -431,16 +429,10 @@ try {
                         </button>
                     </div>
 
-                    <!-- Context selector row -->
-                    <div class="context-selector">
-                        <span>Mode:</span>
+                    <!-- Context is now unified — hidden select for backward compatibility -->
+                    <div class="context-selector" style="display:none;">
                         <select id="contextSelect">
-                            <option value="casual" data-lang-key="controls.mode.casual">💬 Casual Chat</option>
-                            <option value="programming" data-lang-key="controls.mode.programming">💻 Programming</option>
-                            <option value="creative">🎨 Creative</option>
-                            <option value="research">🔬 Research</option>
-                            <option value="psychological" data-lang-key="controls.mode.psychological">🧘 Psychology</option>
-                            <option value="lifestyle" data-lang-key="controls.mode.lifestyle">🌟 Lifestyle</option>
+                            <option value="casual" selected>💬 Universal</option>
                         </select>
                     </div>
                 </div>
@@ -1097,14 +1089,14 @@ try {
                         <select id="vgDuration" class="form-select" style="width: 100%;">
                             <option value="4">4 seconds</option>
                             <option value="8" selected>8 seconds</option>
-                            <option value="12">12 seconds</option>
+                            <!-- <option value="12">12 seconds</option> -->
                         </select>
                     </div>
                     <div>
                         <label class="form-label">🤖 Model</label>
                         <select id="vgModel" class="form-select" style="width: 100%;">
                             <option value="sora-2" selected>Sora 2 ($0.10/s)</option>
-                            <option value="sora-2-pro">Sora 2 Pro ($0.30/s)</option>
+                            <!-- <option value="sora-2-pro">Sora 2 Pro ($0.30/s)</option> -->
                         </select>
                     </div>
                 </div>
@@ -1343,7 +1335,8 @@ try {
     // ════════════════════════════════════════════════════════════
     // THINKING MODE
     // ════════════════════════════════════════════════════════════
-    let currentThinkingMode = localStorage.getItem('thinkingMode') || 'instant';
+    const _savedMode = localStorage.getItem('thinkingMode');
+    let currentThinkingMode = (_savedMode === 'instant' || _savedMode === 'multi-thinking') ? _savedMode : 'instant';
 
     function initThinkingMode() {
         const btn = document.getElementById('thinkingModeBtn');
@@ -1408,7 +1401,8 @@ try {
     }
 
     window.getThinkingMode = () => currentThinkingMode;
-    window.isDeepThinking = () => currentThinkingMode === 'thinking' || currentThinkingMode === 'deep';
+    window.isDeepThinking = () => currentThinkingMode === 'multi-thinking';
+    window.selectThinkingMode = selectThinkingMode;
 
     // ════════════════════════════════════════════════════════════
     // TOOLS MENU
@@ -1442,7 +1436,12 @@ try {
             { id: 'img2imgToolBtn', tool: 'img2img' },
             { id: 'googleSearchBtn', tool: 'google-search' },
             { id: 'githubBtn', tool: 'github' },
+            { id: 'saucenaoBtn', tool: 'saucenao' },
             { id: 'deepResearchToolBtn', tool: 'deep-research' },
+            { id: 'googleLensBtn', tool: 'serpapi-reverse-image' },
+            { id: 'serpapiBingBtn', tool: 'serpapi-bing' },
+            { id: 'serpapiBaiduBtn', tool: 'serpapi-baidu' },
+            { id: 'serpapiImagesBtn', tool: 'serpapi-images' },
         ];
         toolBindings.forEach(({ id, tool }) => {
             const el = document.getElementById(id);
@@ -1456,7 +1455,7 @@ try {
                         gsBtn.classList.add('active');
                     }
                     if (typeof selectThinkingMode === 'function') {
-                        selectThinkingMode('multi-thinking', 'layers', 'Multi-Think');
+                        selectThinkingMode('multi-thinking', 'layers', '4-Agents');
                     }
                 }
             });
@@ -1484,7 +1483,9 @@ try {
         if (activeTools.size === 0) return;
         const icons = {
             'image-generation': '🎨', 'img2img': '🖼️',
-            'google-search': '🔍', 'github': '📦', 'deep-research': '🔬'
+            'google-search': '🔍', 'github': '📦', 'deep-research': '🔬',
+            'saucenao': '�', 'serpapi-reverse-image': '📸',
+            'serpapi-bing': '🅱️', 'serpapi-baidu': '🀄', 'serpapi-images': '�🖼️'
         };
         activeTools.forEach(tool => {
             const badge = document.createElement('span');

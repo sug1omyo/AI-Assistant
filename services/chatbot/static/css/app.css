@@ -3269,6 +3269,82 @@ body.light-mode .message__content pre {
   color: var(--accent, #007bff);
 }
 
+/* ── Response Stats Badge ── */
+.response-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 2px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary, #888);
+  letter-spacing: 0.01em;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  cursor: default;
+}
+.message:hover .response-stats { opacity: 1; }
+
+/* ── Follow-up Suggestions ── */
+.follow-up-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 60px 8px;
+  animation: fadeInUp 0.3s ease-out;
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.suggestion-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid var(--border-primary, rgba(255,255,255,0.12));
+  border-radius: 20px;
+  background: var(--bg-tertiary, rgba(255,255,255,0.04));
+  color: var(--text-secondary, #aaa);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.suggestion-chip:hover {
+  background: var(--bg-hover, rgba(255,255,255,0.08));
+  border-color: var(--accent, #7c6cf0);
+  color: var(--text-primary, #fff);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.suggestion-chip--think {
+  border-color: rgba(124, 108, 240, 0.35);
+  background: rgba(124, 108, 240, 0.08);
+  color: var(--accent, #7c6cf0);
+  font-weight: 600;
+}
+
+.suggestion-chip--think:hover {
+  background: rgba(124, 108, 240, 0.18);
+  border-color: rgba(124, 108, 240, 0.5);
+  color: var(--accent, #7c6cf0);
+  box-shadow: 0 4px 16px rgba(124, 108, 240, 0.25);
+}
+
+.suggestion-chip--think .lucide {
+  width: 14px;
+  height: 14px;
+}
+
 /* ── File Staging Area ── */
 .file-staging {
   display: flex;

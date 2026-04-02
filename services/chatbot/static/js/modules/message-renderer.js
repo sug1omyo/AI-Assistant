@@ -778,6 +778,31 @@ export class MessageRenderer {
     }
 
     /**
+     * Add response stats badge after action buttons
+     * Shows: elapsed time · model name · token count · speed label
+     */
+    addResponseStats(contentDiv, stats = {}) {
+        const { elapsed, model, tokens, speedLabel, thinkingMode } = stats;
+        const statsDiv = document.createElement('div');
+        statsDiv.className = 'response-stats';
+
+        const parts = [];
+        if (elapsed != null) parts.push(`${elapsed < 10 ? elapsed.toFixed(1) : Math.round(elapsed)}s`);
+        if (model) parts.push(model);
+        if (tokens) parts.push(`${tokens} tokens`);
+        if (speedLabel) parts.push(speedLabel);
+
+        statsDiv.textContent = parts.join(' · ');
+
+        // Tooltip with detailed breakdown
+        if (elapsed != null) {
+            statsDiv.title = `Response time: ${elapsed.toFixed(3)}s | Tokens ≈ ${tokens || '?'} | Mode: ${thinkingMode || 'instant'}`;
+        }
+
+        contentDiv.appendChild(statsDiv);
+    }
+
+    /**
      * Open Edit Chat tool
      */
     showEditChatTool(messageDiv, originalContent) {

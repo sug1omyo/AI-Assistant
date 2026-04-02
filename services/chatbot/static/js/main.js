@@ -927,6 +927,9 @@ class ChatBotApp {
             let thinkingData = {};
             let streamFailed = false;
             let thinkingReceived = false;
+            let streamCompleteData = {};
+            let streamSuggestions = [];
+            const _streamStartMs = performance.now();
 
             // Prepare streaming message div for progressive rendering
             const responseTimestamp = this.uiUtils.formatTimestamp(new Date());
@@ -962,6 +965,7 @@ class ChatBotApp {
                         memories: selectedMemories,
                         customPrompt: agentConfig ? agentConfig.systemPrompt : '',
                         images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
+                        tools: activeTools,
                     },
                     this.currentAbortController.signal,
                     {
@@ -1014,10 +1018,16 @@ class ChatBotApp {
                         },
                         onComplete: (data) => {
                             fullResponse = data.response || fullResponse;
+                            streamCompleteData = data;
                             // Clean up thinking container if it never got content
                             if (thinkingContainer && !thinkingReceived) {
                                 thinkingContainer.remove();
                                 thinkingContainer = null;
+                            }
+                        },
+                        onSuggestions: (data) => {
+                            if (data.items && data.items.length > 0) {
+                                streamSuggestions = data.items;
                             }
                         },
                         onError: (data) => {
@@ -1121,6 +1131,21 @@ class ChatBotApp {
                     this.messageRenderer.enhanceMarkdownTables(streamTextDiv);
                     // Add action buttons to streaming message
                     this.messageRenderer.addMessageButtons(streamContentDiv, responseContent, false, streamMsgDiv);
+
+                    // ── Stats badge (time · model · tokens) ──
+                    const _clientElapsed = ((performance.now() - _streamStartMs) / 1000);
+                    const _serverElapsed = streamCompleteData.elapsed_time || _clientElapsed;
+                    const _tokens = streamCompleteData.tokens || 0;
+                    const _modelName = this.messageRenderer.modelNames[formValues.model] || formValues.model;
+                    const _speedLabel = _serverElapsed < 2 ? 'Fast' : _serverElapsed < 5 ? '' : 'Slow';
+                    this.messageRenderer.addResponseStats(streamContentDiv, {
+                        elapsed: _serverElapsed,
+                        model: _modelName,
+                        tokens: _tokens,
+                        speedLabel: _speedLabel,
+                        thinkingMode: thinkingMode,
+                    });
+
                     if (window.lucide) lucide.createIcons({ nodes: [streamMsgDiv] });
                 } else if (streamFailed) {
                     // Non-streaming fallback: use addMessage
@@ -1192,6 +1217,53 @@ class ChatBotApp {
             const makeClickable = () => this.messageRenderer.makeImagesClickable((img) => this.openImagePreview(img));
             setTimeout(makeClickable, 100);
             setTimeout(makeClickable, 500);
+
+            // ── Follow-up suggestions + Think Harder ──
+            if (!streamFailed) {
+                const suggestionsContainer = document.createElement('div');
+                suggestionsContainer.className = 'follow-up-suggestions';
+
+                // "Think Harder" button (only if current mode is instant)
+                if (thinkingMode === 'instant') {
+                    const thinkBtn = document.createElement('button');
+                    thinkBtn.className = 'suggestion-chip suggestion-chip--think';
+                    thinkBtn.innerHTML = '<i data-lucide="brain" class="lucide"></i> Deep Thinking';
+                    thinkBtn.title = '4-Agents involvement';
+                    thinkBtn.onclick = () => {
+                        // Re-send last message with multi-thinking mode
+                        suggestionsContainer.remove();
+                        const lastUserMsg = message;
+                        if (window.selectThinkingMode) {
+                            window.selectThinkingMode('multi-thinking', 'layers', '4-Agents');
+                        }
+                        // Set input and trigger send
+                        this.uiUtils.setInputValue(lastUserMsg);
+                        setTimeout(() => { document.getElementById('sendBtn')?.click(); }, 100);
+                    };
+                    suggestionsContainer.appendChild(thinkBtn);
+                }
+
+                // Follow-up suggestion chips
+                if (streamSuggestions.length > 0) {
+                    streamSuggestions.forEach(text => {
+                        const chip = document.createElement('button');
+                        chip.className = 'suggestion-chip';
+                        chip.textContent = text;
+                        chip.onclick = () => {
+                            suggestionsContainer.remove();
+                            this.uiUtils.setInputValue(text);
+                            setTimeout(() => { document.getElementById('sendBtn')?.click(); }, 100);
+                        };
+                        suggestionsContainer.appendChild(chip);
+                    });
+                }
+
+                if (suggestionsContainer.children.length > 0) {
+                    elements.chatContainer.appendChild(suggestionsContainer);
+                    if (window.lucide) lucide.createIcons({ nodes: [suggestionsContainer] });
+                    elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+                }
+            }
             
         } catch (error) {
             // Remove thinking container if error

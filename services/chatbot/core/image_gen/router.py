@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import time
+import random
 import logging
 from typing import Optional, Generator
 from dataclasses import dataclass, field
@@ -87,8 +88,9 @@ class ImageGenerationRouter:
         # Black Forest Labs
         bfl_key = os.getenv("BFL_API_KEY", "")
         if bfl_key:
+            bfl_base = os.getenv("BFL_BASE_URL", "https://api.bfl.ai/v1")
             self._providers["bfl"] = ProviderConfig(
-                provider=BFLProvider(api_key=bfl_key),
+                provider=BFLProvider(api_key=bfl_key, base_url=bfl_base),
                 priority=85,
             )
 
@@ -584,8 +586,15 @@ class ImageGenerationRouter:
             # Sort by cost
             candidates.sort(key=lambda c: c.provider.cost_per_image)
         else:
-            # Auto: sort by priority (configured ranking)
-            candidates.sort(key=lambda c: c.priority, reverse=True)
+            # Auto: randomize among top-tier providers to distribute cost
+            # Group by priority tier (within 15 points = same tier)
+            if candidates:
+                max_pri = max(c.priority for c in candidates)
+                top_tier = [c for c in candidates if c.priority >= max_pri - 15]
+                rest = [c for c in candidates if c.priority < max_pri - 15]
+                random.shuffle(top_tier)
+                rest.sort(key=lambda c: c.priority, reverse=True)
+                candidates = top_tier + rest
 
         return candidates
 

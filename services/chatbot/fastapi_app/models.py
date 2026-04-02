@@ -55,6 +55,7 @@ class ChatRequest(BaseModel):
     model: str = Field("grok", description="AI model to use")
     context: str = Field("casual", description="Conversation context")
     deep_thinking: bool = Field(False, description="Enable detailed reasoning")
+    thinking_mode: str = Field("instant", description="Thinking mode: instant or multi-thinking")
     language: str = Field("vi", description="Response language")
     custom_prompt: str = Field("", description="Custom system prompt")
     memory_ids: list[str] = Field(default_factory=list)
