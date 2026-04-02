@@ -265,7 +265,7 @@ try {
 
             <div class="topbar__right">
                 <!-- Primary actions -->
-                <button class="topbar__btn" id="splitViewBtn" title="Split view"><i data-lucide="columns-2" class="lucide"></i></button>
+                <!-- <button class="topbar__btn" id="splitViewBtn" title="Split view"><i data-lucide="columns-2" class="lucide"></i></button> -->
                 <button class="topbar__btn" id="imageGenV2Btn" title="AI Image (Multi-provider)" style="color: var(--accent);"><i data-lucide="sparkles" class="lucide"></i></button>
                 <button class="topbar__btn" id="videoGenBtn" title="Video Sora2" style="color: var(--warning, #f59e0b);"><i data-lucide="video" class="lucide"></i></button>
                 <button class="topbar__btn" id="mcpToggleBtn" title="MCP Context"><i data-lucide="message-square-code" class="lucide"></i></button>
@@ -408,7 +408,7 @@ try {
                                 </div>
                             </div>
 
-                            <input type="file" id="fileInput" accept=".txt,.pdf,.doc,.docx,.json,.py,.js,.html,.css,.xlsx,.csv,image/*" multiple class="hidden">
+                            <input type="file" id="fileInput" accept=".txt,.pdf,.doc,.docx,.json,.py,.js,.html,.css,.xlsx,.csv,.md,.ts,.tsx,.jsx,.xml,.yaml,.yml,.log,.sql,.sh,.bat,image/*,audio/*,video/*" multiple class="hidden">
                         </div>
 
                         <!-- File staging area -->
@@ -1413,7 +1413,7 @@ try {
     // ════════════════════════════════════════════════════════════
     // TOOLS MENU
     // ════════════════════════════════════════════════════════════
-    let activeTools = new Set(['image-generation', 'img2img']);
+    let activeTools = new Set();
 
     function initToolsMenu() {
         const btn = document.getElementById('toolsMenuBtn');
@@ -1429,11 +1429,6 @@ try {
         dropdown.addEventListener('click', (e) => e.stopPropagation());
 
         setupToolItemClicks();
-        // Default to image-focused tools while still allowing users to toggle others.
-        ['imageGenToolBtn', 'img2imgToolBtn'].forEach((id) => {
-            const el = document.getElementById(id);
-            if (el) el.classList.add('active');
-        });
         updateActiveToolsDisplay();
     }
 
@@ -1466,10 +1461,6 @@ try {
                 }
             });
         });
-
-        const up = document.getElementById('uploadFilesBtn');
-        const fi = document.getElementById('fileInput');
-        if (up && fi) up.addEventListener('click', () => { closeToolsMenu(); fi.click(); });
 
         const br = document.getElementById('branchConversationBtn');
         if (br) br.addEventListener('click', () => { closeToolsMenu(); createBranchConversation(); });

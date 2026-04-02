@@ -20,7 +20,7 @@ import logging
 import base64
 import time as _time
 from functools import wraps
-from flask import Blueprint, request, jsonify, session, send_file
+from flask import Blueprint, request, jsonify, session, send_file, Response
 from io import BytesIO
 
 from core.image_gen import (
@@ -276,6 +276,174 @@ def generate_image():
         "cost_usd": round(result.cost_usd, 4),
         "style": data.get("style"),
     })
+
+
+
+# -- Streaming generation endpoint -----------------------------------------
+
+@image_gen_bp.route("/api/image-gen/stream", methods=["POST"])
+def generate_image_stream():
+    """
+    Stream image generation with real-time status updates via SSE.
+
+    Same body as /api/image-gen/generate but returns SSE stream with events:
+        - status:           Progress updates (enhancing prompt, selecting provider...)
+        - provider_try:     About to try a provider
+        - provider_fail:    Provider failed, will try next
+        - provider_success: Provider succeeded
+        - result:           Final result with image data
+        - saved:            Saved image info (URLs, IDs)
+        - error:            Fatal error
+    """
+    import json as _json
+
+    data = request.get_json(force=True, silent=True) or {}
+    prompt = data.get("prompt", "").strip()
+
+    if not prompt:
+        def _err_empty():
+            yield "event: error\ndata: " + _json.dumps({"error": "prompt is required"}) + "\n\n"
+        return Response(_err_empty(), mimetype='text/event-stream', status=400)
+
+    # Rate & validation
+    rate_err = _rate_check()
+    if rate_err:
+        def _err_rate():
+            yield "event: error\ndata: " + _json.dumps({"error": rate_err}) + "\n\n"
+        return Response(_err_rate(), mimetype='text/event-stream', status=429)
+    val_err = _validate(data)
+    if val_err:
+        def _err_val():
+            yield "event: error\ndata: " + _json.dumps({"error": val_err}) + "\n\n"
+        return Response(_err_val(), mimetype='text/event-stream', status=400)
+
+    router = _get_router()
+    sessions = _get_sessions()
+    storage = _get_storage()
+
+    conversation_id = data.get("conversation_id", session.get("conversation_id", ""))
+    img_session = sessions.get_or_create(conversation_id)
+    context = img_session.get_context_for_enhancement() if img_session.history else None
+
+    def _stream():
+        try:
+            final_result = None
+            for evt in router.generate_stream(
+                prompt=prompt,
+                quality=data.get("quality", QualityMode.AUTO),
+                style=data.get("style"),
+                width=data.get("width", 1024),
+                height=data.get("height", 1024),
+                steps=data.get("steps", 28),
+                guidance=data.get("guidance", 3.5),
+                seed=data.get("seed"),
+                num_images=data.get("num_images", 1),
+                provider_name=data.get("provider"),
+                model_name=data.get("model"),
+                enhance_prompt=data.get("enhance", True),
+                context=context,
+            ):
+                event_type = evt["event"]
+                event_data = evt["data"]
+                yield "event: " + event_type + "\ndata: " + _json.dumps(event_data) + "\n\n"
+
+                if event_type == "result":
+                    final_result = event_data
+                elif event_type == "error":
+                    return
+
+            # Post-process: save images
+            if final_result and final_result.get("success"):
+                saved_images = []
+                for img_b64 in final_result.get("images_b64", []):
+                    saved = storage.save(
+                        image_b64=img_b64,
+                        prompt=prompt,
+                        provider=final_result["provider"],
+                        model=final_result["model"],
+                        conversation_id=conversation_id,
+                        metadata=final_result.get("metadata", {}),
+                    )
+                    saved_images.append(saved)
+                    _save_to_gallery(saved, prompt, final_result["provider"],
+                                     final_result["model"], conversation_id)
+
+                for img_url in final_result.get("images_url", []):
+                    saved = storage.save(
+                        image_url=img_url,
+                        prompt=prompt,
+                        provider=final_result["provider"],
+                        model=final_result["model"],
+                        conversation_id=conversation_id,
+                        metadata=final_result.get("metadata", {}),
+                    )
+                    saved_images.append(saved)
+                    _save_to_gallery(saved, prompt, final_result["provider"],
+                                     final_result["model"], conversation_id)
+
+                # Update session
+                from core.image_gen.providers.base import ImageResult as _ImageResult
+                result_obj = _ImageResult(
+                    success=True,
+                    provider=final_result["provider"],
+                    model=final_result["model"],
+                    images_url=final_result.get("images_url", []),
+                    images_b64=final_result.get("images_b64", []),
+                    prompt_used=final_result.get("prompt_used", prompt),
+                    cost_usd=final_result.get("cost_usd", 0),
+                    latency_ms=final_result.get("latency_ms", 0),
+                    metadata=final_result.get("metadata", {}),
+                )
+                img_session.add_generation(
+                    user_prompt=prompt,
+                    enhanced_prompt=final_result.get("prompt_used", prompt),
+                    result=result_obj,
+                )
+                if data.get("style"):
+                    img_session.active_style = data["style"]
+
+                if final_result.get("cost_usd", 0) > 0:
+                    _log_cost('generate', final_result["provider"],
+                              final_result["model"], final_result["cost_usd"])
+
+                # Send saved image info as final event
+                images_out = [
+                    {"url": s.get("url", ""), "image_id": s.get("image_id", ""), "local_path": s.get("local_path", "")}
+                    for s in saved_images if not s.get("error")
+                ]
+                yield "event: saved\ndata: " + _json.dumps({"images": images_out}) + "\n\n"
+
+                for s in saved_images:
+                    if not s.get("error"):
+                        log_image_generation(
+                            prompt=prompt, provider=final_result["provider"],
+                            model=final_result["model"],
+                            image_url=s.get("url", ""),
+                            image_path=s.get("local_path", ""),
+                            session_id=conversation_id, mode="txt2img",
+                            extra={
+                                "prompt_used": final_result.get("prompt_used"),
+                                "cost_usd": final_result.get("cost_usd"),
+                                "latency_ms": final_result.get("latency_ms"),
+                                "style": data.get("style"),
+                            },
+                        )
+
+        except GeneratorExit:
+            logger.info("[ImageGen SSE] Client disconnected")
+        except Exception as e:
+            logger.error(f"[ImageGen SSE] Error: {e}")
+            yield "event: error\ndata: " + _json.dumps({"error": str(e)}) + "\n\n"
+
+    return Response(
+        _stream(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+        },
+    )
 
 
 # â”€â”€ Edit existing image â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

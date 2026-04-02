@@ -23,7 +23,7 @@ from core.extensions import MONGODB_ENABLED, logger
 from core.chatbot_v2 import get_chatbot
 from core.streaming import StreamingChatHandler, StreamEvent
 from core.thinking_generator import (
-    generate_thinking_steps, detect_category,
+    ThinkTagParser, detect_category,
     generate_thinking_summary, REASONING_PREFIX
 )
 
@@ -88,6 +88,31 @@ def chat_stream():
         memory_ids = data.get('memory_ids', [])
         mcp_selected_files = data.get('mcp_selected_files', [])
         history = data.get('history')
+
+        # Map thinking_mode (from frontend) to backend behavior
+        thinking_mode = data.get('thinking_mode', 'auto')
+        if thinking_mode in ('thinking', 'deep', 'multi-thinking'):
+            deep_thinking = True
+        elif thinking_mode in ('instant', 'auto'):
+            # auto: parse <think> tags if model produces them, but don't force
+            # instant: no thinking at all
+            deep_thinking = False
+        
+        # Extract images for vision models (base64 data URLs from frontend)
+        images = data.get('images', [])
+        if images and not isinstance(images, list):
+            images = []
+        # Validate and cap images (max 5 images, each max ~10MB base64)
+        MAX_IMAGES = 5
+        MAX_IMAGE_LEN = 15 * 1024 * 1024  # ~10MB raw ≈ 14MB base64
+        validated_images = []
+        for img in (images or [])[:MAX_IMAGES]:
+            if isinstance(img, str) and img.startswith('data:image/') and len(img) <= MAX_IMAGE_LEN:
+                validated_images.append(img)
+        images = validated_images if validated_images else None
+        
+        if images:
+            logger.info(f"[STREAM] {len(images)} image(s) attached for vision")
         
         if not message:
             return Response(
@@ -136,58 +161,29 @@ def chat_stream():
                         "model": model,
                         "context": context,
                         "deep_thinking": deep_thinking,
+                        "thinking_mode": thinking_mode,
                         "streaming": True,
                         "timestamp": datetime.now().isoformat()
                     })
                 ).format()
                 
                 # ── Thinking Phase ──
-                # Generate and stream thinking steps (like ChatGPT's thinking)
+                # Real AI reasoning via <think> tags or native reasoning_content
                 category = detect_category(message)
                 thinking_steps_text = []
+                thinking_summary = ""
+                thinking_duration = 0
+                thinking_started = False
+                thinking_ended = False
+
+                # For instant mode, skip thinking entirely
+                use_thinking = thinking_mode != 'instant'
                 
-                yield StreamEvent(
-                    event="thinking_start",
-                    data=json.dumps({
-                        "category": category,
-                        "timestamp": datetime.now().isoformat()
-                    })
-                ).format()
-                
-                for step in generate_thinking_steps(
-                    message=message,
-                    language=language,
-                    context=context,
-                    deep_thinking=deep_thinking
-                ):
-                    thinking_steps_text.append(step.text)
-                    yield StreamEvent(
-                        event="thinking",
-                        data=json.dumps({
-                            "step": step.text,
-                            "category": step.category,
-                        })
-                    ).format()
-                    # Small delay for natural animation feel
-                    time.sleep(step.duration_ms / 1000.0)
-                
-                thinking_duration = round((time.time() - thinking_start) * 1000)
-                thinking_summary = generate_thinking_summary(message, category, language)
-                
-                yield StreamEvent(
-                    event="thinking_end",
-                    data=json.dumps({
-                        "summary": thinking_summary,
-                        "steps": thinking_steps_text,
-                        "category": category,
-                        "duration_ms": thinking_duration,
-                    })
-                ).format()
-                
-                # ── Response Phase ──
+                # ── Response Phase (with integrated thinking) ──
                 full_response = ""
                 chunk_count = 0
                 has_model_reasoning = False
+                think_parser = ThinkTagParser() if use_thinking else None
                 
                 # Get streaming response from chatbot
                 for chunk in chatbot.chat_stream(
@@ -198,41 +194,135 @@ def chat_stream():
                     history=history,
                     memories=memories if memories else None,
                     language=language,
-                    custom_prompt=custom_prompt
+                    custom_prompt=custom_prompt,
+                    images=images
                 ):
-                    if chunk:
-                        # Check if this is model reasoning content
-                        if chunk.startswith(REASONING_PREFIX):
-                            reasoning_text = chunk[len(REASONING_PREFIX):]
-                            if reasoning_text:
-                                if not has_model_reasoning:
-                                    has_model_reasoning = True
-                                    # Signal that real model reasoning is starting
+                    if not chunk:
+                        continue
+                    
+                    # Handle native reasoning_content (DeepSeek R1, etc.)
+                    if chunk.startswith(REASONING_PREFIX):
+                        reasoning_text = chunk[len(REASONING_PREFIX):]
+                        if reasoning_text:
+                            if not thinking_started:
+                                thinking_started = True
+                                has_model_reasoning = True
+                                yield StreamEvent(
+                                    event="thinking_start",
+                                    data=json.dumps({
+                                        "category": category,
+                                        "timestamp": datetime.now().isoformat()
+                                    })
+                                ).format()
+                            thinking_steps_text.append(reasoning_text)
+                            yield StreamEvent(
+                                event="thinking",
+                                data=json.dumps({
+                                    "step": reasoning_text,
+                                    "category": "model_reasoning",
+                                    "is_reasoning_chunk": True,
+                                })
+                            ).format()
+                        continue
+                    
+                    # Parse <think> tags from model output
+                    if think_parser:
+                        segments = think_parser.feed(chunk)
+                        for is_thinking, text in segments:
+                            if is_thinking:
+                                # This is reasoning content inside <think>
+                                if not thinking_started:
+                                    thinking_started = True
                                     yield StreamEvent(
-                                        event="thinking",
+                                        event="thinking_start",
                                         data=json.dumps({
-                                            "step": "🧠 Suy luận từ mô hình AI:" if language == 'vi' else "🧠 AI model reasoning:",
-                                            "category": "model_reasoning",
+                                            "category": category,
+                                            "timestamp": datetime.now().isoformat()
                                         })
                                     ).format()
+                                thinking_steps_text.append(text)
                                 yield StreamEvent(
                                     event="thinking",
                                     data=json.dumps({
-                                        "step": reasoning_text,
-                                        "category": "model_reasoning",
+                                        "step": text,
+                                        "category": category,
                                         "is_reasoning_chunk": True,
                                     })
                                 ).format()
+                            else:
+                                # Regular response content — end thinking if active
+                                if thinking_started and not thinking_ended:
+                                    thinking_ended = True
+                                    thinking_duration = round((time.time() - thinking_start) * 1000)
+                                    thinking_summary = generate_thinking_summary(message, category, language)
+                                    yield StreamEvent(
+                                        event="thinking_end",
+                                        data=json.dumps({
+                                            "summary": thinking_summary,
+                                            "steps": thinking_steps_text,
+                                            "category": category,
+                                            "duration_ms": thinking_duration,
+                                        })
+                                    ).format()
+                                
+                                full_response += text
+                                chunk_count += 1
+                                yield StreamEvent(
+                                    event="chunk",
+                                    data=json.dumps({
+                                        "content": text,
+                                        "chunk_index": chunk_count
+                                    })
+                                ).format()
+                    else:
+                        # No thinking parser (instant mode) — pass through
+                        full_response += chunk
+                        chunk_count += 1
+                        yield StreamEvent(
+                            event="chunk",
+                            data=json.dumps({
+                                "content": chunk,
+                                "chunk_index": chunk_count
+                            })
+                        ).format()
+                
+                # Flush remaining buffer from think parser
+                if think_parser:
+                    for is_thinking, text in think_parser.flush():
+                        if is_thinking:
+                            thinking_steps_text.append(text)
+                            yield StreamEvent(
+                                event="thinking",
+                                data=json.dumps({
+                                    "step": text,
+                                    "category": category,
+                                    "is_reasoning_chunk": True,
+                                })
+                            ).format()
                         else:
-                            full_response += chunk
+                            full_response += text
                             chunk_count += 1
                             yield StreamEvent(
                                 event="chunk",
                                 data=json.dumps({
-                                    "content": chunk,
+                                    "content": text,
                                     "chunk_index": chunk_count
                                 })
                             ).format()
+                
+                # Close thinking if still open (model didn't close </think>)
+                if thinking_started and not thinking_ended:
+                    thinking_duration = round((time.time() - thinking_start) * 1000)
+                    thinking_summary = generate_thinking_summary(message, category, language)
+                    yield StreamEvent(
+                        event="thinking_end",
+                        data=json.dumps({
+                            "summary": thinking_summary,
+                            "steps": thinking_steps_text,
+                            "category": category,
+                            "duration_ms": thinking_duration,
+                        })
+                    ).format()
                 
                 # Send complete event
                 yield StreamEvent(

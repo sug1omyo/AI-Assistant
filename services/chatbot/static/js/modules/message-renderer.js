@@ -2,6 +2,7 @@
  * Message Renderer Module
  * Handles message rendering, markdown parsing, code highlighting
  */
+import { csvPreview } from './csv-preview.js';
 
 export class MessageRenderer {
     constructor() {
@@ -146,14 +147,8 @@ export class MessageRenderer {
                     });
                 }
                 
-                // Add copy button for tables
-                textDiv.querySelectorAll('table').forEach((table) => {
-                    const copyBtn = document.createElement('button');
-                    copyBtn.className = 'copy-table-btn';
-                    copyBtn.textContent = '📋 Copy bảng';
-                    copyBtn.onclick = () => this.copyTableToClipboard(table, copyBtn);
-                    table.parentNode.insertBefore(copyBtn, table.nextSibling);
-                });
+                // Enhance tables with interactive viewer
+                this.enhanceMarkdownTables(textDiv);
             } else {
                 textDiv.textContent = content;
             }
@@ -287,6 +282,13 @@ export class MessageRenderer {
         
         contentDiv.appendChild(filesGrid);
         
+        // Render inline table preview for files with tableData
+        const tableFiles = files.filter(f => f.tableData && f.tableData.headers && f.tableData.headers.length > 0);
+        tableFiles.forEach(file => {
+            const previewContainer = this._buildInlineTablePreview(file.tableData, file.name);
+            contentDiv.appendChild(previewContainer);
+        });
+        
         // Add timestamp
         const timestampDiv = document.createElement('div');
         timestampDiv.className = 'message-timestamp';
@@ -308,6 +310,7 @@ export class MessageRenderer {
         if (type.startsWith('image/')) return '🖼️';
         if (type.startsWith('video/')) return '🎥';
         if (type.startsWith('audio/')) return '🎵';
+        if (name.endsWith('.csv') || name.endsWith('.tsv')) return '📊';
         if (type === 'application/pdf') return '📕';
         if (type === 'application/msword' || type.includes('wordprocessing')) return '📘';
         if (type.includes('spreadsheet') || name.endsWith('.xlsx')) return '📊';
@@ -329,6 +332,143 @@ export class MessageRenderer {
         const sizes = ['Bytes', 'KB', 'MB', 'GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+    }
+
+    /**
+     * Build an inline table preview (compact, first N rows) for chat messages
+     */
+    _buildInlineTablePreview(tableData, filename, maxRows = 10) {
+        const { headers, rows } = tableData;
+        const container = document.createElement('div');
+        container.className = 'inline-table-preview';
+
+        // Header bar
+        const headerBar = document.createElement('div');
+        headerBar.className = 'inline-table-header';
+        headerBar.innerHTML = `
+            <span class="inline-table-title">📊 ${this.escapeHtml(filename)}</span>
+            <span class="inline-table-stats">${rows.length} hàng · ${headers.length} cột</span>
+        `;
+        container.appendChild(headerBar);
+
+        // Table
+        const tableWrap = document.createElement('div');
+        tableWrap.className = 'inline-table-wrap';
+        const table = document.createElement('table');
+        table.className = 'inline-table';
+
+        // Thead
+        const thead = document.createElement('thead');
+        thead.innerHTML = `<tr>${headers.map(h => `<th>${this.escapeHtml(h)}</th>`).join('')}</tr>`;
+        table.appendChild(thead);
+
+        // Tbody — show first maxRows
+        const displayRows = rows.slice(0, maxRows);
+        const tbody = document.createElement('tbody');
+        tbody.innerHTML = displayRows.map(row =>
+            `<tr>${headers.map(h => {
+                const val = row[h] ?? '';
+                const str = String(val);
+                const display = str.length > 60 ? str.substring(0, 60) + '…' : str;
+                return `<td>${this.escapeHtml(display)}</td>`;
+            }).join('')}</tr>`
+        ).join('');
+        table.appendChild(tbody);
+        tableWrap.appendChild(table);
+        container.appendChild(tableWrap);
+
+        // Footer with "view full" button if there are more rows
+        if (rows.length > maxRows) {
+            const footer = document.createElement('div');
+            footer.className = 'inline-table-footer';
+            footer.innerHTML = `<span class="inline-table-truncated">Hiển thị ${maxRows}/${rows.length} hàng</span>`;
+            const viewBtn = document.createElement('button');
+            viewBtn.className = 'inline-table-view-btn';
+            viewBtn.textContent = '📋 Xem đầy đủ bảng';
+            viewBtn.addEventListener('click', () => {
+                csvPreview.show(tableData, filename);
+            });
+            footer.appendChild(viewBtn);
+            container.appendChild(footer);
+        }
+
+        return container;
+    }
+
+    /**
+     * Enhance HTML tables from markdown rendering with interactive features.
+     * Parses table DOM into {headers, rows} and wraps with toolbar.
+     * Call this on a container after markdown has been rendered.
+     */
+    enhanceMarkdownTables(container) {
+        const tables = container.querySelectorAll('table');
+        tables.forEach(table => {
+            // Skip if already enhanced
+            if (table.dataset.enhanced) return;
+            table.dataset.enhanced = 'true';
+
+            // Parse HTML table into structured data
+            const headers = [];
+            const rows = [];
+            const thElements = table.querySelectorAll('thead th');
+            thElements.forEach(th => headers.push(th.textContent.trim()));
+
+            // If no thead, try first row
+            if (headers.length === 0) {
+                const firstRow = table.querySelector('tr');
+                if (firstRow) {
+                    firstRow.querySelectorAll('th, td').forEach(cell => headers.push(cell.textContent.trim()));
+                }
+            }
+
+            table.querySelectorAll('tbody tr').forEach(tr => {
+                const row = {};
+                tr.querySelectorAll('td').forEach((td, i) => {
+                    row[headers[i] || `Col ${i + 1}`] = td.textContent.trim();
+                });
+                rows.push(row);
+            });
+
+            // Wrap table in a styled container
+            const wrapper = document.createElement('div');
+            wrapper.className = 'enhanced-table-container';
+
+            // Toolbar
+            const toolbar = document.createElement('div');
+            toolbar.className = 'enhanced-table-toolbar';
+            toolbar.innerHTML = `<span class="enhanced-table-info">${rows.length} hàng · ${headers.length} cột</span>`;
+
+            // Copy button
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'enhanced-table-btn';
+            copyBtn.textContent = '📋 Copy';
+            copyBtn.addEventListener('click', () => this.copyTableToClipboard(table, copyBtn));
+            toolbar.appendChild(copyBtn);
+
+            // Expand button — open in full viewer
+            if (headers.length > 0 && rows.length > 0) {
+                const expandBtn = document.createElement('button');
+                expandBtn.className = 'enhanced-table-btn';
+                expandBtn.textContent = '🔍 Xem đầy đủ';
+                expandBtn.addEventListener('click', () => {
+                    csvPreview.show({ headers, rows }, 'Bảng từ AI');
+                });
+                toolbar.appendChild(expandBtn);
+            }
+
+            // Insert wrapper
+            table.parentNode.insertBefore(wrapper, table);
+            wrapper.appendChild(toolbar);
+
+            // Add horizontal scroll wrapper for the table
+            const scrollWrap = document.createElement('div');
+            scrollWrap.className = 'enhanced-table-scroll';
+            wrapper.appendChild(scrollWrap);
+            scrollWrap.appendChild(table);
+
+            // Add enhanced styling class to the table itself
+            table.classList.add('enhanced-table');
+        });
     }
 
     /**

@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import time
 import logging
-from typing import Optional
+from typing import Optional, Generator
 from dataclasses import dataclass, field
 
 from .providers.base import (
@@ -256,6 +256,182 @@ class ImageGenerationRouter:
             error=f"All providers failed. Last error: {last_error}",
             prompt_used=enhanced_prompt,
         )
+
+    def generate_stream(
+        self,
+        prompt: str,
+        mode: str = "auto",
+        quality: str = QualityMode.AUTO,
+        style: Optional[str] = None,
+        width: int = 1024,
+        height: int = 1024,
+        source_image_b64: Optional[str] = None,
+        mask_b64: Optional[str] = None,
+        strength: float = 0.75,
+        steps: int = 28,
+        guidance: float = 3.5,
+        seed: Optional[int] = None,
+        num_images: int = 1,
+        provider_name: Optional[str] = None,
+        model_name: Optional[str] = None,
+        enhance_prompt: bool = True,
+        context: Optional[str] = None,
+    ) -> Generator[dict, None, None]:
+        """
+        Generate image(s) with streaming status updates.
+        
+        Yields dicts with 'event' and 'data' keys:
+          - {"event": "status", "data": {"step": "...", "phase": "...", ...}}
+          - {"event": "provider_try", "data": {"provider": "...", "priority": N, ...}}
+          - {"event": "provider_fail", "data": {"provider": "...", "error": "..."}}
+          - {"event": "provider_success", "data": {"provider": "...", "model": "..."}}
+          - {"event": "result", "data": {<ImageResult fields>}}
+          - {"event": "error", "data": {"error": "..."}}
+        """
+        start_time = time.time()
+
+        # 1. Resolve mode
+        yield {"event": "status", "data": {"step": "Analyzing request...", "phase": "init"}}
+        img_mode = self._resolve_mode(mode, source_image_b64, mask_b64)
+        mode_labels = {
+            ImageMode.TEXT_TO_IMAGE: "Text → Image",
+            ImageMode.IMAGE_TO_IMAGE: "Image → Image",
+            ImageMode.INPAINT: "Inpainting",
+        }
+        yield {"event": "status", "data": {
+            "step": f"Mode: {mode_labels.get(img_mode, str(img_mode))}",
+            "phase": "init",
+        }}
+
+        # 2. Enhance prompt
+        enhanced_prompt = prompt
+        if enhance_prompt and self._enhancer:
+            yield {"event": "status", "data": {
+                "step": "Enhancing prompt with AI...",
+                "phase": "enhance",
+            }}
+            try:
+                enhanced_prompt = self._enhancer.enhance(prompt, style_preset=style, context=context)
+                logger.info(f"[ImageRouter] Enhanced: '{prompt[:50]}...' → '{enhanced_prompt[:80]}...'")
+                yield {"event": "status", "data": {
+                    "step": f"Prompt enhanced",
+                    "phase": "enhance",
+                    "enhanced_prompt": enhanced_prompt,
+                }}
+            except Exception as e:
+                logger.warning(f"[ImageRouter] Enhance failed: {e}")
+                yield {"event": "status", "data": {
+                    "step": "Prompt enhancement skipped",
+                    "phase": "enhance",
+                }}
+
+        # 3. Build request
+        resolved_model = self._resolve_requested_model(model_name)
+        req = ImageRequest(
+            prompt=enhanced_prompt,
+            mode=img_mode,
+            source_image_b64=source_image_b64,
+            mask_b64=mask_b64,
+            strength=strength,
+            width=width,
+            height=height,
+            steps=steps,
+            guidance=guidance,
+            seed=seed,
+            style_preset=style,
+            num_images=num_images,
+            extra={"model": resolved_model} if resolved_model else {},
+        )
+
+        # 4. Select providers
+        yield {"event": "status", "data": {
+            "step": "Selecting providers...",
+            "phase": "select",
+        }}
+        providers = self._select_providers(quality, img_mode, provider_name)
+
+        if resolved_model and resolved_model.startswith("nano-banana"):
+            providers = [cfg for cfg in providers if cfg.provider.name in {"fal", "replicate"}]
+
+        if not providers:
+            error_msg = ("Nano Banana requires fal.ai or Replicate API key."
+                         if resolved_model and resolved_model.startswith("nano-banana")
+                         else "No image providers available. Add API keys for fal.ai, Replicate, or BFL.")
+            yield {"event": "error", "data": {"error": error_msg, "prompt_used": enhanced_prompt}}
+            return
+
+        provider_names = [cfg.provider.name for cfg in providers]
+        yield {"event": "status", "data": {
+            "step": f"Available providers: {', '.join(provider_names)}",
+            "phase": "select",
+            "providers": provider_names,
+        }}
+
+        # 5. Try providers with fallback (streaming status)
+        last_error = ""
+        attempt = 0
+        for prov_config in providers:
+            prov = prov_config.provider
+            attempt += 1
+            yield {"event": "provider_try", "data": {
+                "provider": prov.name,
+                "priority": prov_config.priority,
+                "attempt": attempt,
+                "total_providers": len(providers),
+            }}
+
+            try:
+                result = prov.generate(req)
+                if result.success:
+                    result.prompt_used = enhanced_prompt
+                    self._total_cost += result.cost_usd
+                    self._total_generations += 1
+                    result.metadata["original_prompt"] = prompt
+                    result.metadata["enhanced"] = enhance_prompt
+                    result.metadata["style"] = style
+                    if resolved_model:
+                        result.metadata["requested_model"] = resolved_model
+
+                    latency = round((time.time() - start_time) * 1000, 1)
+                    yield {"event": "provider_success", "data": {
+                        "provider": result.provider,
+                        "model": result.model,
+                        "latency_ms": latency,
+                    }}
+                    yield {"event": "result", "data": {
+                        "success": True,
+                        "provider": result.provider,
+                        "model": result.model,
+                        "images_b64": result.images_b64,
+                        "images_url": result.images_url,
+                        "prompt_used": enhanced_prompt,
+                        "original_prompt": prompt,
+                        "latency_ms": latency,
+                        "cost_usd": result.cost_usd,
+                        "metadata": result.metadata,
+                    }}
+                    return
+                else:
+                    last_error = result.error or "Unknown error"
+                    logger.warning(f"[ImageRouter] {prov.name} failed: {last_error}")
+                    yield {"event": "provider_fail", "data": {
+                        "provider": prov.name,
+                        "error": last_error,
+                        "attempt": attempt,
+                    }}
+            except Exception as e:
+                last_error = str(e)
+                logger.error(f"[ImageRouter] {prov.name} exception: {e}")
+                yield {"event": "provider_fail", "data": {
+                    "provider": prov.name,
+                    "error": last_error,
+                    "attempt": attempt,
+                }}
+
+        yield {"event": "error", "data": {
+            "error": f"All providers failed. Last error: {last_error}",
+            "prompt_used": enhanced_prompt,
+        }}
 
     def get_available_providers(self) -> list[dict]:
         """Return info about all configured providers."""

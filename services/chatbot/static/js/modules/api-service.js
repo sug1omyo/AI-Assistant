@@ -120,6 +120,11 @@ export class APIService {
             custom_prompt: params.customPrompt || '',
         };
 
+        // Include images for vision models (base64 data URLs)
+        if (params.images && params.images.length > 0) {
+            body.images = params.images;
+        }
+
         const response = await fetch('/chat/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

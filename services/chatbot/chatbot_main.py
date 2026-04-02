@@ -5142,6 +5142,73 @@ def serve_storage_image(filename):
     return send_from_directory(storage_dir, filename)
 
 
+
+# -- Extract text from uploaded file (base64) via OCR/parsing --
+@app.route('/api/extract-file-text', methods=['POST'])
+def app_extract_file_text():
+    import base64 as _b64
+    data = request.get_json(silent=True) or {}
+    file_b64 = data.get('file_b64', '')
+    filename = str(data.get('filename', 'file')).strip()
+    if not file_b64 or not filename:
+        return jsonify({'success': False, 'error': 'file_b64 and filename required'}), 400
+    if ',' in file_b64:
+        file_b64 = file_b64.split(',', 1)[1]
+    try:
+        file_data = _b64.b64decode(file_b64)
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Invalid base64: {e}'}), 400
+    success, text = extract_file_content(file_data, filename)
+    if success and text and text.strip():
+        return jsonify({'success': True, 'text': text.strip(), 'filename': filename})
+    return jsonify({'success': False, 'text': '', 'error': 'Could not extract text from file'})
+
+
+# -- Auto-generate title via Ollama --
+@app.route('/api/generate-title', methods=['POST'])
+def app_generate_title():
+    import requests as _req
+    data = request.get_json(silent=True) or {}
+    raw_message = data.get('message', '')
+    if not isinstance(raw_message, str):
+        raw_message = ''
+    user_message = raw_message.strip()[:200]
+    language = str(data.get('language', 'vi')).strip()
+    if not user_message:
+        return jsonify({'error': 'message is required'}), 400
+    if language == 'en':
+        prompt = (
+            'Generate a concise 3-5 word English title for this conversation. '
+            'Return ONLY the title text, no quotes, no explanation:\n'
+            f'"{user_message}"'
+        )
+    else:
+        prompt = (
+            'Tao tieu de ngan gon 3-7 tu tieng Viet cho cuoc tro chuyen nay. '
+            'Chi tra ve tieu de, khong giai thich, khong ngoac kep:\n'
+            f'"{user_message}"'
+        )
+    try:
+        resp = _req.post(
+            'http://localhost:11434/api/generate',
+            json={
+                'model': 'qwen2.5:0.5b',
+                'prompt': prompt,
+                'stream': False,
+                'options': {'temperature': 0.7, 'num_predict': 20},
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        title = resp.json().get('response', '').strip().replace('"', '').replace("'", '').strip()
+        if title:
+            return jsonify({'title': title})
+    except Exception as e:
+        logger.debug(f'[generate-title] Ollama unavailable: {e}')
+    fallback = user_message[:40] + ('...' if len(user_message) > 40 else '')
+    return jsonify({'title': fallback})
+
+
 # Error handlers
 @app.errorhandler(404)
 def not_found(error):
@@ -5155,12 +5222,7 @@ def internal_error(error):
 
 
 # Register blueprints from routes/
-try:
-    from routes.main import main_bp
-    app.register_blueprint(main_bp)
-    logger.info("âœ… Registered main blueprint")
-except ImportError as e:
-    logger.warning(f"âš ï¸ Could not register main blueprint: {e}")
+# main_bp skipped — routes (/, /chat, /clear, etc.) already on app directly
 
 try:
     from routes.memory import memory_bp

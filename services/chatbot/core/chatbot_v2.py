@@ -222,7 +222,8 @@ class ChatbotAgent:
         history: Optional[List[Dict]] = None,
         memories: Optional[List[Dict]] = None,
         language: str = 'vi',
-        custom_prompt: Optional[str] = None
+        custom_prompt: Optional[str] = None,
+        images: Optional[List[str]] = None
     ) -> ChatContext:
         """Build chat context"""
         return ChatContext(
@@ -233,7 +234,8 @@ class ChatbotAgent:
             custom_prompt=custom_prompt,
             history=history,
             memories=memories,
-            conversation_history=self.conversation_history
+            conversation_history=self.conversation_history,
+            images=images
         )
     
     def _chat_with_model(
@@ -303,7 +305,8 @@ class ChatbotAgent:
         history: Optional[List[Dict]] = None,
         memories: Optional[List[Dict]] = None,
         language: str = 'vi',
-        custom_prompt: Optional[str] = None
+        custom_prompt: Optional[str] = None,
+        images: Optional[List[str]] = None
     ) -> Generator[str, None, None]:
         """
         Stream chat response in real-time
@@ -311,7 +314,7 @@ class ChatbotAgent:
         Yields:
             str: Response chunks as they arrive
         """
-        ctx = self._build_context(message, context, deep_thinking, history, memories, language, custom_prompt)
+        ctx = self._build_context(message, context, deep_thinking, history, memories, language, custom_prompt, images=images)
         
         # Save user message if using MongoDB
         if MONGODB_ENABLED and self.conversation_id and history is None:
@@ -392,7 +395,8 @@ class ChatbotAgent:
         memories: Optional[List[Dict]] = None,
         language: str = 'vi',
         custom_prompt: Optional[str] = None,
-        enable_fallback: bool = True
+        enable_fallback: bool = True,
+        images: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         Main chat method with fallback support
@@ -415,7 +419,7 @@ class ChatbotAgent:
         if model in ['bloomvn-local', 'qwen1.5-local', 'qwen2.5-local']:
             return self._chat_with_local_model(message, model, context, deep_thinking, language)
         
-        ctx = self._build_context(message, context, deep_thinking, history, memories, language, custom_prompt)
+        ctx = self._build_context(message, context, deep_thinking, history, memories, language, custom_prompt, images=images)
         
         # Save user message
         if MONGODB_ENABLED and self.conversation_id and history is None:
