@@ -38,6 +38,28 @@ try {
         localStorage.setItem('sidebarFixApplied_v1', '1');
     }
 } catch(e) {}
+
+// Runtime feature flags (override via localStorage or window.__CHAT_FEATURES)
+try {
+    const storedFlags = JSON.parse(localStorage.getItem('chatFeatureFlags') || '{}');
+    window.__CHAT_FEATURES = {
+        tokenGauge: true,
+        collapsibleThinking: true,
+        suggestionChips: true,
+        selectAndReply: true,
+        codeCopy: true,
+        ...storedFlags,
+        ...(window.__CHAT_FEATURES || {}),
+    };
+} catch (e) {
+    window.__CHAT_FEATURES = {
+        tokenGauge: true,
+        collapsibleThinking: true,
+        suggestionChips: true,
+        selectAndReply: true,
+        codeCopy: true,
+    };
+}
 </script>
 
 <div class="app">
@@ -1076,12 +1098,11 @@ try {
                 <!-- Settings Grid -->
                 <div class="vg-settings-grid" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px;">
                     <div>
-                        <label class="form-label">📐 Resolution</label>
+                        <label class="form-label">📐 Aspect Ratio</label>
                         <select id="vgResolution" class="form-select" style="width: 100%;">
-                            <option value="1280x720" selected>1280×720 (Landscape)</option>
-                            <option value="720x1280">720×1280 (Portrait)</option>
-                            <option value="1792x1024">1792×1024 (Wide)</option>
-                            <option value="1024x1792">1024×1792 (Tall)</option>
+                            <option value="1280x720" selected>16:9 Landscape</option>
+                            <option value="720x1280">9:16 Portrait</option>
+                            <option value="1080x1920">1:1 Square</option>
                         </select>
                     </div>
                     <div>

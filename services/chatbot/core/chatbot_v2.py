@@ -64,6 +64,7 @@ class ModelRegistry:
                 api_key=OPENAI_API_KEY,
                 model_id='gpt-4o-mini',
                 supports_streaming=True,
+                supports_vision=True,
                 fallback_model='deepseek'
             )
         
@@ -139,6 +140,7 @@ class ModelRegistry:
                 max_tokens=2000,
                 max_tokens_deep=4000,
                 supports_streaming=True,
+                supports_vision=True,
                 fallback_model='grok'
             )
         
@@ -188,6 +190,27 @@ class ModelRegistry:
     def list_available(self) -> List[str]:
         """List all available models"""
         return list(self._handlers.keys())
+
+    # ── Vision model helpers ──────────────────────────────────────
+    # Preferred order when images are attached
+    VISION_FALLBACK_CHAIN = ['gemini', 'openai']
+
+    def get_vision_model(self, preferred: Optional[str] = None) -> Optional[str]:
+        """Return the best available vision-capable model.
+
+        If *preferred* already supports vision, return it.
+        Otherwise walk the VISION_FALLBACK_CHAIN.
+        """
+        if preferred:
+            cfg = self._configs.get(preferred)
+            if cfg and cfg.supports_vision:
+                return preferred
+
+        for name in self.VISION_FALLBACK_CHAIN:
+            cfg = self._configs.get(name)
+            if cfg and cfg.supports_vision:
+                return name
+        return None
 
 
 # Global model registry
@@ -316,6 +339,16 @@ class ChatbotAgent:
         """
         ctx = self._build_context(message, context, deep_thinking, history, memories, language, custom_prompt, images=images)
         
+        # ── Auto-route to vision model when images are attached ──
+        original_model = model
+        if images and images:
+            vision_model = self.registry.get_vision_model(model)
+            if vision_model and vision_model != model:
+                logger.info(f"[Vision] '{model}' does not support images → routing to '{vision_model}'")
+                model = vision_model
+            elif not vision_model:
+                logger.warning("[Vision] No vision-capable model available; images will be ignored by the API")
+
         # Save user message if using MongoDB
         if MONGODB_ENABLED and self.conversation_id and history is None:
             save_message_to_db(
@@ -421,6 +454,13 @@ class ChatbotAgent:
         
         ctx = self._build_context(message, context, deep_thinking, history, memories, language, custom_prompt, images=images)
         
+        # ── Auto-route to vision model when images are attached ──
+        if images and images:
+            vision_model = self.registry.get_vision_model(model)
+            if vision_model and vision_model != model:
+                logger.info(f"[Vision] '{model}' does not support images → routing to '{vision_model}'")
+                model = vision_model
+
         # Save user message
         if MONGODB_ENABLED and self.conversation_id and history is None:
             save_message_to_db(

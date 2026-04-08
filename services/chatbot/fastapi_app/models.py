@@ -33,8 +33,7 @@ class ContextType(str, Enum):
 class VideoResolution(str, Enum):
     portrait = "720x1280"
     landscape = "1280x720"
-    portrait_wide = "1024x1792"
-    landscape_wide = "1792x1024"
+    square = "1080x1920"
 
 
 class VideoSeconds(str, Enum):
@@ -64,6 +63,8 @@ class ChatRequest(BaseModel):
     # Agent / tool config
     agent_config: dict[str, Any] | None = None
     tools: list[str] = Field(default_factory=list)
+    # Vision (base64 data-URLs from frontend)
+    images: list[str] = Field(default_factory=list, description="Base64 data-URL images for vision models")
     # RAG
     rag_collection_ids: list[str] = Field(default_factory=list, description="RAG collections to search")
     rag_top_k: int = Field(5, description="Max RAG results to retrieve")
@@ -180,7 +181,7 @@ class VideoGenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=1, description="Video generation prompt")
     size: VideoResolution = Field(
         VideoResolution.landscape,
-        description="Video size: 720x1280 | 1280x720 | 1024x1792 | 1792x1024",
+        description="Aspect ratio: 16:9 (landscape), 9:16 (portrait), or 1:1 (square)",
     )
     seconds: VideoSeconds = Field(
         VideoSeconds.medium,
@@ -197,6 +198,7 @@ class VideoStatusResponse(BaseModel):
     status: str  # queued, in_progress, completed, failed
     prompt: str | None = None
     size: str | None = None
+    aspect_ratio: str | None = None
     seconds: str | None = None
     model: str | None = None
     progress: int | None = None

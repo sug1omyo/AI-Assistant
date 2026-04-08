@@ -22,7 +22,14 @@ if str(CHATBOT_DIR) not in sys.path:
 from core.config import MEMORY_DIR
 from core.extensions import MONGODB_ENABLED, logger
 from core.chatbot_v2 import get_chatbot
+from core.stream_metrics import (
+    get_stream_metrics_snapshot,
+    record_stream_complete,
+    record_stream_error,
+    record_stream_start,
+)
 from core.streaming import StreamingChatHandler, StreamEvent
+from core.stream_contract import STREAM_CONTRACT_VERSION, build_complete_event_payload, with_request_id
 from core.thinking_generator import (
     ThinkTagParser, detect_category,
     generate_thinking_summary, REASONING_PREFIX
@@ -63,6 +70,40 @@ _SEARCH_KEYWORDS = [
     "tìm", "search", "tra cứu", "look up", "google",
     "tìm kiếm", "find", "tìm giúp", "check",
 ]
+
+
+def _build_complete_event_payload(
+    *,
+    full_response: str,
+    model: str,
+    context: str,
+    deep_thinking: bool,
+    thinking_mode: str,
+    chunk_count: int,
+    thinking_summary: str,
+    thinking_steps_text: list,
+    thinking_duration: int,
+    elapsed_time: float,
+    tokens: int,
+    max_tokens: int,
+    request_id: str | None = None,
+) -> dict:
+    """Compatibility wrapper around shared contract helper."""
+    return build_complete_event_payload(
+        full_response=full_response,
+        model=model,
+        context=context,
+        deep_thinking=deep_thinking,
+        thinking_mode=thinking_mode,
+        chunk_count=chunk_count,
+        thinking_summary=thinking_summary,
+        thinking_steps_text=thinking_steps_text,
+        thinking_duration=thinking_duration,
+        elapsed_time=elapsed_time,
+        tokens=tokens,
+        max_tokens=max_tokens,
+        request_id=request_id,
+    )
 
 
 def _needs_web_search(message: str, tools: list) -> bool:
@@ -180,6 +221,12 @@ def chat_stream():
         - error: Error event if something fails
     """
     try:
+        request_id = uuid.uuid4().hex[:12]
+        stream_backend = "flask"
+        stream_contract_version = STREAM_CONTRACT_VERSION
+        record_stream_start(backend=stream_backend, request_id=request_id)
+        logger.info(f"[SSE:{request_id}] Incoming stream request")
+
         # Parse request
         if request.method == 'POST':
             if request.content_type and 'application/json' in request.content_type:
@@ -234,7 +281,10 @@ def chat_stream():
         
         if not message:
             return Response(
-                StreamEvent(event="error", data=json.dumps({"error": "Empty message"})).format(),
+                StreamEvent(
+                    event="error",
+                    data=json.dumps(with_request_id({"error": "Empty message"}, request_id), ensure_ascii=False)
+                ).format(),
                 mimetype='text/event-stream',
                 status=400
             )
@@ -378,24 +428,55 @@ def chat_stream():
             except Exception as e:
                 logger.warning(f"[Stream] SerpAPI image search failed: {e}")
 
+        # ── Auto reverse-image search when images attached + search intent ──
+        _IMAGE_SEARCH_PATTERNS = [
+            'tìm nguồn', 'tìm ảnh', 'nguồn ảnh', 'tìm gốc', 'reverse image',
+            'find source', 'image source', 'where is this', 'tìm tác giả',
+            'ai vẽ', 'tác giả', 'author', 'original', 'find this image',
+            'ảnh này từ đâu', 'ảnh gốc', 'tìm kiếm ảnh',
+        ]
+        _raw_msg = data.get('message', '').lower()
+        _wants_image_search = images and any(p in _raw_msg for p in _IMAGE_SEARCH_PATTERNS)
+
+        if _wants_image_search:
+            try:
+                from core.tools import reverse_image_search
+                _ris = reverse_image_search(image_data_url=images[0])
+                if _ris.get("summary"):
+                    message = (
+                        f"{message}\n\n---\n"
+                        f"📋 KẾT QUẢ TÌM KIẾM ẢNH (reverse image search):\n{_ris['summary']}\n---\n"
+                        f"Hãy phân tích kết quả tìm kiếm ảnh ở trên. Đưa ra nguồn gốc, tác giả (nếu có), "
+                        f"và các thông tin chi tiết. Kèm link ảnh gốc nếu tìm được."
+                    )
+                    _search_performed = True
+                    logger.info("[Stream] Auto reverse-image search completed")
+            except Exception as e:
+                logger.warning(f"[Stream] Auto reverse-image search failed: {e}")
+
         # Create streaming generator
         def generate_stream():
             try:
                 thinking_start = time.time()
+
+                def _emit(event: str, payload: dict) -> str:
+                    return StreamEvent(
+                        event=event,
+                        data=json.dumps(with_request_id(payload, request_id), ensure_ascii=False)
+                    ).format()
                 
                 # Send metadata
-                yield StreamEvent(
-                    event="metadata",
-                    data=json.dumps({
-                        "model": model,
-                        "context": context,
-                        "deep_thinking": deep_thinking,
-                        "thinking_mode": thinking_mode,
-                        "web_search": _search_performed,
-                        "streaming": True,
-                        "timestamp": datetime.now().isoformat()
-                    })
-                ).format()
+                yield _emit("metadata", {
+                    "model": model,
+                    "context": context,
+                    "deep_thinking": deep_thinking,
+                    "thinking_mode": thinking_mode,
+                    "stream_backend": stream_backend,
+                    "stream_contract_version": stream_contract_version,
+                    "web_search": _search_performed,
+                    "streaming": True,
+                    "timestamp": datetime.now().isoformat()
+                })
                 
                 # ── Thinking Phase ──
                 # Real AI reasoning via <think> tags or native reasoning_content
@@ -414,57 +495,99 @@ def chat_stream():
                 full_response = ""
                 chunk_count = 0
                 has_model_reasoning = False
+                fallback_used = False
 
                 # ── 4-Agents Coordinated Reasoning ──
                 if is_multi_thinking:
-                    yield StreamEvent(
-                        event="thinking_start",
-                        data=json.dumps({
-                            "mode": "multi-thinking",
-                            "label": "4-Agents Reasoning",
-                            "category": category,
-                            "timestamp": datetime.now().isoformat()
-                        })
-                    ).format()
+                    yield _emit("thinking_start", {
+                        "mode": "multi-thinking",
+                        "label": "4-Agents Reasoning",
+                        "category": category,
+                        "timestamp": datetime.now().isoformat()
+                    })
 
                     try:
+                        import queue as _queue
+                        import threading as _threading
+
                         from app.services.reasoning_service import get_reasoning_service
                         from app.services.ai_service import AIService
                         reasoning_svc = get_reasoning_service(ai_service=AIService())
 
-                        result = reasoning_svc.coordinate_reasoning_sync(
-                            message=message,
-                            context=context,
-                            max_rounds=3,
-                        )
+                        # Use thread + queue so progress events stream in real-time
+                        _progress_q = _queue.Queue()
+                        _DONE = '__DONE__'
+                        _ERROR = '__ERROR__'
 
-                        # Stream thinking process as steps
-                        if result.thinking_process:
-                            for i, part in enumerate(result.thinking_process.split("\n\n")):
-                                part = part.strip()
-                                if part:
-                                    thinking_steps_text.append(part)
-                                    yield StreamEvent(
-                                        event="thinking",
-                                        data=json.dumps({
-                                            "step": part,
-                                            "step_index": i,
-                                            "is_reasoning_chunk": True,
-                                        })
-                                    ).format()
+                        def _run_reasoning():
+                            try:
+                                r = reasoning_svc.coordinate_reasoning_sync(
+                                    message=message,
+                                    context=context,
+                                    max_rounds=3,
+                                    images=images,
+                                    progress_callback=lambda msg: _progress_q.put(msg),
+                                )
+                                _progress_q.put((_DONE, r))
+                            except Exception as exc:
+                                _progress_q.put((_ERROR, exc))
+
+                        _t = _threading.Thread(target=_run_reasoning, daemon=True)
+                        _t.start()
+
+                        result = None
+                        step_idx = 0
+                        while True:
+                            try:
+                                item = _progress_q.get(timeout=15)
+                            except _queue.Empty:
+                                # SSE keepalive comment to prevent connection timeout
+                                yield ": keepalive\n\n"
+                                continue
+
+                            if isinstance(item, tuple) and len(item) == 2:
+                                if item[0] == _DONE:
+                                    result = item[1]
+                                    break
+                                elif item[0] == _ERROR:
+                                    raise item[1]
+
+                            # Real progress event from reasoning service
+                            # Dict items = streamed tokens (with trajectory ID)
+                            if isinstance(item, dict) and item.get("type") == "token":
+                                yield _emit("thinking", {
+                                    "step": item.get("text", ""),
+                                    "step_index": step_idx,
+                                    "is_reasoning_chunk": True,
+                                    "trajectory_id": item.get("tid", ""),
+                                })
+                            else:
+                                # String items = status headers / markers
+                                step_text = str(item).strip()
+                                if step_text:
+                                    step_idx += 1
+                                    thinking_steps_text.append(step_text)
+                                    yield _emit("thinking", {
+                                        "step": step_text,
+                                        "step_index": step_idx,
+                                        "is_reasoning_chunk": False,
+                                    })
+
+                        # Ensure thread is joined
+                        _t.join(timeout=5)
+
+                        if result is None:
+                            raise RuntimeError("Reasoning returned no result")
 
                         thinking_duration = round(result.reasoning_time * 1000)
-                        yield StreamEvent(
-                            event="thinking_end",
-                            data=json.dumps({
-                                "summary": f"{result.total_rounds} rounds · {result.total_trajectories} trajectories · {result.reasoning_time:.1f}s",
-                                "duration_ms": thinking_duration,
-                                "rounds": result.total_rounds,
-                                "trajectories": result.total_trajectories,
-                                "steps": thinking_steps_text,
-                                "category": category,
-                            })
-                        ).format()
+                        yield _emit("thinking_end", {
+                            "summary": f"{result.total_rounds} rounds · {result.total_trajectories} trajectories · {result.reasoning_time:.1f}s",
+                            "duration_ms": thinking_duration,
+                            "rounds": result.total_rounds,
+                            "trajectories": result.total_trajectories,
+                            "steps": thinking_steps_text,
+                            "category": category,
+                        })
 
                         full_response = result.final_answer
                         _est_tokens = result.total_tokens or max(1, int(len(full_response) * 0.75))
@@ -474,22 +597,17 @@ def chat_stream():
                         for i in range(0, len(full_response), chunk_size):
                             text = full_response[i:i + chunk_size]
                             chunk_count += 1
-                            yield StreamEvent(
-                                event="chunk",
-                                data=json.dumps({"content": text, "chunk_index": chunk_count})
-                            ).format()
+                            yield _emit("chunk", {"content": text, "chunk_index": chunk_count})
 
                     except Exception as e:
-                        logger.error(f"[4-Agents] Coordinated reasoning failed, fallback: {e}")
-                        yield StreamEvent(
-                            event="thinking_end",
-                            data=json.dumps({
-                                "summary": "Fallback to standard",
-                                "duration_ms": 0,
-                                "steps": [],
-                                "category": category,
-                            })
-                        ).format()
+                        logger.error(f"[SSE:{request_id}] 4-Agents reasoning failed, fallback: {e}")
+                        fallback_used = True
+                        yield _emit("thinking_end", {
+                            "summary": "Fallback to standard",
+                            "duration_ms": 0,
+                            "steps": [],
+                            "category": category,
+                        })
                         # Fallback to standard deep-thinking stream below
                         is_multi_thinking = False
 
@@ -519,22 +637,16 @@ def chat_stream():
                                 if not thinking_started:
                                     thinking_started = True
                                     has_model_reasoning = True
-                                    yield StreamEvent(
-                                        event="thinking_start",
-                                        data=json.dumps({
-                                            "category": category,
-                                            "timestamp": datetime.now().isoformat()
-                                        })
-                                    ).format()
-                                thinking_steps_text.append(reasoning_text)
-                                yield StreamEvent(
-                                    event="thinking",
-                                    data=json.dumps({
-                                        "step": reasoning_text,
-                                        "category": "model_reasoning",
-                                        "is_reasoning_chunk": True,
+                                    yield _emit("thinking_start", {
+                                        "category": category,
+                                        "timestamp": datetime.now().isoformat()
                                     })
-                                ).format()
+                                thinking_steps_text.append(reasoning_text)
+                                yield _emit("thinking", {
+                                    "step": reasoning_text,
+                                    "category": "model_reasoning",
+                                    "is_reasoning_chunk": True,
+                                })
                             continue
                         
                         # Parse <think> tags from model output
@@ -545,120 +657,122 @@ def chat_stream():
                                     # This is reasoning content inside <think>
                                     if not thinking_started:
                                         thinking_started = True
-                                        yield StreamEvent(
-                                            event="thinking_start",
-                                            data=json.dumps({
-                                                "category": category,
-                                                "timestamp": datetime.now().isoformat()
-                                            })
-                                        ).format()
-                                    thinking_steps_text.append(text)
-                                    yield StreamEvent(
-                                        event="thinking",
-                                        data=json.dumps({
-                                            "step": text,
+                                        yield _emit("thinking_start", {
                                             "category": category,
-                                            "is_reasoning_chunk": True,
+                                            "timestamp": datetime.now().isoformat()
                                         })
-                                    ).format()
+                                    thinking_steps_text.append(text)
+                                    yield _emit("thinking", {
+                                        "step": text,
+                                        "category": category,
+                                        "is_reasoning_chunk": True,
+                                    })
                                 else:
                                     # Regular response content — end thinking if active
                                     if thinking_started and not thinking_ended:
                                         thinking_ended = True
                                         thinking_duration = round((time.time() - thinking_start) * 1000)
                                         thinking_summary = generate_thinking_summary(message, category, language)
-                                        yield StreamEvent(
-                                            event="thinking_end",
-                                            data=json.dumps({
-                                                "summary": thinking_summary,
-                                                "steps": thinking_steps_text,
-                                                "category": category,
-                                                "duration_ms": thinking_duration,
-                                            })
-                                        ).format()
+                                        yield _emit("thinking_end", {
+                                            "summary": thinking_summary,
+                                            "steps": thinking_steps_text,
+                                            "category": category,
+                                            "duration_ms": thinking_duration,
+                                        })
                                     
                                     full_response += text
                                     chunk_count += 1
-                                    yield StreamEvent(
-                                        event="chunk",
-                                        data=json.dumps({
-                                            "content": text,
-                                            "chunk_index": chunk_count
-                                        })
-                                    ).format()
+                                    yield _emit("chunk", {
+                                        "content": text,
+                                        "chunk_index": chunk_count
+                                    })
                         else:
                             # No thinking parser (instant mode) — pass through
                             full_response += chunk
                             chunk_count += 1
-                            yield StreamEvent(
-                                event="chunk",
-                                data=json.dumps({
-                                    "content": chunk,
-                                    "chunk_index": chunk_count
-                                })
-                            ).format()
+                            yield _emit("chunk", {
+                                "content": chunk,
+                                "chunk_index": chunk_count
+                            })
                     
                     # Flush remaining buffer from think parser
                     if think_parser:
                         for is_thinking, text in think_parser.flush():
                             if is_thinking:
                                 thinking_steps_text.append(text)
-                                yield StreamEvent(
-                                    event="thinking",
-                                    data=json.dumps({
-                                        "step": text,
-                                        "category": category,
-                                        "is_reasoning_chunk": True,
-                                    })
-                                ).format()
+                                yield _emit("thinking", {
+                                    "step": text,
+                                    "category": category,
+                                    "is_reasoning_chunk": True,
+                                })
                             else:
                                 full_response += text
                                 chunk_count += 1
-                                yield StreamEvent(
-                                    event="chunk",
-                                    data=json.dumps({
-                                        "content": text,
-                                        "chunk_index": chunk_count
-                                    })
-                                ).format()
+                                yield _emit("chunk", {
+                                    "content": text,
+                                    "chunk_index": chunk_count
+                                })
                     
                     # Close thinking if still open (model didn't close </think>)
                     if thinking_started and not thinking_ended:
                         thinking_duration = round((time.time() - thinking_start) * 1000)
                         thinking_summary = generate_thinking_summary(message, category, language)
-                        yield StreamEvent(
-                            event="thinking_end",
-                            data=json.dumps({
-                                "summary": thinking_summary,
-                                "steps": thinking_steps_text,
-                                "category": category,
-                                "duration_ms": thinking_duration,
-                            })
-                        ).format()
+                        yield _emit("thinking_end", {
+                            "summary": thinking_summary,
+                            "steps": thinking_steps_text,
+                            "category": category,
+                            "duration_ms": thinking_duration,
+                        })
                 
                 # Send complete event
+                _elapsed = time.time() - thinking_start
+                _est_tokens = max(1, int(len(full_response) * 0.75))
+                if is_multi_thinking:
+                    _max_tokens = 4096
+                else:
+                    _mc = chatbot.registry.get_config(model) if chatbot.registry else None
+                    _max_tokens = (_mc.max_tokens_deep if deep_thinking else _mc.max_tokens) if _mc else 2000
                 yield StreamEvent(
                     event="complete",
-                    data=json.dumps({
-                        "response": full_response,
-                        "model": model,
-                        "context": context,
-                        "deep_thinking": deep_thinking,
-                        "total_chunks": chunk_count,
-                        "thinking_summary": thinking_summary,
-                        "thinking_steps": thinking_steps_text,
-                        "thinking_duration_ms": thinking_duration,
-                        "timestamp": datetime.now().isoformat()
-                    })
+                    data=json.dumps(_build_complete_event_payload(
+                        full_response=full_response,
+                        model=model,
+                        context=context,
+                        deep_thinking=deep_thinking,
+                        thinking_mode=thinking_mode,
+                        chunk_count=chunk_count,
+                        thinking_summary=thinking_summary,
+                        thinking_steps_text=thinking_steps_text,
+                        thinking_duration=thinking_duration,
+                        elapsed_time=_elapsed,
+                        tokens=_est_tokens,
+                        max_tokens=_max_tokens,
+                        request_id=request_id,
+                    ))
                 ).format()
+                record_stream_complete(
+                    backend=stream_backend,
+                    request_id=request_id,
+                    elapsed_s=_elapsed,
+                    chunk_count=chunk_count,
+                    tokens=_est_tokens,
+                    max_tokens=_max_tokens,
+                    fallback_used=fallback_used,
+                    time_to_first_chunk_s=None,
+                )
+                logger.info(
+                    f"[SSE:{request_id}] complete model={model} chunks={chunk_count} "
+                    f"tokens={_est_tokens}/{_max_tokens} elapsed={_elapsed:.3f}s"
+                )
                 
             except GeneratorExit:
-                logger.info("[SSE] Client disconnected")
+                logger.info(f"[SSE:{request_id}] Client disconnected")
             except Exception as e:
-                logger.error(f"[SSE] Streaming error: {e}")
+                logger.error(f"[SSE:{request_id}] Streaming error: {e}")
+                record_stream_error(backend=stream_backend, request_id=request_id, error=str(e))
                 yield StreamEvent(
                     event="error",
-                    data=json.dumps({"error": str(e)})
+                    data=json.dumps(with_request_id({"error": str(e)}, request_id), ensure_ascii=False)
                 ).format()
         
         return Response(
@@ -673,9 +787,9 @@ def chat_stream():
         )
         
     except Exception as e:
-        logger.error(f"[Stream] Error: {e}")
+        logger.error(f"[SSE] Error before stream init: {e}")
         return Response(
-            StreamEvent(event="error", data=json.dumps({"error": str(e)})).format(),
+            StreamEvent(event="error", data=json.dumps({"error": str(e)}, ensure_ascii=False)).format(),
             mimetype='text/event-stream',
             status=500
         )
@@ -702,3 +816,9 @@ def list_streaming_models():
         'models': models,
         'streaming_supported': [m['name'] for m in models if m['supports_streaming']]
     }
+
+
+@stream_bp.route('/chat/stream/metrics', methods=['GET'])
+def stream_metrics():
+    """Return in-memory stream telemetry snapshot."""
+    return get_stream_metrics_snapshot()

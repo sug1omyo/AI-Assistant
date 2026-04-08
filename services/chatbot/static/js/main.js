@@ -819,6 +819,13 @@ class ChatBotApp {
         // Auto-include file context if files are attached
         // Keep original message for display, build augmented message for API
         const originalUserMessage = message;
+
+        // Inject quoted context if any (select-and-reply feature)
+        const quotedCtx = this.messageRenderer.consumeQuotedContext();
+        if (quotedCtx) {
+            message = `[Ngữ cảnh được chọn — ưu tiên trả lời dựa trên đoạn này]\n> ${quotedCtx}\n\n${message}`;
+        }
+
         // Extract image base64 data URLs for vision API (sent separately from text)
         const imageDataUrls = [];
         if (sessionFiles.length > 0) {
@@ -977,6 +984,9 @@ class ChatBotApp {
                                 // Insert before the stream message div
                                 streamMsgDiv.parentNode.insertBefore(thinkingContainer, streamMsgDiv);
                             }
+                            if (data?.request_id && thinkingContainer) {
+                                thinkingContainer.dataset.requestId = data.request_id;
+                            }
                         },
                         onThinking: (data) => {
                             thinkingReceived = true;
@@ -984,15 +994,22 @@ class ChatBotApp {
                                 thinkingContainer = this.messageRenderer.createThinkingSection(null, true);
                                 streamMsgDiv.parentNode.insertBefore(thinkingContainer, streamMsgDiv);
                             }
+                            if (data?.request_id && thinkingContainer) {
+                                thinkingContainer.dataset.requestId = data.request_id;
+                            }
                             thinkingSteps.push(data.step);
                             this.messageRenderer.addThinkingStep(
-                                thinkingContainer, data.step, !!data.is_reasoning_chunk
+                                thinkingContainer, data.step, !!data.is_reasoning_chunk,
+                                data.trajectory_id || null
                             );
                             elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
                         },
                         onThinkingEnd: (data) => {
                             thinkingData = data;
                             if (thinkingContainer) {
+                                if (data?.request_id) {
+                                    thinkingContainer.dataset.requestId = data.request_id;
+                                }
                                 this.messageRenderer.finalizeThinking(thinkingContainer, data);
                             }
                         },
@@ -1127,6 +1144,7 @@ class ChatBotApp {
                     if (typeof hljs !== 'undefined') {
                         streamTextDiv.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
                     }
+                    this.messageRenderer.enhanceCodeBlocks(streamTextDiv);
                     // Enhance tables with interactive viewer
                     this.messageRenderer.enhanceMarkdownTables(streamTextDiv);
                     // Add action buttons to streaming message
@@ -1136,12 +1154,14 @@ class ChatBotApp {
                     const _clientElapsed = ((performance.now() - _streamStartMs) / 1000);
                     const _serverElapsed = streamCompleteData.elapsed_time || _clientElapsed;
                     const _tokens = streamCompleteData.tokens || 0;
+                    const _maxTokens = streamCompleteData.max_tokens || 0;
                     const _modelName = this.messageRenderer.modelNames[formValues.model] || formValues.model;
                     const _speedLabel = _serverElapsed < 2 ? 'Fast' : _serverElapsed < 5 ? '' : 'Slow';
                     this.messageRenderer.addResponseStats(streamContentDiv, {
                         elapsed: _serverElapsed,
                         model: _modelName,
                         tokens: _tokens,
+                        maxTokens: _maxTokens,
                         speedLabel: _speedLabel,
                         thinkingMode: thinkingMode,
                     });
@@ -1219,7 +1239,20 @@ class ChatBotApp {
             setTimeout(makeClickable, 500);
 
             // ── Follow-up suggestions + Think Harder ──
-            if (!streamFailed) {
+            if (!streamFailed && this.messageRenderer.features?.suggestionChips !== false) {
+                // Client-side fallback suggestions when server sends none
+                if (streamSuggestions.length === 0 && responseContent) {
+                    const hasCode = responseContent.includes('```');
+                    const hasList = (responseContent.match(/\n- /g) || []).length >= 3;
+                    if (hasCode) {
+                        streamSuggestions = ['Giải thích chi tiết đoạn code này', 'Tối ưu hiệu suất được không?', 'Viết unit test cho code này'];
+                    } else if (hasList) {
+                        streamSuggestions = ['Phân tích chi tiết hơn từng mục', 'Cái nào quan trọng nhất?', 'Tóm tắt ngắn gọn hơn'];
+                    } else {
+                        streamSuggestions = ['Giải thích thêm chi tiết', 'Có ví dụ cụ thể không?', 'Áp dụng vào thực tế như thế nào?'];
+                    }
+                }
+
                 const suggestionsContainer = document.createElement('div');
                 suggestionsContainer.className = 'follow-up-suggestions';
 
@@ -1243,12 +1276,12 @@ class ChatBotApp {
                     suggestionsContainer.appendChild(thinkBtn);
                 }
 
-                // Follow-up suggestion chips
+                // Follow-up suggestion chips (Grok-style with arrow)
                 if (streamSuggestions.length > 0) {
                     streamSuggestions.forEach(text => {
                         const chip = document.createElement('button');
                         chip.className = 'suggestion-chip';
-                        chip.textContent = text;
+                        chip.innerHTML = `<span class="suggestion-chip__icon">↗</span><span class="suggestion-chip__text">${this._escapeHtml(text)}</span>`;
                         chip.onclick = () => {
                             suggestionsContainer.remove();
                             this.uiUtils.setInputValue(text);

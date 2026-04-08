@@ -3,13 +3,17 @@ Monitor và Dashboard cho Rate Limits & Cache
 Hiển thị real-time stats về API usage
 """
 from flask import Blueprint, jsonify, make_response
-import sys
-from pathlib import Path
 
-# Import utilities
-sys.path.append(str(Path(__file__).parent.parent.parent))
-from config.rate_limiter import get_rate_limit_stats
-from config.response_cache import get_all_cache_stats
+# Import utilities (prefer package-relative imports, fallback to stubs)
+try:
+    from .rate_limiter import get_rate_limit_stats
+    from .response_cache import get_all_cache_stats
+except Exception:
+    def get_rate_limit_stats():
+        return {"enabled": False, "error": "rate_limiter module unavailable"}
+
+    def get_all_cache_stats():
+        return {"enabled": False, "error": "response_cache module unavailable"}
 
 # Blueprint
 monitor_bp = Blueprint('monitor', __name__)

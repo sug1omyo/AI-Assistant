@@ -376,3 +376,189 @@ def serpapi_image_search(query: str, engine: str = "google_images_light") -> str
         logger.error(f"[SERPAPI:IMAGE_SEARCH] Error: {e}")
         return f"❌ Lỗi image search: {str(e)}"
 
+
+# ── Comprehensive reverse image search ────────────────────────────────
+
+def reverse_image_search(image_data_url: str = "", image_url: str = "") -> dict:
+    """
+    Comprehensive reverse image search pipeline.
+
+    Accepts a base64 data-URL *or* a public URL.  When only a data-URL is
+    provided the image is uploaded to ImgBB first to obtain a public URL
+    that SerpAPI/SauceNAO can accept.
+
+    Returns a dict with structured results::
+
+        {
+            "sources": [
+                {
+                    "title": str,
+                    "author": str | None,
+                    "url": str,
+                    "thumbnail": str | None,
+                    "similarity": float | None,  # 0-100
+                    "source_engine": str,         # "saucenao" | "google_lens" | ...
+                }
+            ],
+            "similar": [ ... same schema ... ],
+            "knowledge": str | None,   # Knowledge-graph blurb
+            "summary": str,            # Human-readable markdown summary
+        }
+    """
+    result = {
+        "sources": [],
+        "similar": [],
+        "knowledge": None,
+        "summary": "",
+    }
+
+    # ── Resolve a public URL ──────────────────────────────────────
+    public_url = image_url
+    if not public_url and image_data_url:
+        try:
+            from core.image_storage import upload_to_imgbb
+            public_url = upload_to_imgbb(image_data_url) or ""
+            if public_url:
+                logger.info(f"[ReverseImg] Uploaded to ImgBB: {public_url[:80]}")
+        except Exception as e:
+            logger.warning(f"[ReverseImg] ImgBB upload failed: {e}")
+
+    # ── 1. SauceNAO (best for anime/art) ─────────────────────────
+    try:
+        if SAUCENAO_API_KEY:
+            from saucenao_api import SauceNao
+            sauce = SauceNao(api_key=SAUCENAO_API_KEY, numres=8)
+            if public_url:
+                sauce_results = sauce.from_url(public_url)
+            elif image_data_url:
+                import tempfile, os, base64 as _b64
+                raw = image_data_url
+                if ',' in raw:
+                    raw = raw.split(',', 1)[1]
+                img_bytes = _b64.b64decode(raw)
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+                tmp.write(img_bytes)
+                tmp.close()
+                try:
+                    sauce_results = sauce.from_file(tmp.name)
+                finally:
+                    os.unlink(tmp.name)
+            else:
+                sauce_results = None
+
+            if sauce_results:
+                for res in sauce_results[:6]:
+                    result["sources"].append({
+                        "title": res.title or "Unknown",
+                        "author": res.author or None,
+                        "url": (res.urls[0] if res.urls else ""),
+                        "thumbnail": None,
+                        "similarity": float(res.similarity) if res.similarity else None,
+                        "source_engine": "saucenao",
+                    })
+    except ImportError:
+        logger.debug("[ReverseImg] saucenao_api not installed — skipping")
+    except Exception as e:
+        logger.warning(f"[ReverseImg] SauceNAO failed: {e}")
+
+    # ── 2. Google Lens (best for real-world objects) ──────────────
+    if public_url and SERPAPI_API_KEY:
+        try:
+            resp = requests.get(_SERPAPI_URL, params={
+                "engine": "google_lens",
+                "url": public_url,
+                "api_key": SERPAPI_API_KEY,
+            }, timeout=25)
+            if resp.status_code == 200:
+                data = resp.json()
+                # Knowledge graph
+                kg = data.get("knowledge_graph", {})
+                if kg:
+                    result["knowledge"] = f"{kg.get('title', '')} — {kg.get('description', '')[:300]}"
+
+                # Visual matches → sources (exact/near-exact)
+                for m in data.get("visual_matches", [])[:8]:
+                    result["sources"].append({
+                        "title": m.get("title", ""),
+                        "author": m.get("source", None),
+                        "url": m.get("link", ""),
+                        "thumbnail": m.get("thumbnail", None),
+                        "similarity": None,
+                        "source_engine": "google_lens",
+                    })
+        except Exception as e:
+            logger.warning(f"[ReverseImg] Google Lens failed: {e}")
+
+    # ── 3. Google Reverse Image ───────────────────────────────────
+    if public_url and SERPAPI_API_KEY and len(result["sources"]) < 3:
+        try:
+            resp = requests.get(_SERPAPI_URL, params={
+                "engine": "google_reverse_image",
+                "image_url": public_url,
+                "api_key": SERPAPI_API_KEY,
+            }, timeout=25)
+            if resp.status_code == 200:
+                data = resp.json()
+                for item in data.get("image_results", data.get("inline_images", []))[:5]:
+                    result["similar"].append({
+                        "title": item.get("title", ""),
+                        "author": item.get("source", None),
+                        "url": item.get("link", item.get("original", "")),
+                        "thumbnail": item.get("thumbnail", None),
+                        "similarity": None,
+                        "source_engine": "google_reverse_image",
+                    })
+        except Exception as e:
+            logger.warning(f"[ReverseImg] Google Reverse Image failed: {e}")
+
+    # ── 4. Yandex Images (good for non-English sources) ───────────
+    if public_url and SERPAPI_API_KEY and len(result["sources"]) < 3:
+        try:
+            resp = requests.get(_SERPAPI_URL, params={
+                "engine": "yandex_images",
+                "url": public_url,
+                "api_key": SERPAPI_API_KEY,
+            }, timeout=25)
+            if resp.status_code == 200:
+                data = resp.json()
+                for item in data.get("images_results", [])[:5]:
+                    result["similar"].append({
+                        "title": item.get("title", ""),
+                        "author": item.get("source", None),
+                        "url": item.get("link", item.get("original", "")),
+                        "thumbnail": item.get("thumbnail", None),
+                        "similarity": None,
+                        "source_engine": "yandex",
+                    })
+        except Exception as e:
+            logger.warning(f"[ReverseImg] Yandex failed: {e}")
+
+    # ── Build summary ─────────────────────────────────────────────
+    parts = []
+    if result["knowledge"]:
+        parts.append(f"🧠 **Knowledge Graph:** {result['knowledge']}")
+
+    if result["sources"]:
+        parts.append(f"\n🔍 **Nguồn tìm thấy** ({len(result['sources'])} kết quả):\n")
+        for i, s in enumerate(result["sources"][:8], 1):
+            sim_str = f" — {s['similarity']:.1f}% match" if s.get("similarity") else ""
+            author_str = f" | 🎨 {s['author']}" if s.get("author") else ""
+            engine = s.get("source_engine", "")
+            parts.append(
+                f"**#{i}** [{engine}]{sim_str}{author_str}\n"
+                f"📌 **{s['title']}**\n"
+                f"🔗 {s['url']}"
+            )
+
+    if result["similar"]:
+        parts.append(f"\n🖼️ **Ảnh tương tự** ({len(result['similar'])} kết quả):\n")
+        for i, s in enumerate(result["similar"][:5], 1):
+            parts.append(f"**#{i}** {s['title']}\n🔗 {s['url']}")
+
+    if not parts:
+        result["summary"] = "🔍 Không tìm thấy kết quả reverse image từ bất kỳ nguồn nào."
+    else:
+        result["summary"] = "\n\n".join(parts)
+
+    return result
+

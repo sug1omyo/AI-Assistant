@@ -35,12 +35,13 @@ class ModelConfig:
     api_key: str = ""
     base_url: str = ""
     model_id: str = ""
-    max_tokens: int = 1000
-    max_tokens_deep: int = 2000
+    max_tokens: int = 2000
+    max_tokens_deep: int = 4096
     temperature: float = 0.7
     temperature_deep: float = 0.5
     timeout: int = 60
     supports_streaming: bool = True
+    supports_vision: bool = False
     fallback_model: Optional[str] = None
 
 
