@@ -18,6 +18,7 @@ private/
 **.*/knowledge_base/
 ./knowledge_base/
 /webui_csv/
+**/S.png
 
 # ============================================
 # VIRTUAL ENVIRONMENT

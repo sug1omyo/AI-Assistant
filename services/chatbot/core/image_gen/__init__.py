@@ -19,6 +19,8 @@ from .router import ImageGenerationRouter, QualityMode
 from .session import ImageSession, SessionManager
 from .storage import ImageStorage
 from .enhancer import PromptEnhancer, STYLE_PRESETS, create_enhancer
+from .intent import ImageIntent, IntentResult, detect_intent
+from .orchestrator import ImageOrchestrator, OrchestratorResult
 
 __all__ = [
     "ImageGenerationRouter",
@@ -29,4 +31,10 @@ __all__ = [
     "PromptEnhancer",
     "STYLE_PRESETS",
     "create_enhancer",
+    # New orchestration layer
+    "ImageIntent",
+    "IntentResult",
+    "detect_intent",
+    "ImageOrchestrator",
+    "OrchestratorResult",
 ]

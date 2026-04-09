@@ -102,16 +102,26 @@ class ImageGenerationRouter:
                 priority=70,
             )
 
-        # ComfyUI (local) â€” always available as fallback
-        comfyui_url = os.getenv("COMFYUI_URL", os.getenv("SD_API_URL", "http://127.0.0.1:8188"))
-        self._providers["comfyui"] = ProviderConfig(
-            provider=ComfyUIProvider(
-                base_url=comfyui_url,
-                sdxl_checkpoint=os.getenv("COMFYUI_SDXL_CHECKPOINT", "sd_xl_base_1.0.safetensors"),
-                upscale_factor=float(os.getenv("COMFYUI_UPSCALE_FACTOR", "1.5")),
-            ),
-            priority=10,  # lowest priority unless explicitly requested
-        )
+        # ComfyUI (local) — register only when local services are enabled
+        skip_comfyui = False
+        try:
+            from app.services.image_orchestrator.runtime_profile import get_runtime_profile
+            skip_comfyui = get_runtime_profile().skip_comfyui_provider
+        except Exception:
+            pass  # runtime_profile not available → fall back to old behaviour
+
+        if skip_comfyui:
+            logger.info("[ImageRouter] Skipping ComfyUI provider (local services disabled)")
+        else:
+            comfyui_url = os.getenv("COMFYUI_URL", os.getenv("SD_API_URL", "http://127.0.0.1:8188"))
+            self._providers["comfyui"] = ProviderConfig(
+                provider=ComfyUIProvider(
+                    base_url=comfyui_url,
+                    sdxl_checkpoint=os.getenv("COMFYUI_SDXL_CHECKPOINT", "sd_xl_base_1.0.safetensors"),
+                    upscale_factor=float(os.getenv("COMFYUI_UPSCALE_FACTOR", "1.5")),
+                ),
+                priority=10,  # lowest priority unless explicitly requested
+            )
 
         # Together.ai (free tier available)
         together_key = os.getenv("TOGETHER_API_KEY", "")
@@ -595,6 +605,38 @@ class ImageGenerationRouter:
                 random.shuffle(top_tier)
                 rest.sort(key=lambda c: c.priority, reverse=True)
                 candidates = top_tier + rest
+
+        # ── Hybrid mode: promote healthy local providers when profile is "full" ──
+        try:
+            from app.services.image_orchestrator.runtime_profile import get_runtime_profile
+            profile = get_runtime_profile()
+            if profile.prefer_local_when_healthy and quality in (
+                QualityMode.AUTO, QualityMode.FREE, QualityMode.CHEAP,
+            ):
+                local = [c for c in candidates if c.provider.tier == ProviderTier.LOCAL]
+                remote = [c for c in candidates if c.provider.tier != ProviderTier.LOCAL]
+                if local:
+                    local_names = [c.provider.name for c in local]
+                    remote_names = [c.provider.name for c in remote]
+                    logger.info(
+                        f"[ImageRouter] HYBRID decision: local {local_names} healthy "
+                        f"→ promoted first (free, 0 latency). "
+                        f"Fallback chain: {remote_names}"
+                    )
+                    candidates = local + remote
+                else:
+                    remote_names = [c.provider.name for c in remote]
+                    logger.info(
+                        f"[ImageRouter] HYBRID decision: no healthy local provider "
+                        f"→ using remote providers {remote_names}"
+                    )
+            else:
+                names = [c.provider.name for c in candidates]
+                logger.info(
+                    f"[ImageRouter] Provider order (quality={quality}): {names}"
+                )
+        except Exception:
+            pass
 
         return candidates
 

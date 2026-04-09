@@ -65,6 +65,15 @@ class ChatRequest(BaseModel):
     tools: list[str] = Field(default_factory=list)
     # Vision (base64 data-URLs from frontend)
     images: list[str] = Field(default_factory=list, description="Base64 data-URL images for vision models")
+    # ── Image generation controls ──────────────────────────────────
+    enable_image_gen: bool = Field(
+        True,
+        description="Set False to skip image orchestration and go straight to LLM",
+    )
+    image_quality: str = Field(
+        "auto",
+        description="Image quality hint: auto | fast | quality | free | cheap",
+    )
     # RAG
     rag_collection_ids: list[str] = Field(default_factory=list, description="RAG collections to search")
     rag_top_k: int = Field(5, description="Max RAG results to retrieve")
@@ -118,6 +127,12 @@ class ChatResponse(BaseModel):
     thinking_process: str | None = None
     citations: list[dict[str, Any]] | None = None
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    # ── Image generation result (only when image was generated) ──
+    image_result: dict[str, Any] | None = Field(
+        None,
+        description="Set when an image was generated. Contains intent, provider, "
+                    "images_url, images_b64, enhanced_prompt, cost_usd, latency_ms.",
+    )
     # ── Multi-agent council (only populated when agent_mode != "off") ──
     agent_run_id: str | None = Field(
         None, description="Unique ID of the council run (None when agent_mode=off)",

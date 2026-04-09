@@ -11,7 +11,13 @@ from typing import Any
 
 from fastapi import APIRouter, File, Form, Request, UploadFile, HTTPException
 
-from fastapi_app.dependencies import get_chatbot_for_session, get_session_id
+from fastapi_app.dependencies import (
+    get_chatbot_for_session,
+    get_session_id,
+    get_image_orchestrator_for_session,
+    use_new_image_orchestrator,
+    get_new_orchestration_service,
+)
 from fastapi_app.models import ChatRequest, ChatResponse
 from fastapi_app.rag_helpers import retrieve_rag_context
 from core.config import MEMORY_DIR
@@ -107,6 +113,159 @@ def _inject_file_context(message: str, file_contents: list[dict]) -> str:
     return ctx + message
 
 
+# ── Image orchestration helper (extracted for clarity) ─────────────────
+
+_LOCAL_PROVIDERS = frozenset({"comfyui", "stable-diffusion", "sd-webui"})
+
+
+def _image_result_metadata(
+    result,
+    *,
+    pipeline: str,
+    session_id: str = "",
+) -> dict:
+    """
+    Build the image_result dict for ChatResponse.
+
+    Adds safe extra metadata fields on top of the existing shape so the
+    frontend can read them when ready without breaking anything.
+    """
+    provider = getattr(result, "provider", "") or ""
+    intent_val = getattr(result.intent, "value", str(result.intent)) if hasattr(result, "intent") else "generate"
+    is_edit = intent_val in ("edit", "followup_edit")
+
+    # Determine backend type from provider name
+    used_local  = provider.lower() in _LOCAL_PROVIDERS
+    used_remote = bool(provider) and not used_local
+
+    # Scene spec summary (only available from the new pipeline)
+    scene_summary = None
+    scene = getattr(result, "scene", None)
+    if scene is not None:
+        scene_summary = {
+            "subject":     getattr(scene, "subject", ""),
+            "style":       getattr(scene, "style", ""),
+            "background":  getattr(scene, "background", ""),
+            "lighting":    getattr(scene, "lighting", ""),
+            "mood":        getattr(scene, "mood", ""),
+            "is_edit":     is_edit,
+            "strength":    getattr(scene, "strength", None),
+        }
+
+    # Try to read lineage from session memory (new pipeline only)
+    edit_lineage = None
+    if pipeline == "new" and session_id:
+        try:
+            from app.services.image_orchestrator.session_memory import get_session_memory_store
+            mem = get_session_memory_store().get(session_id)
+            if mem is not None:
+                edit_lineage = mem.edit_lineage_count
+        except Exception:
+            pass
+
+    return {
+        # ── Existing fields (backward compatible) ──
+        "intent":          intent_val,
+        "provider":        provider,
+        "model":           getattr(result, "model", ""),
+        "images_url":      getattr(result, "images_url", []),
+        "images_b64":      getattr(result, "images_b64", []),
+        "enhanced_prompt": getattr(result, "enhanced_prompt", ""),
+        "cost_usd":        getattr(result, "cost_usd", 0.0),
+        "latency_ms":      getattr(result, "latency_ms", 0.0),
+        # ── New metadata fields (safe additions) ──
+        "request_kind":               intent_val,
+        "provider_selected":          provider,
+        "used_local_backend":         used_local,
+        "used_remote_backend":        used_remote,
+        "scene_spec_summary":         scene_summary,
+        "used_previous_image_context": is_edit,
+        "pipeline":                   pipeline,
+        "edit_lineage":               edit_lineage,
+    }
+
+
+def _try_image_orchestration(
+    *,
+    request: Request,
+    original_message: str,
+    language: str,
+    tools: list[str],
+    image_quality: str,
+    model: str,
+    context: str,
+    deep_thinking: bool,
+) -> ChatResponse | None:
+    """
+    Attempt image generation via the new or legacy orchestrator.
+
+    Returns a ChatResponse if an image was generated, or None to fall
+    through to the LLM path.  When USE_NEW_IMAGE_ORCHESTRATOR=1, the
+    new pipeline runs first with an automatic internal fallback to legacy.
+    When the flag is off, the legacy pipeline runs directly (unchanged
+    behavior from before this integration).
+    """
+    session_id = get_session_id(request)
+
+    # ── New pipeline (feature-flagged) ────────────────────────────────
+    if use_new_image_orchestrator():
+        new_svc = get_new_orchestration_service()
+        if new_svc is not None:
+            new_result = new_svc.handle(
+                message    = original_message,
+                session_id = session_id,
+                language   = language,
+                tools      = tools,
+                quality    = image_quality,
+            )
+            if new_result.is_image:
+                logger.info(
+                    f"[Chat] 🎨 Image generated (new pipeline) — "
+                    f"intent={new_result.intent.value} provider={new_result.provider} "
+                    f"cost=${new_result.cost_usd:.4f}"
+                )
+                return ChatResponse(
+                    response      = new_result.response_text,
+                    model         = model,
+                    context       = context,
+                    deep_thinking = deep_thinking,
+                    image_result  = _image_result_metadata(
+                        new_result, pipeline="new", session_id=session_id,
+                    ),
+                )
+            # fallback_to_llm=True from new pipeline → fall through to LLM
+            return None
+
+    # ── Legacy pipeline (default, or when new pipeline unavailable) ───
+    orchestrator = get_image_orchestrator_for_session(request)
+    if orchestrator is not None:
+        _orch_msg = original_message
+        if image_quality and image_quality != "auto":
+            _orch_msg = f"{original_message} [{image_quality}]"
+        orch_result = orchestrator.handle(
+            message  = _orch_msg,
+            language = language,
+            tools    = tools,
+        )
+        if orch_result.is_image:
+            logger.info(
+                f"[Chat] 🎨 Image generated (legacy) — "
+                f"intent={orch_result.intent.value} provider={orch_result.provider} "
+                f"cost=${orch_result.cost_usd:.4f}"
+            )
+            return ChatResponse(
+                response      = orch_result.response_text,
+                model         = model,
+                context       = context,
+                deep_thinking = deep_thinking,
+                image_result  = _image_result_metadata(
+                    orch_result, pipeline="legacy", session_id=session_id,
+                ),
+            )
+
+    return None
+
+
 # ── JSON endpoint ──────────────────────────────────────────────────────
 
 @router.post("/chat", response_model=ChatResponse)
@@ -136,6 +295,8 @@ async def chat_json(body: ChatRequest, request: Request):
         reasoning_effort=body.reasoning_effort,
         enable_web_search=body.enable_web_search,
         enable_x_search=body.enable_x_search,
+        enable_image_gen=body.enable_image_gen,
+        image_quality=body.image_quality,
     )
 
 
@@ -166,6 +327,8 @@ async def chat_upload(
     reasoning_effort: str = Form("high"),
     enable_web_search: bool = Form(True),
     enable_x_search: bool = Form(False),
+    enable_image_gen: bool = Form(True),
+    image_quality: str = Form("auto"),
     files: list[UploadFile] = File(default=[]),
 ):
     """Chat with file uploads (multipart/form-data)."""
@@ -196,6 +359,8 @@ async def chat_upload(
         reasoning_effort=reasoning_effort,
         enable_web_search=enable_web_search,
         enable_x_search=enable_x_search,
+        enable_image_gen=enable_image_gen,
+        image_quality=image_quality,
     )
 
 
@@ -228,6 +393,9 @@ async def _do_chat(
     reasoning_effort: str = "high",
     enable_web_search: bool = True,
     enable_x_search: bool = False,
+    # ── Image orchestration parameters ──
+    enable_image_gen: bool = True,
+    image_quality: str = "auto",
 ) -> ChatResponse:
     # Agent config processing
     if agent_config:
@@ -260,6 +428,27 @@ async def _do_chat(
                 message = augmented
         except Exception as e:
             logger.warning(f"[MCP] Error injecting context: {e}")
+
+    # ── Image Orchestration branch (before LLM) ────────────────────
+    # Fast keyword-based intent detection — no extra latency when not triggered.
+    # Falls through safely to LLM if disabled, no providers, or intent=NONE.
+    if enable_image_gen and agent_mode == "off":
+        try:
+            image_response = _try_image_orchestration(
+                request=request,
+                original_message=original_message,
+                language=language,
+                tools=tools,
+                image_quality=image_quality,
+                model=model,
+                context=context,
+                deep_thinking=deep_thinking,
+            )
+            if image_response is not None:
+                return image_response
+            # fallback_to_llm=True → proceed normally below
+        except Exception as _orch_err:
+            logger.warning(f"[Chat] Orchestrator error (falling back to LLM): {_orch_err}")
 
     chatbot = get_chatbot_for_session(request)
     memories = _load_memories(memory_ids) if memory_ids else None

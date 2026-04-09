@@ -11,7 +11,13 @@ from typing import AsyncGenerator
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from fastapi_app.dependencies import get_chatbot_for_session, get_session_id
+from fastapi_app.dependencies import (
+    get_chatbot_for_session,
+    get_session_id,
+    get_image_orchestrator_for_session,
+    use_new_image_orchestrator,
+    get_new_orchestration_service,
+)
 from fastapi_app.models import StreamRequest
 from fastapi_app.rag_helpers import retrieve_rag_context
 from core.config import MEMORY_DIR
@@ -341,11 +347,91 @@ async def chat_stream(body: StreamRequest, request: Request):
     # ── 4-Agents (multi-thinking) mode ──
     is_multi_thinking = thinking_mode == "multi-thinking"
 
+    # ── Image orchestration (pre-compute intent before streaming) ────
+    # Done OUTSIDE the async generator so we can use the sync orchestrator API.
+    # If image was generated, the generator only emits image SSE events.
+    _image_orch_events: list[dict] = []
+    _image_orch_done = False
+    _image_pipeline_used = "legacy"
+    _original_message_for_orch = body.message  # pre-MCP/RAG message
+
+    enable_image_gen = getattr(body, "enable_image_gen", True)
+    if enable_image_gen and body.agent_mode == "off":
+        try:
+            # ── New pipeline (feature-flagged) ────────────────────────
+            if use_new_image_orchestrator():
+                new_svc = get_new_orchestration_service()
+                if new_svc is not None:
+                    _session_id = get_session_id(request)
+                    for evt in new_svc.handle_stream(
+                        message    = _original_message_for_orch,
+                        session_id = _session_id,
+                        language   = language,
+                        tools      = tools,
+                        quality    = getattr(body, "image_quality", "auto"),
+                    ):
+                        _image_orch_events.append(evt)
+                    if _image_orch_events and _image_orch_events[-1]["event"] == "image_gen_result":
+                        _image_orch_done = True
+                        _image_pipeline_used = "new"
+
+            # ── Legacy pipeline (default or fallback) ─────────────────
+            if not _image_orch_done:
+                _orch = get_image_orchestrator_for_session(request)
+                if _orch is not None:
+                    _image_orch_events = []  # reset if new pipeline yielded partial events
+                    for evt in _orch.handle_stream(
+                        message  = _original_message_for_orch,
+                        language = language,
+                        tools    = tools,
+                    ):
+                        _image_orch_events.append(evt)
+                    if _image_orch_events and _image_orch_events[-1]["event"] == "image_gen_result":
+                        _image_orch_done = True
+                        _image_pipeline_used = "legacy"
+        except Exception as _orch_stream_err:
+            logger.warning(f"[Stream] Orchestrator error (fallback to LLM): {_orch_stream_err}")
+            _image_orch_events = []
+
     async def event_generator() -> AsyncGenerator[str, None]:
         import time as _time
         try:
             def _emit(event: str, payload: dict) -> str:
                 return _sse(event, payload, request_id=request_id)
+
+            # ── Image generation path ──────────────────────────────────
+            if _image_orch_done:
+                # Enrich the final result event with extra metadata
+                _last_data = _image_orch_events[-1]["data"]
+                _provider = _last_data.get("provider", "")
+                _is_local = _provider.lower() in ("comfyui", "stable-diffusion", "sd-webui")
+                _last_data.setdefault("pipeline", _image_pipeline_used)
+                _last_data.setdefault("request_kind", _last_data.get("intent", "generate"))
+                _last_data.setdefault("provider_selected", _provider)
+                _last_data.setdefault("used_local_backend", _is_local)
+                _last_data.setdefault("used_remote_backend", bool(_provider) and not _is_local)
+                _last_data.setdefault("used_previous_image_context",
+                                      _last_data.get("intent", "") in ("edit", "followup_edit"))
+
+                for evt in _image_orch_events:
+                    yield _emit(evt["event"], evt["data"])
+                # Emit a 'complete' event so the frontend knows the stream ended
+                yield _emit("complete", {
+                    "full_response": _last_data.get("response_text", ""),
+                    "model":         model,
+                    "context":       context,
+                    "image_result":  _last_data,
+                    "streaming":     True,
+                    "stream_contract_version": stream_contract_version,
+                    "request_id":    request_id,
+                })
+                return
+
+            # Emit intermediate image_gen_start/status events even if we ultimately
+            # fell back (so the frontend can show a "checking…" indicator)
+            for evt in _image_orch_events:
+                if evt["event"] in ("image_gen_start", "image_gen_status"):
+                    yield _emit(evt["event"], evt["data"])
 
             # ── Early RAG metadata event (before any tokens) ──
             if rag.chunk_count > 0:
