@@ -327,12 +327,30 @@ for _s in [
     _ensure_stub(_s)
 
 import sys as _sys, types as _types
+from pathlib import Path as _Path
 
-# Provide attrs referenced at import time by rag.py and rag_helpers.py
-_src_rag_mod = _types.ModuleType("src.rag")
-_src_rag_mod.RAG_ENABLED = False         # type: ignore
-_src_rag_mod.get_rag_pipeline = lambda: None  # type: ignore
-_sys.modules["src.rag"] = _src_rag_mod
+# Provide attrs referenced at import time by rag.py and rag_helpers.py.
+#
+# _ensure_stub() may have already put a plain types.ModuleType("src.rag")
+# into sys.modules (without __path__) as a side-effect of stubbing child
+# packages.  A plain ModuleType is *not* a package: attempting
+# `from src.rag.prompts import …` in any later test file would raise
+#     ModuleNotFoundError: … 'src.rag' is not a package
+# To avoid that, ensure the module in sys.modules["src.rag"] either:
+#   a) is the real imported package (has __path__) – leave it untouched, or
+#   b) has __path__ pointing at the real src/rag/ directory so that
+#      sub-packages remain importable even via the lightweight stub.
+_rag_real_path = str((_Path(__file__).parent.parent / "src" / "rag").resolve())
+_existing = _sys.modules.get("src.rag")
+if _existing is None or not hasattr(_existing, "__path__"):
+    # Create (or replace) the stub and give it a proper __path__ so that
+    # Python can still find src.rag.prompts, src.rag.security, etc.
+    _src_rag_mod = _types.ModuleType("src.rag")
+    _src_rag_mod.RAG_ENABLED = False         # type: ignore
+    _src_rag_mod.get_rag_pipeline = lambda: None  # type: ignore
+    _src_rag_mod.__path__ = [_rag_real_path]  # marks this as a package
+    _src_rag_mod.__package__ = "src.rag"
+    _sys.modules["src.rag"] = _src_rag_mod
 _sys.modules["src.rag.service.orchestrator"].RAGOrchestrator = MagicMock  # type: ignore
 _sys.modules["src.rag.service.orchestrator"].RAGResult = MagicMock        # type: ignore
 
