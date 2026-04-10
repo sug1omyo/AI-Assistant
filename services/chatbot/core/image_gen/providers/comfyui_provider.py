@@ -1,11 +1,15 @@
-﻿"""
-ComfyUI provider â€” local/remote ComfyUI instance for FLUX, SDXL, etc.
-Talks to the ComfyUI API to queue prompts and retrieve generated images.
+"""
+ComfyUI provider -- local/remote ComfyUI instance.
+Auto-discovers available checkpoints and builds optimized workflows
+for SD 1.5 anime, SDXL, and SDXL Lightning models.
+
 Best for: free local generation when GPU is available.
 """
 
 from __future__ import annotations
 
+import os
+import re
 import time
 import json
 import base64
@@ -21,212 +25,352 @@ from .base import (
 logger = logging.getLogger(__name__)
 
 
-# â”€â”€ Workflow templates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-def _flux_txt2img_workflow(prompt: str, width: int, height: int,
-                            steps: int, guidance: float, seed: int,
-                            checkpoint: str = "flux1-schnell-fp8.safetensors") -> dict:
-    """Minimal FLUX txt2img workflow for ComfyUI API."""
-    return {
-        "3": {
-            "class_type": "KSampler",
-            "inputs": {
-                "seed": seed,
-                "steps": steps,
-                "cfg": guidance,
-                "sampler_name": "euler",
-                "scheduler": "simple",
-                "denoise": 1.0,
-                "model": ["4", 0],
-                "positive": ["6", 0],
-                "negative": ["7", 0],
-                "latent_image": ["5", 0],
+# -- Model profiles -------------------------------------------------------
+# Each profile defines optimal generation parameters for a checkpoint.
+
+MODEL_PROFILES: dict[str, dict] = {
+    # -- SD 1.5 anime ------------------------------------------------------
+    "AnythingV5Ink_ink.safetensors": {
+        "type": "sd15", "style": "anime", "priority": 90,
+        "res_portrait": (512, 768), "res_landscape": (768, 512), "res_square": (512, 512),
+        "steps": 25, "cfg": 7.0,
+        "sampler": "dpmpp_2m", "scheduler": "karras",
+        "vae": "kl-f8-anime2.vae.safetensors",
+    },
+    "illustrij_v3.safetensors": {
+        "type": "sd15", "style": "anime", "priority": 85,
+        "res_portrait": (512, 768), "res_landscape": (768, 512), "res_square": (512, 512),
+        "steps": 25, "cfg": 7.0,
+        "sampler": "dpmpp_2m", "scheduler": "karras",
+        "vae": "kl-f8-anime2.vae.safetensors",
+    },
+    "abyssorangemix3AOM3_aom3a1b.safetensors": {
+        "type": "sd15", "style": "anime", "priority": 80,
+        "res_portrait": (512, 768), "res_landscape": (768, 512), "res_square": (512, 512),
+        "steps": 25, "cfg": 7.0,
+        "sampler": "dpmpp_2m_sde", "scheduler": "karras",
+        "vae": "orangemix.vae.pt",
+    },
+    "soushiki_v10.safetensors": {
+        "type": "sd15", "style": "anime", "priority": 75,
+        "res_portrait": (512, 768), "res_landscape": (768, 512), "res_square": (512, 512),
+        "steps": 25, "cfg": 7.0,
+        "sampler": "dpmpp_2m", "scheduler": "karras",
+        "vae": "kl-f8-anime2.vae.safetensors",
+    },
+    "anythingelseV4_v45.safetensors": {
+        "type": "sd15", "style": "anime", "priority": 70,
+        "res_portrait": (512, 768), "res_landscape": (768, 512), "res_square": (512, 512),
+        "steps": 25, "cfg": 7.0,
+        "sampler": "dpmpp_2m", "scheduler": "karras",
+        "vae": "kl-f8-anime2.vae.safetensors",
+    },
+    "abyssorangemix2SFW_abyssorangemix2Sfw.safetensors": {
+        "type": "sd15", "style": "anime", "priority": 65,
+        "res_portrait": (512, 768), "res_landscape": (768, 512), "res_square": (512, 512),
+        "steps": 25, "cfg": 7.0,
+        "sampler": "dpmpp_2m_sde", "scheduler": "karras",
+        "vae": "orangemix.vae.pt",
+    },
+    # -- SDXL ---------------------------------------------------------------
+    "flatpiececorexl_a1818.safetensors": {
+        "type": "sdxl", "style": "anime", "priority": 88,
+        "res_portrait": (832, 1216), "res_landscape": (1216, 832), "res_square": (1024, 1024),
+        "steps": 25, "cfg": 6.5,
+        "sampler": "dpmpp_2m_sde", "scheduler": "karras",
+        "vae": None,
+    },
+    "realvisxlV50_v50LightningBakedvae.safetensors": {
+        "type": "sdxl_lightning", "style": "realistic", "priority": 92,
+        "res_portrait": (832, 1216), "res_landscape": (1216, 832), "res_square": (1024, 1024),
+        "steps": 6, "cfg": 1.8,
+        "sampler": "euler", "scheduler": "sgm_uniform",
+        "vae": None,
+    },
+}
+
+# Quality negative prompts per model type
+NEGATIVE_SD15 = (
+    "worst quality, low quality, normal quality, lowres, blurry, jpeg artifacts, "
+    "bad anatomy, bad hands, missing fingers, extra digit, fewer digits, "
+    "cropped, watermark, username, signature, text, error, "
+    "ugly, deformed, disfigured, mutation, mutated, extra limbs"
+)
+
+NEGATIVE_SDXL = (
+    "worst quality, low quality, blurry, jpeg artifacts, watermark, text, "
+    "bad anatomy, bad hands, deformed, ugly, error"
+)
+
+# LoRAs that boost detail quality
+DETAIL_LORAS_SD15 = ["add_detail.safetensors", "more_details.safetensors"]
+DETAIL_LORAS_SDXL = ["add-detail-xl.safetensors", "PerfectEyesXL.safetensors"]
+
+# Keywords for style classification
+_ANIME_KEYWORDS = re.compile(
+    r"anime|manga|genshin|waifu|chibi|2d\b|illustration|ghibli|vtuber|"
+    r"light novel|visual novel|manhwa|webtoon|cel[\s-]?shad|lineart|"
+    r"bishoujo|shoujo|shounen|isekai",
+    re.IGNORECASE,
+)
+_REALISTIC_KEYWORDS = re.compile(
+    r"photo(?:realistic|graph)?|realistic|dslr|portrait\b|headshot|"
+    r"studio\b|real\b|cinema|film|35mm|bokeh|raw photo",
+    re.IGNORECASE,
+)
+
+
+def _classify_style(prompt: str, style_preset: str | None) -> str:
+    if style_preset:
+        sp = style_preset.lower()
+        if sp in ("anime", "digital_art", "fantasy"):
+            return "anime"
+        if sp in ("photorealistic", "cinematic", "studio_photo", "noir"):
+            return "realistic"
+    if _ANIME_KEYWORDS.search(prompt):
+        return "anime"
+    if _REALISTIC_KEYWORDS.search(prompt):
+        return "realistic"
+    return "anime"
+
+
+def _pick_resolution(profile: dict, req_w: int, req_h: int) -> tuple[int, int]:
+    ratio = req_w / max(req_h, 1)
+    if ratio > 1.15:
+        return profile["res_landscape"]
+    elif ratio < 0.87:
+        return profile["res_portrait"]
+    else:
+        return profile["res_square"]
+
+
+# -- Workflow builders -----------------------------------------------------
+
+def _build_txt2img_workflow(
+    prompt: str, negative: str,
+    width: int, height: int,
+    steps: int, cfg: float, seed: int,
+    sampler: str, scheduler: str,
+    checkpoint: str,
+    vae: str | None = None,
+    loras: list[tuple[str, float]] | None = None,
+    upscale_to: tuple[int, int] | None = None,
+) -> dict:
+    nodes: dict = {}
+    node_id = 0
+
+    def nid():
+        nonlocal node_id
+        node_id += 1
+        return str(node_id)
+
+    # 1. Checkpoint loader
+    ckpt_id = nid()
+    nodes[ckpt_id] = {
+        "class_type": "CheckpointLoaderSimple",
+        "inputs": {"ckpt_name": checkpoint},
+    }
+    model_src = [ckpt_id, 0]
+    clip_src = [ckpt_id, 1]
+    vae_src = [ckpt_id, 2]
+
+    # 2. Optional external VAE
+    if vae:
+        vae_id = nid()
+        nodes[vae_id] = {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": vae},
+        }
+        vae_src = [vae_id, 0]
+
+    # 3. Optional LoRA stack
+    if loras:
+        for lora_name, strength in loras:
+            lora_id = nid()
+            nodes[lora_id] = {
+                "class_type": "LoraLoader",
+                "inputs": {
+                    "lora_name": lora_name,
+                    "strength_model": strength,
+                    "strength_clip": strength,
+                    "model": model_src,
+                    "clip": clip_src,
+                },
             }
-        },
-        "4": {
-            "class_type": "CheckpointLoaderSimple",
-            "inputs": {"ckpt_name": checkpoint}
-        },
-        "5": {
-            "class_type": "EmptyLatentImage",
-            "inputs": {"width": width, "height": height, "batch_size": 1}
-        },
-        "6": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": prompt, "clip": ["4", 1]}
-        },
-        "7": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": "", "clip": ["4", 1]}
-        },
-        "8": {
-            "class_type": "VAEDecode",
-            "inputs": {"samples": ["3", 0], "vae": ["4", 2]}
-        },
-        "9": {
-            "class_type": "SaveImage",
-            "inputs": {"filename_prefix": "api_gen", "images": ["8", 0]}
+            model_src = [lora_id, 0]
+            clip_src = [lora_id, 1]
+
+    # 4. CLIP text encode (positive + negative)
+    pos_id = nid()
+    nodes[pos_id] = {
+        "class_type": "CLIPTextEncode",
+        "inputs": {"text": prompt, "clip": clip_src},
+    }
+    neg_id = nid()
+    nodes[neg_id] = {
+        "class_type": "CLIPTextEncode",
+        "inputs": {"text": negative, "clip": clip_src},
+    }
+
+    # 5. Empty latent image
+    latent_id = nid()
+    nodes[latent_id] = {
+        "class_type": "EmptyLatentImage",
+        "inputs": {"width": width, "height": height, "batch_size": 1},
+    }
+
+    # 6. KSampler
+    sampler_id = nid()
+    nodes[sampler_id] = {
+        "class_type": "KSampler",
+        "inputs": {
+            "seed": seed,
+            "steps": steps,
+            "cfg": cfg,
+            "sampler_name": sampler,
+            "scheduler": scheduler,
+            "denoise": 1.0,
+            "model": model_src,
+            "positive": [pos_id, 0],
+            "negative": [neg_id, 0],
+            "latent_image": [latent_id, 0],
         },
     }
 
+    # 7. VAE decode
+    decode_id = nid()
+    nodes[decode_id] = {
+        "class_type": "VAEDecode",
+        "inputs": {"samples": [sampler_id, 0], "vae": vae_src},
+    }
 
-def _flux_sdxl_upscale_workflow(
-    prompt: str, width: int, height: int,
-    steps: int, guidance: float, seed: int,
-    flux_checkpoint: str = "flux1-schnell-fp8.safetensors",
-    sdxl_checkpoint: str = "sd_xl_base_1.0.safetensors",
-    sdxl_steps: int = 20,
-    sdxl_denoise: float = 0.4,
-    sdxl_guidance: float = 7.5,
-    upscale_factor: float = 1.5,
-) -> dict:
-    """FLUX → SDXL refinement → Upscale → Save workflow for ComfyUI API."""
-    return {
-        # ── FLUX stage ───────────────────────────────────────────────────
-        "1": {
-            "class_type": "CheckpointLoaderSimple",
-            "inputs": {"ckpt_name": flux_checkpoint}
-        },
-        "2": {
-            "class_type": "EmptyLatentImage",
-            "inputs": {"width": width, "height": height, "batch_size": 1}
-        },
-        "3": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": prompt, "clip": ["1", 1]}
-        },
-        "4": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": "", "clip": ["1", 1]}
-        },
-        "5": {
-            "class_type": "KSampler",
-            "inputs": {
-                "seed": seed,
-                "steps": steps,
-                "cfg": guidance,
-                "sampler_name": "euler",
-                "scheduler": "simple",
-                "denoise": 1.0,
-                "model": ["1", 0],
-                "positive": ["3", 0],
-                "negative": ["4", 0],
-                "latent_image": ["2", 0],
-            }
-        },
-        "6": {
-            "class_type": "VAEDecode",
-            "inputs": {"samples": ["5", 0], "vae": ["1", 2]}
-        },
-        # ── SDXL refinement stage ────────────────────────────────────────
-        "7": {
-            "class_type": "CheckpointLoaderSimple",
-            "inputs": {"ckpt_name": sdxl_checkpoint}
-        },
-        "8": {
-            "class_type": "VAEEncode",
-            "inputs": {"pixels": ["6", 0], "vae": ["7", 2]}
-        },
-        "9": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": prompt, "clip": ["7", 1]}
-        },
-        "10": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": "", "clip": ["7", 1]}
-        },
-        "11": {
-            "class_type": "KSampler",
-            "inputs": {
-                "seed": seed,
-                "steps": sdxl_steps,
-                "cfg": sdxl_guidance,
-                "sampler_name": "euler_ancestral",
-                "scheduler": "karras",
-                "denoise": sdxl_denoise,
-                "model": ["7", 0],
-                "positive": ["9", 0],
-                "negative": ["10", 0],
-                "latent_image": ["8", 0],
-            }
-        },
-        "12": {
-            "class_type": "VAEDecode",
-            "inputs": {"samples": ["11", 0], "vae": ["7", 2]}
-        },
-        # ── Upscale stage ────────────────────────────────────────────────
-        "13": {
+    img_src = [decode_id, 0]
+
+    # 8. Optional upscale (HiRes fix for SD1.5)
+    if upscale_to:
+        up_id = nid()
+        nodes[up_id] = {
             "class_type": "ImageScale",
             "inputs": {
-                "image": ["12", 0],
+                "image": img_src,
                 "upscale_method": "lanczos",
-                "width": int(width * upscale_factor),
-                "height": int(height * upscale_factor),
+                "width": upscale_to[0],
+                "height": upscale_to[1],
                 "crop": "disabled",
-            }
-        },
-        # ── Save ──────────────────────────────────────────────────────────
-        "14": {
-            "class_type": "SaveImage",
-            "inputs": {"filename_prefix": "api_flux_sdxl", "images": ["13", 0]}
+            },
+        }
+        img_src = [up_id, 0]
+
+    # 9. Save
+    save_id = nid()
+    nodes[save_id] = {
+        "class_type": "SaveImage",
+        "inputs": {"filename_prefix": "api_gen", "images": img_src},
+    }
+
+    return nodes
+
+
+def _build_img2img_workflow(
+    prompt: str, negative: str,
+    steps: int, cfg: float, seed: int,
+    sampler: str, scheduler: str,
+    strength: float,
+    image_b64: str,
+    checkpoint: str,
+    vae: str | None = None,
+) -> dict:
+    nodes: dict = {}
+    node_id = 0
+
+    def nid():
+        nonlocal node_id
+        node_id += 1
+        return str(node_id)
+
+    # 1. Load source image
+    img_id = nid()
+    nodes[img_id] = {
+        "class_type": "LoadImageBase64",
+        "inputs": {"image": image_b64},
+    }
+
+    # 2. Checkpoint
+    ckpt_id = nid()
+    nodes[ckpt_id] = {
+        "class_type": "CheckpointLoaderSimple",
+        "inputs": {"ckpt_name": checkpoint},
+    }
+    model_src = [ckpt_id, 0]
+    clip_src = [ckpt_id, 1]
+    vae_src = [ckpt_id, 2]
+
+    # 3. Optional external VAE
+    if vae:
+        vae_id = nid()
+        nodes[vae_id] = {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": vae},
+        }
+        vae_src = [vae_id, 0]
+
+    # 4. CLIP encode
+    pos_id = nid()
+    nodes[pos_id] = {
+        "class_type": "CLIPTextEncode",
+        "inputs": {"text": prompt, "clip": clip_src},
+    }
+    neg_id = nid()
+    nodes[neg_id] = {
+        "class_type": "CLIPTextEncode",
+        "inputs": {"text": negative, "clip": clip_src},
+    }
+
+    # 5. VAE encode source image
+    enc_id = nid()
+    nodes[enc_id] = {
+        "class_type": "VAEEncode",
+        "inputs": {"pixels": [img_id, 0], "vae": vae_src},
+    }
+
+    # 6. KSampler
+    sampler_id = nid()
+    nodes[sampler_id] = {
+        "class_type": "KSampler",
+        "inputs": {
+            "seed": seed,
+            "steps": steps,
+            "cfg": cfg,
+            "sampler_name": sampler,
+            "scheduler": scheduler,
+            "denoise": strength,
+            "model": model_src,
+            "positive": [pos_id, 0],
+            "negative": [neg_id, 0],
+            "latent_image": [enc_id, 0],
         },
     }
 
-
-def _img2img_workflow(prompt: str, width: int, height: int,
-                       steps: int, guidance: float, seed: int,
-                       strength: float, image_b64: str,
-                       checkpoint: str = "flux1-schnell-fp8.safetensors") -> dict:
-    """img2img workflow with LoadImage + KSampler denoise."""
-    return {
-        "1": {
-            "class_type": "LoadImageBase64",
-            "inputs": {"image": image_b64}
-        },
-        "3": {
-            "class_type": "KSampler",
-            "inputs": {
-                "seed": seed,
-                "steps": steps,
-                "cfg": guidance,
-                "sampler_name": "euler",
-                "scheduler": "simple",
-                "denoise": strength,
-                "model": ["4", 0],
-                "positive": ["6", 0],
-                "negative": ["7", 0],
-                "latent_image": ["10", 0],
-            }
-        },
-        "4": {
-            "class_type": "CheckpointLoaderSimple",
-            "inputs": {"ckpt_name": checkpoint}
-        },
-        "6": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": prompt, "clip": ["4", 1]}
-        },
-        "7": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": "", "clip": ["4", 1]}
-        },
-        "8": {
-            "class_type": "VAEDecode",
-            "inputs": {"samples": ["3", 0], "vae": ["4", 2]}
-        },
-        "9": {
-            "class_type": "SaveImage",
-            "inputs": {"filename_prefix": "api_i2i", "images": ["8", 0]}
-        },
-        "10": {
-            "class_type": "VAEEncode",
-            "inputs": {"pixels": ["1", 0], "vae": ["4", 2]}
-        },
+    # 7. VAE decode
+    decode_id = nid()
+    nodes[decode_id] = {
+        "class_type": "VAEDecode",
+        "inputs": {"samples": [sampler_id, 0], "vae": vae_src},
     }
 
+    # 8. Save
+    save_id = nid()
+    nodes[save_id] = {
+        "class_type": "SaveImage",
+        "inputs": {"filename_prefix": "api_i2i", "images": [decode_id, 0]},
+    }
+
+    return nodes
+
+
+# -- Provider class --------------------------------------------------------
 
 class ComfyUIProvider(BaseImageProvider):
-    """ComfyUI local/remote â€” free GPU generation."""
-
     name = "comfyui"
     tier = ProviderTier.LOCAL
     supports_i2i = True
@@ -234,16 +378,126 @@ class ComfyUIProvider(BaseImageProvider):
     cost_per_image = 0.0
 
     def __init__(self, api_key: str = "", base_url: str = "", **kwargs):
-        base_url = base_url or "http://127.0.0.1:8189"
+        base_url = base_url or os.getenv("COMFYUI_URL", "http://127.0.0.1:8188")
         super().__init__(api_key=api_key, base_url=base_url, **kwargs)
-        self.checkpoint = kwargs.get("checkpoint", "flux1-schnell-fp8.safetensors")
-        self.sdxl_checkpoint = kwargs.get("sdxl_checkpoint", "sd_xl_base_1.0.safetensors")
-        self.sdxl_steps = int(kwargs.get("sdxl_steps", 20))
-        self.sdxl_denoise = float(kwargs.get("sdxl_denoise", 0.4))
-        self.sdxl_guidance = float(kwargs.get("sdxl_guidance", 7.5))
-        self.upscale_factor = float(kwargs.get("upscale_factor", 1.5))
         self._http = httpx.Client(base_url=self.base_url, timeout=300.0)
-        self._configured = True  # Always try local
+        self._configured = True
+
+        self._available_ckpts: list[str] | None = None
+        self._available_vaes: list[str] | None = None
+        self._available_loras: list[str] | None = None
+
+        self._force_checkpoint: str = kwargs.get("checkpoint", os.getenv("COMFYUI_CHECKPOINT", ""))
+        self._upscale_factor: float = float(kwargs.get("upscale_factor", os.getenv("COMFYUI_UPSCALE_FACTOR", "1.5")))
+        self._enable_loras: bool = str(kwargs.get("enable_loras", os.getenv("COMFYUI_ENABLE_LORAS", "true"))).lower() in ("true", "1", "yes")
+        self._enable_hires: bool = str(kwargs.get("enable_hires", os.getenv("COMFYUI_ENABLE_HIRES", "true"))).lower() in ("true", "1", "yes")
+
+    # -- Discovery ---------------------------------------------------------
+
+    def _discover(self):
+        if self._available_ckpts is not None:
+            return
+
+        self._available_ckpts = []
+        self._available_vaes = []
+        self._available_loras = []
+
+        try:
+            r = self._http.get("/object_info/CheckpointLoaderSimple", timeout=5.0)
+            if r.status_code == 200:
+                self._available_ckpts = (
+                    r.json()
+                    .get("CheckpointLoaderSimple", {})
+                    .get("input", {})
+                    .get("required", {})
+                    .get("ckpt_name", [[]])[0]
+                )
+        except Exception as e:
+            logger.warning(f"[ComfyUI] Failed to discover checkpoints: {e}")
+
+        try:
+            r = self._http.get("/object_info/VAELoader", timeout=5.0)
+            if r.status_code == 200:
+                self._available_vaes = (
+                    r.json()
+                    .get("VAELoader", {})
+                    .get("input", {})
+                    .get("required", {})
+                    .get("vae_name", [[]])[0]
+                )
+        except Exception:
+            pass
+
+        try:
+            r = self._http.get("/object_info/LoraLoader", timeout=5.0)
+            if r.status_code == 200:
+                self._available_loras = (
+                    r.json()
+                    .get("LoraLoader", {})
+                    .get("input", {})
+                    .get("required", {})
+                    .get("lora_name", [[]])[0]
+                )
+        except Exception:
+            pass
+
+        logger.info(
+            f"[ComfyUI] Discovered: {len(self._available_ckpts)} checkpoints, "
+            f"{len(self._available_vaes)} VAEs, {len(self._available_loras)} LoRAs"
+        )
+
+    def _select_model(self, req: ImageRequest) -> tuple[str, dict]:
+        self._discover()
+
+        if self._force_checkpoint and self._force_checkpoint in self._available_ckpts:
+            profile = MODEL_PROFILES.get(self._force_checkpoint)
+            if profile:
+                return self._force_checkpoint, profile
+            return self._force_checkpoint, {
+                "type": "sd15", "style": "anime", "priority": 50,
+                "res_portrait": (512, 768), "res_landscape": (768, 512), "res_square": (512, 512),
+                "steps": 25, "cfg": 7.0,
+                "sampler": "dpmpp_2m", "scheduler": "karras",
+                "vae": None,
+            }
+
+        style = _classify_style(req.prompt, req.style_preset)
+
+        candidates = []
+        for ckpt in self._available_ckpts:
+            profile = MODEL_PROFILES.get(ckpt)
+            if profile:
+                candidates.append((ckpt, profile))
+
+        if not candidates:
+            if self._available_ckpts:
+                ckpt = self._available_ckpts[0]
+                logger.warning(f"[ComfyUI] No profiled model, using {ckpt}")
+                return ckpt, {
+                    "type": "sd15", "style": "anime", "priority": 50,
+                    "res_portrait": (512, 768), "res_landscape": (768, 512), "res_square": (512, 512),
+                    "steps": 25, "cfg": 7.0,
+                    "sampler": "dpmpp_2m", "scheduler": "karras",
+                    "vae": None,
+                }
+            raise RuntimeError("No checkpoints available in ComfyUI")
+
+        style_match = [(c, p) for c, p in candidates if p["style"] == style]
+        pool = style_match if style_match else candidates
+        pool.sort(key=lambda x: x[1]["priority"], reverse=True)
+        return pool[0]
+
+    def _resolve_loras(self, model_type: str) -> list[tuple[str, float]]:
+        if not self._enable_loras or not self._available_loras:
+            return []
+        target = DETAIL_LORAS_SDXL if model_type.startswith("sdxl") else DETAIL_LORAS_SD15
+        found = []
+        for lora_name in target:
+            if lora_name in self._available_loras:
+                found.append((lora_name, 0.4))
+                if len(found) >= 1:
+                    break
+        return found
 
     @property
     def is_available(self) -> bool:
@@ -255,40 +509,70 @@ class ComfyUIProvider(BaseImageProvider):
         seed = req.seed if req.seed is not None else int(time.time()) % (2**32)
 
         try:
+            checkpoint, profile = self._select_model(req)
+            model_type = profile["type"]
+            native_w, native_h = _pick_resolution(profile, req.width, req.height)
+
+            vae = profile.get("vae")
+            if vae and self._available_vaes and vae not in self._available_vaes:
+                vae = None
+
+            loras = self._resolve_loras(model_type)
+            negative = NEGATIVE_SDXL if model_type.startswith("sdxl") else NEGATIVE_SD15
+
+            upscale_to = None
+            if self._enable_hires and model_type == "sd15":
+                target_w, target_h = req.width, req.height
+                if target_w > native_w or target_h > native_h:
+                    upscale_to = (
+                        min(target_w, int(native_w * self._upscale_factor)),
+                        min(target_h, int(native_h * self._upscale_factor)),
+                    )
+
+            logger.info(
+                f"[ComfyUI] Generating: ckpt={checkpoint}, "
+                f"res={native_w}x{native_h}, steps={profile['steps']}, "
+                f"cfg={profile['cfg']}, sampler={profile['sampler']}, "
+                f"vae={'ext' if vae else 'built-in'}, "
+                f"loras={[l[0] for l in loras]}, "
+                f"upscale={upscale_to or 'none'}"
+            )
+
             if req.mode == ImageMode.IMAGE_TO_IMAGE and req.source_image_b64:
-                workflow = _img2img_workflow(
-                    prompt=req.prompt, width=req.width, height=req.height,
-                    steps=req.steps, guidance=req.guidance, seed=seed,
-                    strength=req.strength, image_b64=req.source_image_b64,
-                    checkpoint=self.checkpoint,
-                )
-            elif self.sdxl_checkpoint and self.sdxl_checkpoint.strip():
-                workflow = _flux_sdxl_upscale_workflow(
-                    prompt=req.prompt, width=req.width, height=req.height,
-                    steps=req.steps, guidance=req.guidance, seed=seed,
-                    flux_checkpoint=self.checkpoint,
-                    sdxl_checkpoint=self.sdxl_checkpoint,
-                    sdxl_steps=self.sdxl_steps,
-                    sdxl_denoise=self.sdxl_denoise,
-                    sdxl_guidance=self.sdxl_guidance,
-                    upscale_factor=self.upscale_factor,
+                workflow = _build_img2img_workflow(
+                    prompt=req.prompt, negative=negative,
+                    steps=profile["steps"], cfg=profile["cfg"],
+                    seed=seed,
+                    sampler=profile["sampler"], scheduler=profile["scheduler"],
+                    strength=req.strength,
+                    image_b64=req.source_image_b64,
+                    checkpoint=checkpoint, vae=vae,
                 )
             else:
-                workflow = _flux_txt2img_workflow(
-                    prompt=req.prompt, width=req.width, height=req.height,
-                    steps=req.steps, guidance=req.guidance, seed=seed,
-                    checkpoint=self.checkpoint,
+                workflow = _build_txt2img_workflow(
+                    prompt=req.prompt, negative=negative,
+                    width=native_w, height=native_h,
+                    steps=profile["steps"], cfg=profile["cfg"],
+                    seed=seed,
+                    sampler=profile["sampler"], scheduler=profile["scheduler"],
+                    checkpoint=checkpoint, vae=vae,
+                    loras=loras, upscale_to=upscale_to,
                 )
 
-            # Queue prompt
             resp = self._http.post("/prompt", json={
                 "prompt": workflow,
                 "client_id": client_id,
             })
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                body = resp.text[:500]
+                logger.error(f"[ComfyUI] Queue failed ({resp.status_code}): {body}")
+                return ImageResult(
+                    success=False,
+                    error=f"ComfyUI rejected workflow ({resp.status_code}): {body}",
+                    provider=self.name,
+                )
             prompt_id = resp.json()["prompt_id"]
 
-            # Poll history
             images_b64 = self._wait_for_images(prompt_id)
             latency = (time.time() - t0) * 1000
 
@@ -296,15 +580,20 @@ class ComfyUIProvider(BaseImageProvider):
                 success=True,
                 images_b64=images_b64,
                 provider=self.name,
-                model=(
-                    f"comfyui/{self.checkpoint}+{self.sdxl_checkpoint}"
-                    if self.sdxl_checkpoint and req.mode != ImageMode.IMAGE_TO_IMAGE
-                    else f"comfyui/{self.checkpoint}"
-                ),
+                model=f"comfyui/{checkpoint}",
                 prompt_used=req.prompt,
                 latency_ms=latency,
                 cost_usd=0.0,
-                metadata={"prompt_id": prompt_id, "seed": seed},
+                metadata={
+                    "prompt_id": prompt_id,
+                    "seed": seed,
+                    "checkpoint": checkpoint,
+                    "model_type": model_type,
+                    "resolution": f"{native_w}x{native_h}",
+                    "upscaled_to": f"{upscale_to[0]}x{upscale_to[1]}" if upscale_to else None,
+                    "vae": vae or "built-in",
+                    "loras": [l[0] for l in loras],
+                },
             )
 
         except Exception as e:
@@ -318,13 +607,18 @@ class ComfyUIProvider(BaseImageProvider):
             if resp.status_code == 200:
                 history = resp.json()
                 if prompt_id in history:
+                    status = history[prompt_id].get("status", {})
+                    if status.get("status_str") == "error":
+                        msgs = status.get("messages", [])
+                        error_detail = json.dumps(msgs[:3]) if msgs else "unknown"
+                        raise RuntimeError(f"ComfyUI execution error: {error_detail}")
+
                     outputs = history[prompt_id].get("outputs", {})
                     images = []
-                    for node_id, node_out in outputs.items():
+                    for _nid, node_out in outputs.items():
                         for img_info in node_out.get("images", []):
                             fname = img_info.get("filename")
                             subfolder = img_info.get("subfolder", "")
-                            # Fetch actual image
                             img_resp = self._http.get("/view", params={
                                 "filename": fname,
                                 "subfolder": subfolder,
@@ -335,7 +629,7 @@ class ComfyUIProvider(BaseImageProvider):
                     if images:
                         return images
             time.sleep(1.0)
-        raise TimeoutError(f"ComfyUI prompt {prompt_id} timed out")
+        raise TimeoutError(f"ComfyUI prompt {prompt_id} timed out after {max_wait}s")
 
     def health_check(self) -> bool:
         try:
@@ -345,10 +639,5 @@ class ComfyUIProvider(BaseImageProvider):
             return False
 
     def get_models(self) -> list[str]:
-        """List available checkpoints."""
-        try:
-            resp = self._http.get("/object_info/CheckpointLoaderSimple")
-            data = resp.json()
-            return data.get("CheckpointLoaderSimple", {}).get("input", {}).get("required", {}).get("ckpt_name", [[]])[0]
-        except Exception:
-            return []
+        self._discover()
+        return list(self._available_ckpts or [])
