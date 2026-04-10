@@ -4638,6 +4638,130 @@ body.light-mode .message__content pre {
   font-size: 11.5px;
 }
 
+/* ── igv2 provider choice dialog ──────────────────────────────────────── */
+.igv2-provider-choice {
+  background: var(--bg-secondary, #1a1a2e);
+  border: 1px solid var(--border-color, #2d2d44);
+  border-radius: 12px;
+  padding: 16px;
+  min-width: 280px;
+  max-width: 420px;
+  animation: igv2-step-in 0.3s ease-out;
+}
+.igv2-choice-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color, #2d2d44);
+}
+.igv2-choice-icon {
+  font-size: 18px;
+}
+.igv2-choice-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #e0e0e0);
+  flex: 1;
+}
+.igv2-choice-timer {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent, #7c8aff);
+  background: rgba(99, 122, 255, 0.12);
+  padding: 2px 8px;
+  border-radius: 10px;
+  min-width: 32px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.igv2-choice-buttons {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.igv2-choice-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 8px;
+  border: 1px solid var(--border-color, #2d2d44);
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: var(--text-primary, #e0e0e0);
+}
+.igv2-choice-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.igv2-choice-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.igv2-choice-local:hover:not(:disabled) {
+  border-color: #4caf50;
+  background: rgba(76, 175, 80, 0.1);
+}
+.igv2-choice-api:hover:not(:disabled) {
+  border-color: #2196f3;
+  background: rgba(33, 150, 243, 0.1);
+}
+.igv2-choice-cancel:hover:not(:disabled) {
+  border-color: #f44336;
+  background: rgba(244, 67, 54, 0.1);
+}
+.igv2-choice-btn.selected {
+  border-width: 2px;
+}
+.igv2-choice-local.selected {
+  border-color: #4caf50;
+  background: rgba(76, 175, 80, 0.15);
+}
+.igv2-choice-api.selected {
+  border-color: #2196f3;
+  background: rgba(33, 150, 243, 0.15);
+}
+.igv2-choice-cancel.selected {
+  border-color: #f44336;
+  background: rgba(244, 67, 54, 0.15);
+}
+.igv2-choice-btn.dimmed {
+  opacity: 0.35;
+  pointer-events: none;
+}
+.igv2-choice-btn:disabled {
+  cursor: default;
+}
+.igv2-choice-btn-icon {
+  font-size: 22px;
+}
+.igv2-choice-btn-label {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.igv2-choice-btn-desc {
+  font-size: 10.5px;
+  color: var(--text-secondary, #b0b0c8);
+  opacity: 0.8;
+}
+.igv2-choice-progress {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.igv2-choice-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent, #7c8aff), #a78bfa);
+  border-radius: 2px;
+  transition: width 1s linear;
+}
+
 /* Import Inter font */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 

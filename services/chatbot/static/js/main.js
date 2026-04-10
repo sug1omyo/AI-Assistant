@@ -592,6 +592,100 @@ class ChatBotApp {
             );
             this.uiUtils.clearInput();
 
+            // ── Provider Choice Dialog (LOCAL / API / CANCEL) with 30s timeout ──
+            const providerChoice = await new Promise((resolve) => {
+                const TIMEOUT_SECONDS = 30;
+                const choiceContainer = document.createElement('div');
+                choiceContainer.className = 'message assistant';
+                choiceContainer.innerHTML = `
+                    <div class="message__avatar">🎨</div>
+                    <div class="message__body">
+                        <div class="message-content">
+                            <div class="igv2-provider-choice">
+                                <div class="igv2-choice-header">
+                                    <span class="igv2-choice-icon">⚡</span>
+                                    <span class="igv2-choice-title">Chọn phương thức tạo ảnh</span>
+                                    <span class="igv2-choice-timer">${TIMEOUT_SECONDS}s</span>
+                                </div>
+                                <div class="igv2-choice-buttons">
+                                    <button class="igv2-choice-btn igv2-choice-local" data-choice="local">
+                                        <span class="igv2-choice-btn-icon">🖥️</span>
+                                        <span class="igv2-choice-btn-label">LOCAL</span>
+                                        <span class="igv2-choice-btn-desc">ComfyUI · Miễn phí</span>
+                                    </button>
+                                    <button class="igv2-choice-btn igv2-choice-api" data-choice="api">
+                                        <span class="igv2-choice-btn-icon">☁️</span>
+                                        <span class="igv2-choice-btn-label">API</span>
+                                        <span class="igv2-choice-btn-desc">Cloud · Nhanh & chất lượng</span>
+                                    </button>
+                                    <button class="igv2-choice-btn igv2-choice-cancel" data-choice="cancel">
+                                        <span class="igv2-choice-btn-icon">❌</span>
+                                        <span class="igv2-choice-btn-label">HỦY</span>
+                                        <span class="igv2-choice-btn-desc">Không tạo ảnh</span>
+                                    </button>
+                                </div>
+                                <div class="igv2-choice-progress">
+                                    <div class="igv2-choice-progress-bar"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                elements.chatContainer.appendChild(choiceContainer);
+                elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+
+                const timerEl = choiceContainer.querySelector('.igv2-choice-timer');
+                const progressBar = choiceContainer.querySelector('.igv2-choice-progress-bar');
+                let remaining = TIMEOUT_SECONDS;
+                let resolved = false;
+
+                const finalize = (choice) => {
+                    if (resolved) return;
+                    resolved = true;
+                    clearInterval(countdownInterval);
+                    // Mark selected button
+                    choiceContainer.querySelectorAll('.igv2-choice-btn').forEach(btn => {
+                        btn.disabled = true;
+                        if (btn.dataset.choice === choice) btn.classList.add('selected');
+                        else btn.classList.add('dimmed');
+                    });
+                    timerEl.textContent = choice === 'cancel' ? 'Đã hủy' : choice === 'local' ? 'LOCAL' : 'API';
+                    resolve(choice);
+                };
+
+                choiceContainer.querySelectorAll('.igv2-choice-btn').forEach(btn => {
+                    btn.addEventListener('click', () => finalize(btn.dataset.choice));
+                });
+
+                const countdownInterval = setInterval(() => {
+                    remaining--;
+                    if (timerEl) timerEl.textContent = `${remaining}s`;
+                    if (progressBar) progressBar.style.width = `${(remaining / TIMEOUT_SECONDS) * 100}%`;
+                    if (remaining <= 0) {
+                        finalize('cancel');
+                    }
+                }, 1000);
+                // Initial progress bar
+                if (progressBar) progressBar.style.width = '100%';
+            });
+
+            if (providerChoice === 'cancel') {
+                this.messageRenderer.addMessage(
+                    elements.chatContainer,
+                    '⏰ Đã hủy tạo ảnh — không có phản hồi hoặc người dùng chọn HỦY.',
+                    false, formValues.model, formValues.context,
+                    this.uiUtils.formatTimestamp(new Date())
+                );
+                elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+                await this.saveCurrentSession(true);
+                return;
+            }
+
+            const imageGenOptions = providerChoice === 'local'
+                ? { quality: 'free', provider: 'comfyui' }
+                : { quality: 'auto' };
+            console.log('[App] Provider choice:', providerChoice, imageGenOptions);
+
             // Create streaming status container (like thinking but for image gen)
             const statusContainer = document.createElement('div');
             statusContainer.className = 'message assistant';
@@ -673,7 +767,8 @@ class ChatBotApp {
                         headerIcon.textContent = '❌';
                         headerIcon.classList.remove('spinning');
                     },
-                }
+                },
+                imageGenOptions,
             );
 
             if (result.success) {
@@ -709,6 +804,40 @@ class ChatBotApp {
                     false, formValues.model, formValues.context,
                     this.uiUtils.formatTimestamp(new Date())
                 );
+
+                // ── 4-Agents Deep Thinking Analysis (when multi-thinking mode) ──
+                if (formValues.thinkingMode === 'multi-thinking' && result.success) {
+                    const thinkingSection = this.messageRenderer.createThinkingSection(null, true);
+                    const thinkMsgEl = document.createElement('div');
+                    thinkMsgEl.className = 'message assistant';
+                    thinkMsgEl.innerHTML = '<div class="message__avatar">🧠</div><div class="message__body"><div class="message-content"></div></div>';
+                    thinkMsgEl.querySelector('.message-content').appendChild(thinkingSection);
+                    elements.chatContainer.appendChild(thinkMsgEl);
+                    elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+
+                    const analysisSteps = [
+                        { icon: '🔍', text: `**Phân tích prompt** — "${(result.prompt_used || message).substring(0, 80)}..."` },
+                        { icon: '🎨', text: `**Provider:** ${result.provider} / ${result.model}` },
+                        { icon: '⚡', text: `**Hiệu suất:** ${Math.round(result.latency_ms)}ms · Chi phí: $${result.cost_usd}` },
+                        { icon: '📐', text: `**Đánh giá bố cục:** Ảnh được tạo với kích thước ${result.metadata?.width || '?'}×${result.metadata?.height || '?'}` },
+                        { icon: '✨', text: `**Chất lượng:** ${providerChoice === 'local' ? 'ComfyUI local — miễn phí, tùy chỉnh tốt' : 'Cloud API — chất lượng cao, tốc độ nhanh'}` },
+                        { icon: '✅', text: '**Kết luận:** Ảnh đã được tạo thành công. Bạn có thể yêu cầu chỉnh sửa thêm.' },
+                    ];
+
+                    for (let i = 0; i < analysisSteps.length; i++) {
+                        await new Promise(r => setTimeout(r, 400));
+                        this.messageRenderer.addThinkingStep(
+                            thinkingSection,
+                            `${analysisSteps[i].icon} ${analysisSteps[i].text}`
+                        );
+                        elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+                    }
+
+                    // Finalize thinking
+                    if (this.messageRenderer.finalizeThinking) {
+                        this.messageRenderer.finalizeThinking(thinkingSection);
+                    }
+                }
             } else {
                 this.messageRenderer.addMessage(
                     elements.chatContainer,

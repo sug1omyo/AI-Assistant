@@ -318,7 +318,7 @@ export class ImageGenV2 {
      *   onError({error})
      * @returns {Promise<Object>} Final result data
      */
-    async generateFromChatStream(message, conversationId, abortSignal = null, callbacks = {}) {
+    async generateFromChatStream(message, conversationId, abortSignal = null, callbacks = {}, options = {}) {
         this.conversationId = conversationId || this.conversationId;
 
         try {
@@ -327,7 +327,8 @@ export class ImageGenV2 {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     prompt: message,
-                    quality: 'auto',
+                    quality: options.quality || 'auto',
+                    provider: options.provider || undefined,
                     enhance: true,
                     conversation_id: this.conversationId,
                     num_images: 1,
