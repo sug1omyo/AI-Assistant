@@ -243,6 +243,8 @@ resources/templates/temp/
 local_data/
 data/connections/
 data/knowledge_base/
+storage/
+**.**/storage/
 
 # ============================================
 # RUNTIME FILES (Generated at runtime)

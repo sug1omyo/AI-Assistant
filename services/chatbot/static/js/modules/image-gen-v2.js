@@ -346,6 +346,7 @@ export class ImageGenV2 {
             let buffer = '';
             let finalResult = null;
             let savedData = null;
+            let currentEvent = 'message';
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -354,8 +355,6 @@ export class ImageGenV2 {
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
                 buffer = lines.pop(); // Keep incomplete line
-
-                let currentEvent = 'message';
                 for (const line of lines) {
                     if (line.startsWith('event: ')) {
                         currentEvent = line.slice(7).trim();
@@ -390,6 +389,8 @@ export class ImageGenV2 {
                         } catch (e) {
                             // Skip invalid JSON
                         }
+                    } else if (line === '') {
+                        // Empty line = end of SSE message, reset event type
                         currentEvent = 'message';
                     }
                 }

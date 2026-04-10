@@ -9,7 +9,7 @@ import time
 import threading
 from datetime import datetime
 from pathlib import Path
-from flask import Blueprint, request, jsonify, session, render_template
+from flask import Blueprint, request, jsonify, session, render_template, redirect
 import logging
 
 # Setup path
@@ -22,6 +22,7 @@ from core.extensions import MONGODB_ENABLED, logger
 from core.chatbot import get_chatbot
 from core.tools import google_search_tool, github_search_tool
 from core.private_logger import log_chat, log_interaction
+from app.middleware.auth import require_login
 
 # Check MCP availability
 MCP_AVAILABLE = False
@@ -94,6 +95,7 @@ def _log_chat_event(event: str, data: dict) -> None:
 
 
 @main_bp.route('/')
+@require_login
 def index():
     """Home page - Original beautiful UI with full SDXL support"""
     if 'session_id' not in session:
@@ -102,6 +104,7 @@ def index():
 
 
 @main_bp.route('/new')
+@require_login
 def index_new():
     """New Tailwind version (experimental)"""
     if 'session_id' not in session:
@@ -110,6 +113,7 @@ def index_new():
 
 
 @main_bp.route('/chat', methods=['POST'])
+@require_login
 def chat():
     """Chat endpoint - handles both JSON and FormData (with files)"""
     try:

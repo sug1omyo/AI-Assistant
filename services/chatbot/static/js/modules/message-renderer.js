@@ -1227,6 +1227,11 @@ export class MessageRenderer {
      * Regenerate response
      */
     regenerateResponse(messageDiv) {
+        // ── Image generation: detect and redirect ──
+        if (messageDiv.dataset.igv2IsImage === 'true') {
+            return this.regenerateImageResponse(messageDiv);
+        }
+
         // Find the user message before this assistant message
         let prevMessage = messageDiv.previousElementSibling;
         while (prevMessage && !prevMessage.classList.contains('user')) {
@@ -1357,7 +1362,219 @@ export class MessageRenderer {
             }
         });
     }
-    
+
+    /**
+     * Regenerate image response — re-runs image generation with same provider.
+     * Local (ComfyUI): unlimited retries, always uses 'free' quality.
+     * API (Cloud): max 1 retry, uses 'auto' quality.
+     */
+    async regenerateImageResponse(messageDiv) {
+        const provider = messageDiv.dataset.igv2Provider || 'local';
+        const userPrompt = messageDiv.dataset.igv2Prompt || '';
+        const regenCount = parseInt(messageDiv.dataset.igv2RegenCount || '0', 10);
+        const conversationId = messageDiv.dataset.igv2ConversationId || '';
+
+        if (!userPrompt || !window.chatApp) return;
+
+        // API provider: limit to 1 retry
+        if (provider === 'api' && regenCount >= 1) {
+            alert('API chỉ cho phép thử lại 1 lần. Hãy dùng LOCAL để tạo không giới hạn.');
+            return;
+        }
+
+        // Find user message for version tracking
+        let prevMessage = messageDiv.previousElementSibling;
+        while (prevMessage && !prevMessage.classList.contains('user')) {
+            prevMessage = prevMessage.previousElementSibling;
+        }
+
+        const chatContainer = messageDiv.parentElement;
+        if (!chatContainer) return;
+
+        // Store current version
+        const currentResponse = messageDiv.querySelector('.message-text')?.innerHTML || '';
+        const messageId = prevMessage
+            ? (prevMessage.dataset.messageId || `msg_${Date.now()}_${Math.random()}`)
+            : `msg_${Date.now()}_${Math.random()}`;
+        if (prevMessage) prevMessage.dataset.messageId = messageId;
+
+        if (!this.messageHistory.has(messageId)) {
+            this.messageHistory.set(messageId, []);
+            this.addMessageVersion(messageId, userPrompt, currentResponse, new Date().toISOString());
+        }
+
+        // Remove status/thinking containers that follow the image message
+        let nextEl = messageDiv.nextElementSibling;
+        while (nextEl && nextEl.classList.contains('assistant') && !nextEl.querySelector('.message-text:not(:empty)')) {
+            const toRemove = nextEl;
+            nextEl = nextEl.nextElementSibling;
+            toRemove.remove();
+        }
+
+        // Also remove any igv2-stream-status that precedes the image message
+        let prevEl = messageDiv.previousElementSibling;
+        while (prevEl && prevEl.classList.contains('assistant') && prevEl.querySelector('.igv2-stream-status')) {
+            const toRemove = prevEl;
+            prevEl = prevEl.previousElementSibling;
+            toRemove.remove();
+        }
+
+        // Remove current assistant image message
+        messageDiv.remove();
+
+        // Build streaming status container
+        const imageGenOptions = provider === 'local'
+            ? { quality: 'free', provider: 'comfyui' }
+            : { quality: 'auto' };
+
+        const statusContainer = document.createElement('div');
+        statusContainer.className = 'message assistant';
+        statusContainer.innerHTML = `
+            <div class="message__avatar">🎨</div>
+            <div class="message__body">
+                <div class="message-content">
+                    <div class="igv2-stream-status">
+                        <div class="igv2-stream-header">
+                            <span class="igv2-stream-icon spinning">⚙️</span>
+                            <span class="igv2-stream-title">Image Regeneration</span>
+                        </div>
+                        <div class="igv2-stream-steps"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+        chatContainer.appendChild(statusContainer);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+
+        const stepsContainer = statusContainer.querySelector('.igv2-stream-steps');
+        const headerIcon = statusContainer.querySelector('.igv2-stream-icon');
+
+        const addStep = (icon, text, className = '') => {
+            const step = document.createElement('div');
+            step.className = `igv2-stream-step ${className}`;
+            step.innerHTML = `<span class="igv2-step-icon">${icon}</span><span class="igv2-step-text">${text}</span>`;
+            stepsContainer.appendChild(step);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            return step;
+        };
+        const updateStep = (stepEl, icon, text, className = '') => {
+            if (!stepEl) return;
+            stepEl.className = `igv2-stream-step ${className}`;
+            stepEl.innerHTML = `<span class="igv2-step-icon">${icon}</span><span class="igv2-step-text">${text}</span>`;
+        };
+
+        window.chatApp.currentAbortController = new AbortController();
+        let providerStep = null;
+
+        try {
+            const result = await window.chatApp.imageGenV2.generateFromChatStream(
+                userPrompt, conversationId, window.chatApp.currentAbortController.signal,
+                {
+                    onStatus: (data) => {
+                        if (data.phase === 'enhance') {
+                            addStep(data.enhanced_prompt ? '✨' : '✨', data.enhanced_prompt ? 'Prompt enhanced' : data.step, data.enhanced_prompt ? 'done' : 'active');
+                        } else if (data.phase === 'select') {
+                            addStep(data.providers ? '📡' : '🔍', data.providers ? `Providers: ${data.providers.join(', ')}` : data.step, data.providers ? 'done' : 'active');
+                        } else {
+                            addStep('⚙️', data.step, 'active');
+                        }
+                    },
+                    onProviderTry: (data) => {
+                        providerStep = addStep('🔄', `Trying ${data.provider} (${data.attempt}/${data.total_providers})...`, 'active');
+                    },
+                    onProviderFail: (data) => {
+                        updateStep(providerStep, '❌', `${data.provider} failed: ${data.error}`, 'fail');
+                        providerStep = null;
+                    },
+                    onProviderSuccess: (data) => {
+                        updateStep(providerStep, '✅', `${data.provider} / ${data.model} — ${Math.round(data.latency_ms)}ms`, 'done');
+                        headerIcon.textContent = '✅';
+                        headerIcon.classList.remove('spinning');
+                    },
+                    onError: (data) => {
+                        addStep('❌', data.error, 'fail');
+                        headerIcon.textContent = '❌';
+                        headerIcon.classList.remove('spinning');
+                    },
+                },
+                imageGenOptions,
+            );
+
+            const formValues = window.chatApp.uiUtils.getFormValues();
+            const timestamp = window.chatApp.uiUtils.formatTimestamp(new Date());
+
+            if (result.success) {
+                let imgSrc = '';
+                let imageId = '';
+                if (result.images?.length > 0 && result.images[0].url) {
+                    imgSrc = result.images[0].url;
+                    imageId = result.images[0].image_id || '';
+                } else if (result.images_url?.length > 0) {
+                    imgSrc = result.images_url[0];
+                }
+
+                const meta = `🎨 **${result.provider}** / ${result.model} | ${Math.round(result.latency_ms)}ms | $${result.cost_usd}`;
+                const enhanced = result.prompt_used ? `\n📝 ${result.prompt_used.substring(0, 150)}` : '';
+                const esc = (v) => String(v || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const promptEsc = esc(result.prompt_used || userPrompt);
+                const imgSrcAttr = esc(imgSrc);
+                const imageIdAttr = esc(imageId);
+                const overlayButtons = `
+                    <div class="igv2-img-overlay">
+                        <button type="button" class="igv2-img-btn" title="Tải ảnh" data-igv2-action="download" data-img-src="${imgSrcAttr}" data-image-id="${imageIdAttr}">⬇</button>
+                        <button type="button" class="igv2-img-btn" title="Thông tin" data-igv2-action="info" data-image-id="${imageIdAttr}">ℹ</button>
+                        ${imageId ? `<button type="button" class="igv2-img-btn igv2-save-btn" title="Lưu & Upload Drive" data-igv2-action="save" data-image-id="${imageIdAttr}">☁</button>` : ''}
+                    </div>`;
+
+                const content = `<div class="igv2-chat-image" data-image-id="${imageIdAttr}" data-prompt="${promptEsc}">${overlayButtons}<img src="${imgSrc}" alt="Generated" data-igv2-open="${imgSrcAttr}"><div class="igv2-chat-meta">${meta}${enhanced}</div></div>`;
+
+                const newMsgDiv = this.addMessage(chatContainer, content, false, formValues.model, formValues.context, timestamp);
+
+                // Carry forward image gen metadata
+                newMsgDiv.dataset.igv2Provider = provider;
+                newMsgDiv.dataset.igv2Prompt = userPrompt;
+                newMsgDiv.dataset.igv2RegenCount = String(regenCount + 1);
+                newMsgDiv.dataset.igv2ConversationId = conversationId;
+                newMsgDiv.dataset.igv2IsImage = 'true';
+
+                // Save version
+                this.addMessageVersion(messageId, userPrompt, content, new Date().toISOString());
+
+                // Make images clickable
+                setTimeout(() => {
+                    if (window.chatApp?.messageRenderer) {
+                        window.chatApp.messageRenderer.makeImagesClickable((img) => window.chatApp.openImagePreview(img));
+                    }
+                }, 100);
+            } else {
+                const errContent = `❌ Không thể tạo ảnh: ${result.error}`;
+                const newMsgDiv = this.addMessage(chatContainer, errContent, false, formValues.model, formValues.context, timestamp);
+                newMsgDiv.dataset.igv2Provider = provider;
+                newMsgDiv.dataset.igv2Prompt = userPrompt;
+                newMsgDiv.dataset.igv2RegenCount = String(regenCount + 1);
+                newMsgDiv.dataset.igv2ConversationId = conversationId;
+                newMsgDiv.dataset.igv2IsImage = 'true';
+
+                this.addMessageVersion(messageId, userPrompt, errContent, new Date().toISOString());
+            }
+
+            // Update version indicator on user message
+            if (prevMessage) {
+                const history = this.getMessageHistory(messageId);
+                prevMessage.dataset.currentVersion = (history.length - 1).toString();
+                this.updateVersionIndicator(prevMessage);
+            }
+
+            // Save session
+            if (window.chatApp) window.chatApp.saveCurrentSession(true);
+        } catch (error) {
+            console.error('[RegenImage] Error:', error);
+            headerIcon.textContent = '❌';
+            headerIcon.classList.remove('spinning');
+            addStep('❌', error.message || 'Unknown error', 'fail');
+        }
+    }
+
     /**
      * Show more options menu
      */

@@ -805,6 +805,16 @@ class ChatBotApp {
                     this.uiUtils.formatTimestamp(new Date())
                 );
 
+                // Store image gen metadata on the message div for regeneration
+                const lastAssistantMsg = elements.chatContainer.querySelector('.message.assistant:last-child');
+                if (lastAssistantMsg) {
+                    lastAssistantMsg.dataset.igv2Provider = providerChoice;  // 'local' or 'api'
+                    lastAssistantMsg.dataset.igv2Prompt = message;           // original user prompt
+                    lastAssistantMsg.dataset.igv2RegenCount = '0';
+                    lastAssistantMsg.dataset.igv2ConversationId = conversationId;
+                    lastAssistantMsg.dataset.igv2IsImage = 'true';
+                }
+
                 // ── 4-Agents Deep Thinking Analysis (when multi-thinking mode) ──
                 if (formValues.thinkingMode === 'multi-thinking' && result.success) {
                     const thinkingSection = this.messageRenderer.createThinkingSection(null, true);
@@ -845,6 +855,15 @@ class ChatBotApp {
                     false, formValues.model, formValues.context,
                     this.uiUtils.formatTimestamp(new Date())
                 );
+                // Store image gen metadata on error message too for retry
+                const lastErrMsg = elements.chatContainer.querySelector('.message.assistant:last-child');
+                if (lastErrMsg) {
+                    lastErrMsg.dataset.igv2Provider = providerChoice;
+                    lastErrMsg.dataset.igv2Prompt = message;
+                    lastErrMsg.dataset.igv2RegenCount = '0';
+                    lastErrMsg.dataset.igv2ConversationId = conversationId;
+                    lastErrMsg.dataset.igv2IsImage = 'true';
+                }
             }
             elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
             await this.saveCurrentSession(true);

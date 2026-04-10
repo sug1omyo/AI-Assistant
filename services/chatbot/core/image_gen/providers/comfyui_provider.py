@@ -33,52 +33,59 @@ MODEL_PROFILES: dict[str, dict] = {
     "AnythingV5Ink_ink.safetensors": {
         "type": "sd15", "style": "anime", "priority": 90,
         "res_portrait": (512, 768), "res_landscape": (768, 512), "res_square": (512, 512),
-        "steps": 25, "cfg": 7.0,
+        "steps": 28, "cfg": 7.5,
         "sampler": "dpmpp_2m", "scheduler": "karras",
         "vae": "kl-f8-anime2.vae.safetensors",
+        "clip_skip": 2,
     },
     "illustrij_v3.safetensors": {
         "type": "sd15", "style": "anime", "priority": 85,
         "res_portrait": (512, 768), "res_landscape": (768, 512), "res_square": (512, 512),
-        "steps": 25, "cfg": 7.0,
+        "steps": 28, "cfg": 7.0,
         "sampler": "dpmpp_2m", "scheduler": "karras",
         "vae": "kl-f8-anime2.vae.safetensors",
+        "clip_skip": 2,
     },
     "abyssorangemix3AOM3_aom3a1b.safetensors": {
         "type": "sd15", "style": "anime", "priority": 80,
         "res_portrait": (512, 768), "res_landscape": (768, 512), "res_square": (512, 512),
-        "steps": 25, "cfg": 7.0,
+        "steps": 28, "cfg": 6.5,
         "sampler": "dpmpp_2m_sde", "scheduler": "karras",
         "vae": "orangemix.vae.pt",
+        "clip_skip": 2,
     },
     "soushiki_v10.safetensors": {
         "type": "sd15", "style": "anime", "priority": 75,
         "res_portrait": (512, 768), "res_landscape": (768, 512), "res_square": (512, 512),
-        "steps": 25, "cfg": 7.0,
+        "steps": 28, "cfg": 7.0,
         "sampler": "dpmpp_2m", "scheduler": "karras",
         "vae": "kl-f8-anime2.vae.safetensors",
+        "clip_skip": 2,
     },
     "anythingelseV4_v45.safetensors": {
         "type": "sd15", "style": "anime", "priority": 70,
         "res_portrait": (512, 768), "res_landscape": (768, 512), "res_square": (512, 512),
-        "steps": 25, "cfg": 7.0,
+        "steps": 28, "cfg": 7.0,
         "sampler": "dpmpp_2m", "scheduler": "karras",
         "vae": "kl-f8-anime2.vae.safetensors",
+        "clip_skip": 2,
     },
     "abyssorangemix2SFW_abyssorangemix2Sfw.safetensors": {
         "type": "sd15", "style": "anime", "priority": 65,
         "res_portrait": (512, 768), "res_landscape": (768, 512), "res_square": (512, 512),
-        "steps": 25, "cfg": 7.0,
+        "steps": 28, "cfg": 6.5,
         "sampler": "dpmpp_2m_sde", "scheduler": "karras",
         "vae": "orangemix.vae.pt",
+        "clip_skip": 2,
     },
     # -- SDXL ---------------------------------------------------------------
     "flatpiececorexl_a1818.safetensors": {
         "type": "sdxl", "style": "anime", "priority": 88,
         "res_portrait": (832, 1216), "res_landscape": (1216, 832), "res_square": (1024, 1024),
-        "steps": 25, "cfg": 6.5,
+        "steps": 30, "cfg": 5.0,
         "sampler": "dpmpp_2m_sde", "scheduler": "karras",
         "vae": None,
+        "clip_skip": 1,
     },
     "realvisxlV50_v50LightningBakedvae.safetensors": {
         "type": "sdxl_lightning", "style": "realistic", "priority": 92,
@@ -86,25 +93,56 @@ MODEL_PROFILES: dict[str, dict] = {
         "steps": 6, "cfg": 1.8,
         "sampler": "euler", "scheduler": "sgm_uniform",
         "vae": None,
+        "clip_skip": 1,
     },
 }
 
 # Quality negative prompts per model type
 NEGATIVE_SD15 = (
-    "worst quality, low quality, normal quality, lowres, blurry, jpeg artifacts, "
-    "bad anatomy, bad hands, missing fingers, extra digit, fewer digits, "
-    "cropped, watermark, username, signature, text, error, "
-    "ugly, deformed, disfigured, mutation, mutated, extra limbs"
+    "(worst quality:1.4), (low quality:1.4), (normal quality:1.2), lowres, "
+    "bad anatomy, bad proportions, bad hands, missing fingers, extra fingers, "
+    "fused fingers, too many fingers, poorly drawn hands, poorly drawn face, "
+    "long neck, missing arms, missing legs, extra arms, extra legs, extra limbs, "
+    "mutated hands, deformed, disfigured, mutation, ugly, blurry, "
+    "jpeg artifacts, cropped, watermark, username, signature, text, error, "
+    "3d, render, cgi"
 )
 
 NEGATIVE_SDXL = (
-    "worst quality, low quality, blurry, jpeg artifacts, watermark, text, "
-    "bad anatomy, bad hands, deformed, ugly, error"
+    "(worst quality:1.4), (low quality:1.4), lowres, blurry, jpeg artifacts, "
+    "bad anatomy, bad proportions, bad hands, missing fingers, extra fingers, "
+    "fused fingers, poorly drawn hands, poorly drawn face, deformed, "
+    "long neck, ugly, watermark, text, error, 3d, render"
 )
 
-# LoRAs that boost detail quality
-DETAIL_LORAS_SD15 = ["add_detail.safetensors", "more_details.safetensors"]
-DETAIL_LORAS_SDXL = ["add-detail-xl.safetensors", "PerfectEyesXL.safetensors"]
+# LoRAs that boost detail quality — ordered by priority (first found is used)
+DETAIL_LORAS_SD15 = [
+    ("add_detail.safetensors", 0.35),
+    ("detail_tweaker_lora.safetensors", 0.4),
+    ("more_details.safetensors", 0.3),
+]
+ANATOMY_LORAS_SD15 = [
+    ("handmix101.safetensors", 0.4),
+    ("body_proportion.safetensors", 0.35),
+]
+EYE_LORAS_SD15 = [
+    ("beautiful_detailed_eyes.safetensors", 0.3),
+    ("eyecolle_cosmos_v100.safetensors", 0.25),
+]
+
+DETAIL_LORAS_SDXL = [
+    ("add-detail-xl.safetensors", 0.35),
+    ("anime_detailer_xl.safetensors", 0.3),
+]
+EYE_LORAS_SDXL = [
+    ("PerfectEyesXL.safetensors", 0.3),
+    ("detailed_eyes_xl.safetensors", 0.25),
+    ("perfect_eyes_xl.safetensors", 0.25),
+]
+STYLE_LORAS_SDXL = [
+    ("anime_nouveau_xl.safetensors", 0.25),
+    ("pvc_style_animagine_xl_4.safetensors", 0.2),
+]
 
 # Keywords for style classification
 _ANIME_KEYWORDS = re.compile(
@@ -155,6 +193,8 @@ def _build_txt2img_workflow(
     vae: str | None = None,
     loras: list[tuple[str, float]] | None = None,
     upscale_to: tuple[int, int] | None = None,
+    clip_skip: int = 1,
+    model_type: str = "sd15",
 ) -> dict:
     nodes: dict = {}
     node_id = 0
@@ -163,6 +203,12 @@ def _build_txt2img_workflow(
         nonlocal node_id
         node_id += 1
         return str(node_id)
+
+    # -- Quality tag prefix for SD1.5 anime models
+    if model_type == "sd15":
+        quality_prefix = "masterpiece, best quality, highly detailed, "
+        if not prompt.lower().startswith(("masterpiece", "best quality")):
+            prompt = quality_prefix + prompt
 
     # 1. Checkpoint loader
     ckpt_id = nid()
@@ -200,7 +246,16 @@ def _build_txt2img_workflow(
             model_src = [lora_id, 0]
             clip_src = [lora_id, 1]
 
-    # 4. CLIP text encode (positive + negative)
+    # 4. CLIP skip (essential for anime SD1.5 models)
+    if clip_skip > 1:
+        clipskip_id = nid()
+        nodes[clipskip_id] = {
+            "class_type": "CLIPSetLastLayer",
+            "inputs": {"stop_at_clip_layer": -clip_skip, "clip": clip_src},
+        }
+        clip_src = [clipskip_id, 0]
+
+    # 5. CLIP text encode (positive + negative)
     pos_id = nid()
     nodes[pos_id] = {
         "class_type": "CLIPTextEncode",
@@ -212,14 +267,14 @@ def _build_txt2img_workflow(
         "inputs": {"text": negative, "clip": clip_src},
     }
 
-    # 5. Empty latent image
+    # 6. Empty latent image
     latent_id = nid()
     nodes[latent_id] = {
         "class_type": "EmptyLatentImage",
         "inputs": {"width": width, "height": height, "batch_size": 1},
     }
 
-    # 6. KSampler
+    # 7. KSampler (first pass)
     sampler_id = nid()
     nodes[sampler_id] = {
         "class_type": "KSampler",
@@ -237,35 +292,55 @@ def _build_txt2img_workflow(
         },
     }
 
-    # 7. VAE decode
-    decode_id = nid()
-    nodes[decode_id] = {
-        "class_type": "VAEDecode",
-        "inputs": {"samples": [sampler_id, 0], "vae": vae_src},
-    }
+    latent_out = [sampler_id, 0]
 
-    img_src = [decode_id, 0]
-
-    # 8. Optional upscale (HiRes fix for SD1.5)
+    # 8. Proper HiRes fix: latent upscale → second KSampler pass
     if upscale_to:
-        up_id = nid()
-        nodes[up_id] = {
-            "class_type": "ImageScale",
+        # Upscale the latent (not the pixel image)
+        latent_up_id = nid()
+        nodes[latent_up_id] = {
+            "class_type": "LatentUpscale",
             "inputs": {
-                "image": img_src,
-                "upscale_method": "lanczos",
+                "samples": latent_out,
+                "upscale_method": "bislerp",
                 "width": upscale_to[0],
                 "height": upscale_to[1],
                 "crop": "disabled",
             },
         }
-        img_src = [up_id, 0]
 
-    # 9. Save
+        # Second KSampler pass at low denoise to refine details
+        hires_sampler_id = nid()
+        hires_steps = max(steps // 2, 12)  # half steps for refinement
+        nodes[hires_sampler_id] = {
+            "class_type": "KSampler",
+            "inputs": {
+                "seed": seed + 1,
+                "steps": hires_steps,
+                "cfg": cfg,
+                "sampler_name": sampler,
+                "scheduler": scheduler,
+                "denoise": 0.55,
+                "model": model_src,
+                "positive": [pos_id, 0],
+                "negative": [neg_id, 0],
+                "latent_image": [latent_up_id, 0],
+            },
+        }
+        latent_out = [hires_sampler_id, 0]
+
+    # 9. VAE decode
+    decode_id = nid()
+    nodes[decode_id] = {
+        "class_type": "VAEDecode",
+        "inputs": {"samples": latent_out, "vae": vae_src},
+    }
+
+    # 10. Save
     save_id = nid()
     nodes[save_id] = {
         "class_type": "SaveImage",
-        "inputs": {"filename_prefix": "api_gen", "images": img_src},
+        "inputs": {"filename_prefix": "api_gen", "images": [decode_id, 0]},
     }
 
     return nodes
@@ -487,17 +562,41 @@ class ComfyUIProvider(BaseImageProvider):
         pool.sort(key=lambda x: x[1]["priority"], reverse=True)
         return pool[0]
 
-    def _resolve_loras(self, model_type: str) -> list[tuple[str, float]]:
+    def _resolve_loras(self, model_type: str, style: str = "anime") -> list[tuple[str, float]]:
+        """Select best available LoRAs per category (detail + anatomy + eyes + style)."""
         if not self._enable_loras or not self._available_loras:
             return []
-        target = DETAIL_LORAS_SDXL if model_type.startswith("sdxl") else DETAIL_LORAS_SD15
-        found = []
-        for lora_name in target:
-            if lora_name in self._available_loras:
-                found.append((lora_name, 0.4))
-                if len(found) >= 1:
-                    break
-        return found
+
+        is_xl = model_type.startswith("sdxl")
+
+        # Pick one LoRA from each category (first available wins)
+        categories: list[list[tuple[str, float]]] = []
+        if is_xl:
+            categories = [DETAIL_LORAS_SDXL, EYE_LORAS_SDXL]
+            if style == "anime":
+                categories.append(STYLE_LORAS_SDXL)
+        else:
+            categories = [DETAIL_LORAS_SD15, ANATOMY_LORAS_SD15, EYE_LORAS_SD15]
+
+        found: list[tuple[str, float]] = []
+        for cat in categories:
+            for lora_name, strength in cat:
+                # Check both plain name and subfolder paths
+                if lora_name in self._available_loras or any(
+                    l.endswith(lora_name) or l.endswith("/" + lora_name) or l.endswith("\\" + lora_name)
+                    for l in self._available_loras
+                ):
+                    # Use the matched name as ComfyUI sees it
+                    matched = lora_name
+                    for l in self._available_loras:
+                        if l == lora_name or l.endswith("/" + lora_name) or l.endswith("\\" + lora_name):
+                            matched = l
+                            break
+                    found.append((matched, strength))
+                    break  # one per category
+
+        # Limit to 3 LoRAs max to avoid VRAM issues
+        return found[:3]
 
     @property
     def is_available(self) -> bool:
@@ -517,7 +616,7 @@ class ComfyUIProvider(BaseImageProvider):
             if vae and self._available_vaes and vae not in self._available_vaes:
                 vae = None
 
-            loras = self._resolve_loras(model_type)
+            loras = self._resolve_loras(model_type, _classify_style(req.prompt, req.style_preset))
             negative = NEGATIVE_SDXL if model_type.startswith("sdxl") else NEGATIVE_SD15
 
             upscale_to = None
@@ -533,9 +632,10 @@ class ComfyUIProvider(BaseImageProvider):
                 f"[ComfyUI] Generating: ckpt={checkpoint}, "
                 f"res={native_w}x{native_h}, steps={profile['steps']}, "
                 f"cfg={profile['cfg']}, sampler={profile['sampler']}, "
+                f"clip_skip={profile.get('clip_skip', 1)}, "
                 f"vae={'ext' if vae else 'built-in'}, "
                 f"loras={[l[0] for l in loras]}, "
-                f"upscale={upscale_to or 'none'}"
+                f"hires={'latent→' + str(upscale_to) if upscale_to else 'none'}"
             )
 
             if req.mode == ImageMode.IMAGE_TO_IMAGE and req.source_image_b64:
@@ -557,6 +657,8 @@ class ComfyUIProvider(BaseImageProvider):
                     sampler=profile["sampler"], scheduler=profile["scheduler"],
                     checkpoint=checkpoint, vae=vae,
                     loras=loras, upscale_to=upscale_to,
+                    clip_skip=profile.get("clip_skip", 1),
+                    model_type=model_type,
                 )
 
             resp = self._http.post("/prompt", json={

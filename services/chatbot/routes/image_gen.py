@@ -168,6 +168,21 @@ def generate_image():
         guidance: float       â€” Guidance/CFG scale (default: 3.5)
         conversation_id: str  â€” For session tracking
     """
+    # -- Quota check --
+    _username = session.get('username', '')
+    _quota_db = None
+    if _username:
+        try:
+            from core.user_auth import check_image_quota
+            from core.extensions import get_db as _get_quota_db
+            _quota_db = _get_quota_db()
+            _allowed, _reason = check_image_quota(_quota_db, _username)
+            if not _allowed:
+                return jsonify({'error': _reason, 'quota_exceeded': True}), 403
+        except Exception as _qe:
+            logger.warning(f'[image_gen] quota check failed: {_qe}')
+    # -----------------------------------------------------------------
+
     data = request.get_json(force=True, silent=True) or {}
     prompt = data.get("prompt", "").strip()
 
@@ -208,6 +223,16 @@ def generate_image():
         }), 500
 
     # Save to storage
+    # -- Increment quota after successful generation --
+    if _username and _quota_db is not None:
+        try:
+            from core.user_auth import increment_image_quota
+            _count = len(result.images_b64) + len(result.images_url)
+            increment_image_quota(_quota_db, _username, max(1, _count))
+        except Exception:
+            pass
+    # -----------------------------------------------------------------
+
     saved_images = []
     for img_b64 in result.images_b64:
         saved = storage.save(
