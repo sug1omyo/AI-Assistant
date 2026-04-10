@@ -1,6 +1,17 @@
 """Query / RAG routes."""
 
 import time
+import uuid
+
+from fastapi import APIRouter, Depends, Header
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from apps.api.dependencies import db_session, embedding_provider, llm_provider
+from apps.api.schemas import QueryRequest, QueryResponse, SourceChunk
+from libs.core.models import RetrievalTrace
+from libs.core.providers.base import EmbeddingProvider, LLMProvider
+from libs.retrieval.generator import generate_answer
+from libs.retrieval.search import SearchFilters, vector_search
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +54,13 @@ router = APIRouter(prefix="/query", tags=["query"])
 @router.post("/", response_model=QueryResponse)
 async def query_rag(
     body: QueryRequest,
+    db: AsyncSession = Depends(db_session),
+    embedder: EmbeddingProvider = Depends(embedding_provider),
+    llm: LLMProvider = Depends(llm_provider),
+    x_tenant_id: str = Header(...),
+) -> QueryResponse:
+    """Ask a question — retrieves relevant chunks and generates an answer."""
+    tenant_id = uuid.UUID(x_tenant_id)
     auth: AuthContext = Depends(auth_context),
     db: AsyncSession = Depends(db_session),
     embedder: EmbeddingProvider = Depends(embedding_provider),

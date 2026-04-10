@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 
 from .providers.base import (
     BaseImageProvider, ImageRequest, ImageResult,
-    ImageMode, ProviderTier,
+    ImageMode, ProviderTier, LoraSpec,
 )
 from .providers import (
     FalProvider, ReplicateProvider, BFLProvider,
@@ -25,6 +25,7 @@ from .providers import (
 from .providers.fal_provider import FAL_COST
 from .providers.replicate_provider import REPLICATE_COST
 from .enhancer import PromptEnhancer, create_enhancer, STYLE_PRESETS
+from .character_detector import CharacterDetector
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +62,12 @@ class ImageGenerationRouter:
     def __init__(self):
         self._providers: dict[str, ProviderConfig] = {}
         self._enhancer: Optional[PromptEnhancer] = None
+        self._character_detector: Optional[CharacterDetector] = None
         self._total_cost: float = 0.0
         self._total_generations: int = 0
         self._init_providers()
         self._init_enhancer()
+        self._init_character_detector()
 
     def _init_providers(self):
         """Initialize all available providers from environment."""
@@ -146,6 +149,15 @@ class ImageGenerationRouter:
         except Exception as e:
             logger.warning(f"[ImageRouter] Enhancer init failed: {e}")
 
+    def _init_character_detector(self):
+        """Initialize character detector from LoRA catalog."""
+        try:
+            from config.model_presets import LORA_CATALOG
+            self._character_detector = CharacterDetector(LORA_CATALOG)
+            logger.info("[ImageRouter] Character detector initialized")
+        except Exception as e:
+            logger.warning(f"[ImageRouter] Character detector init failed: {e}")
+
     # â”€â”€ Public API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def generate(
@@ -167,6 +179,14 @@ class ImageGenerationRouter:
         model_name: Optional[str] = None,
         enhance_prompt: bool = True,
         context: Optional[str] = None,
+        lora_models: Optional[list[dict]] = None,
+        vae_name: Optional[str] = None,
+        checkpoint: Optional[str] = None,
+        preset_id: Optional[str] = None,
+        hires_fix: bool = False,
+        hires_scale: float = 1.5,
+        hires_denoise: float = 0.45,
+        hires_steps: int = 15,
     ) -> ImageResult:
         """
         Generate image(s) with automatic provider selection.
@@ -184,7 +204,86 @@ class ImageGenerationRouter:
             model_name: Force specific model
             enhance_prompt: Whether to use LLM prompt enhancement
             context: Additional context for prompt enhancement
+            lora_models: List of LoRA dicts [{"name": "file.safetensors", "weight": 0.8}]
+            vae_name: Explicit VAE override filename
+            checkpoint: Explicit checkpoint override
+            preset_id: Workflow preset ID (resolves checkpoint + LoRAs + settings)
+            hires_fix: Enable two-pass hi-res fix
+            hires_scale: Upscale factor for hi-res fix
+            hires_denoise: Denoise strength for hi-res fix pass 2
+            hires_steps: Steps for hi-res fix pass 2
         """
+
+        # 0. Resolve workflow preset (applies defaults that can be overridden)
+        resolved_loras: list[LoraSpec] = []
+        resolved_checkpoint = checkpoint
+        resolved_neg = ""
+        if preset_id:
+            resolved_checkpoint, resolved_loras, preset_settings = self._resolve_preset(
+                preset_id, checkpoint, lora_models,
+            )
+            if preset_settings:
+                steps = preset_settings.get("steps", steps)
+                guidance = preset_settings.get("cfg_scale", guidance)
+                width = preset_settings.get("width", width)
+                height = preset_settings.get("height", height)
+                resolved_neg = preset_settings.get("negative_prompt", "")
+                if preset_settings.get("hires_fix"):
+                    hires_fix = True
+                    hires_scale = preset_settings.get("hires_scale", hires_scale)
+                    hires_denoise = preset_settings.get("hires_denoise", hires_denoise)
+                    hires_steps = preset_settings.get("hires_steps", hires_steps)
+        elif lora_models:
+            resolved_loras = [
+                LoraSpec(
+                    name=l.get("name", ""),
+                    weight=float(l.get("weight", 0.8)),
+                    clip_weight=float(l.get("clip_weight", l.get("weight", 0.8))),
+                    trigger_words=l.get("trigger_words", []),
+                )
+                for l in lora_models if l.get("name")
+            ]
+
+        # 0b. Auto-detect characters in prompt → inject LoRAs automatically
+        #     Only when no explicit LoRAs / preset were provided.
+        auto_detected = False
+        if not resolved_loras and not preset_id and self._character_detector:
+            detection = self._character_detector.detect(prompt)
+            if detection.has_characters:
+                auto_detected = True
+                resolved_loras = [
+                    LoraSpec(
+                        name=c.lora_file,
+                        weight=c.weight,
+                        clip_weight=c.weight,
+                        trigger_words=c.trigger_words,
+                    )
+                    for c in detection.characters
+                ]
+                if not resolved_checkpoint and detection.suggested_checkpoint:
+                    resolved_checkpoint = detection.suggested_checkpoint
+                # If a preset exists for the exact character, use its settings
+                if detection.suggested_preset_id and not preset_id:
+                    _, _, preset_settings = self._resolve_preset(
+                        detection.suggested_preset_id, resolved_checkpoint, None,
+                    )
+                    if preset_settings:
+                        steps = preset_settings.get("steps", steps)
+                        guidance = preset_settings.get("cfg_scale", guidance)
+                        width = preset_settings.get("width", width)
+                        height = preset_settings.get("height", height)
+                        resolved_neg = preset_settings.get("negative_prompt", resolved_neg)
+                logger.info(
+                    f"[ImageRouter] Auto-detected characters: "
+                    f"{[c.display_name for c in detection.characters]} → "
+                    f"LoRAs: {[l.name for l in resolved_loras]}"
+                )
+
+        # When LoRAs are specified (explicit or auto-detected), force ComfyUI
+        # (local) since cloud providers don't support custom LoRAs.
+        if resolved_loras and not provider_name:
+            provider_name = "comfyui"
+            quality = QualityMode.FREE
 
         # 1. Determine mode
         img_mode = self._resolve_mode(mode, source_image_b64, mask_b64)
@@ -202,6 +301,7 @@ class ImageGenerationRouter:
         resolved_model = self._resolve_requested_model(model_name)
         req = ImageRequest(
             prompt=enhanced_prompt,
+            negative_prompt=resolved_neg,
             mode=img_mode,
             source_image_b64=source_image_b64,
             mask_b64=mask_b64,
@@ -213,7 +313,21 @@ class ImageGenerationRouter:
             seed=seed,
             style_preset=style,
             num_images=num_images,
-            extra={"model": resolved_model} if resolved_model else {},
+            lora_models=resolved_loras,
+            vae_name=vae_name,
+            checkpoint=resolved_checkpoint,
+            preset_id=preset_id,
+            extra={
+                "model": resolved_model,
+                "hires_fix": hires_fix,
+                "hires_scale": hires_scale,
+                "hires_denoise": hires_denoise,
+                "hires_steps": hires_steps,
+            } if resolved_model or hires_fix else (
+                {"hires_fix": True, "hires_scale": hires_scale,
+                 "hires_denoise": hires_denoise, "hires_steps": hires_steps}
+                if hires_fix else {}
+            ),
         )
 
         # 4. Select provider(s)
@@ -249,6 +363,11 @@ class ImageGenerationRouter:
                     result.metadata["original_prompt"] = prompt
                     result.metadata["enhanced"] = enhance_prompt
                     result.metadata["style"] = style
+                    if auto_detected:
+                        result.metadata["auto_detected_characters"] = [
+                            c.display_name for c in detection.characters
+                        ]
+                        result.metadata["auto_loras"] = [l.name for l in resolved_loras]
                     if resolved_model:
                         result.metadata["requested_model"] = resolved_model
                     return result
@@ -636,3 +755,111 @@ class ImageGenerationRouter:
 
         return candidates
 
+    def _resolve_preset(
+        self,
+        preset_id: str,
+        checkpoint_override: Optional[str],
+        lora_override: Optional[list[dict]],
+    ) -> tuple[Optional[str], list[LoraSpec], dict]:
+        """
+        Resolve a workflow preset into checkpoint, LoRA specs, and settings.
+        User-supplied overrides take priority over preset defaults.
+        """
+        try:
+            from config.model_presets import (
+                get_workflow_preset, resolve_loras_for_preset, get_lora_by_key,
+            )
+        except ImportError:
+            logger.warning("[ImageRouter] model_presets import failed — preset ignored")
+            return checkpoint_override, [], {}
+
+        preset = get_workflow_preset(preset_id)
+        if not preset:
+            safe_preset_id = str(preset_id).replace("\r", "").replace("\n", "")
+            logger.warning("[ImageRouter] Unknown preset: %s", safe_preset_id)
+            return checkpoint_override, [], {}
+
+        # Checkpoint: override > preset
+        ckpt = checkpoint_override or preset.get("checkpoint")
+
+        # LoRAs: override > preset defaults
+        lora_specs: list[LoraSpec] = []
+        if lora_override:
+            for l in lora_override:
+                lora_specs.append(LoraSpec(
+                    name=l.get("name", ""),
+                    weight=float(l.get("weight", 0.8)),
+                    clip_weight=float(l.get("clip_weight", l.get("weight", 0.8))),
+                    trigger_words=l.get("trigger_words", []),
+                ))
+        else:
+            resolved = resolve_loras_for_preset(preset_id)
+            for r in resolved:
+                lora_specs.append(LoraSpec(
+                    name=r["file"],
+                    weight=r["weight"],
+                    clip_weight=r["weight"],
+                    trigger_words=r.get("trigger", []),
+                ))
+
+        # Gather other settings
+        settings = {
+            k: preset[k] for k in (
+                "steps", "cfg_scale", "width", "height",
+                "negative_prompt", "sampler",
+                "hires_fix", "hires_scale", "hires_denoise", "hires_steps",
+            ) if k in preset
+        }
+
+        safe_preset_id = str(preset_id).replace("\r", "").replace("\n", "")
+        safe_ckpt = (
+            str(ckpt).replace("\r", "").replace("\n", "")
+            if ckpt is not None else None
+        )
+        logger.info(
+            "[ImageRouter] Preset '%s': ckpt=%s, loras=%s, settings=%s",
+            safe_preset_id,
+            safe_ckpt,
+            [l.name for l in lora_specs],
+            list(settings.keys()),
+        )
+        return ckpt, lora_specs, settings
+
+    def get_available_loras(self) -> list[str]:
+        """Query ComfyUI for available LoRA files."""
+        comfyui = self._providers.get("comfyui")
+        if comfyui and hasattr(comfyui.provider, "get_loras"):
+            return comfyui.provider.get_loras()
+        return []
+
+    def detect_characters(self, prompt: str) -> dict:
+        """
+        Public API: detect characters in a prompt.
+        Returns dict with detected characters and suggested LoRAs.
+        """
+        if not self._character_detector:
+            return {"characters": [], "detected": False}
+        result = self._character_detector.detect(prompt)
+        return {
+            "detected": result.has_characters,
+            "characters": [
+                {
+                    "key": c.key,
+                    "name": c.display_name,
+                    "lora_file": c.lora_file,
+                    "weight": c.weight,
+                    "trigger_words": c.trigger_words,
+                    "franchise": c.franchise,
+                    "base": c.base,
+                }
+                for c in result.characters
+            ],
+            "suggested_checkpoint": result.suggested_checkpoint,
+            "suggested_preset_id": result.suggested_preset_id,
+        }
+
+    def get_detectable_characters(self) -> list[dict]:
+        """List all characters the detector can recognize."""
+        if not self._character_detector:
+            return []
+        return self._character_detector.get_all_characters()

@@ -213,6 +213,14 @@ def generate_image():
         model_name=data.get("model"),
         enhance_prompt=data.get("enhance", True),
         context=context,
+        lora_models=data.get("loras"),
+        vae_name=data.get("vae"),
+        checkpoint=data.get("checkpoint"),
+        preset_id=data.get("preset_id"),
+        hires_fix=data.get("hires_fix", False),
+        hires_scale=float(data.get("hires_scale", 1.5)),
+        hires_denoise=float(data.get("hires_denoise", 0.45)),
+        hires_steps=int(data.get("hires_steps", 15)),
     )
 
     if not result.success:
@@ -300,6 +308,8 @@ def generate_image():
         "latency_ms": round(result.latency_ms, 1),
         "cost_usd": round(result.cost_usd, 4),
         "style": data.get("style"),
+        "auto_detected_characters": result.metadata.get("auto_detected_characters"),
+        "auto_loras": result.metadata.get("auto_loras"),
     })
 
 
@@ -740,3 +750,99 @@ def _log_cost(gen_type: str, provider: str, model: str, cost_usd: float):
 def _get_cost_summary() -> dict:
     total = sum(c["cost_usd"] for c in _cost_log_v2)
     return {"total_usd": round(total, 4), "count": len(_cost_log_v2), "recent": _cost_log_v2[-10:]}
+
+
+# ── LoRA & workflow preset endpoints ─────────────────────────────────────
+
+@image_gen_bp.route("/api/image-gen/loras", methods=["GET"])
+def list_loras():
+    """
+    List available LoRA models.
+    Returns both the catalog (known presets) and live LoRAs from ComfyUI.
+    """
+    try:
+        from config.model_presets import LORA_CATALOG
+    except ImportError:
+        LORA_CATALOG = {}
+
+    # Live LoRAs from ComfyUI
+    router = _get_router()
+    live_loras = router.get_available_loras()
+
+    catalog = [
+        {"key": k, "file": v["file"], "category": v.get("category", ""),
+         "trigger": v.get("trigger", []), "base": v.get("base", "")}
+        for k, v in LORA_CATALOG.items()
+    ]
+
+    return jsonify({
+        "catalog": catalog,
+        "live": live_loras,
+        "total_catalog": len(catalog),
+        "total_live": len(live_loras),
+    })
+
+
+@image_gen_bp.route("/api/image-gen/workflow-presets", methods=["GET"])
+def list_workflow_presets():
+    """List all workflow presets (checkpoint + LoRA combos)."""
+    try:
+        from config.model_presets import get_all_workflow_presets
+        presets = get_all_workflow_presets()
+    except ImportError:
+        presets = {}
+    return jsonify({"presets": presets})
+
+
+@image_gen_bp.route("/api/image-gen/workflow-presets/<preset_id>", methods=["GET"])
+def get_workflow_preset_detail(preset_id: str):
+    """Get details for a specific workflow preset."""
+    try:
+        from config.model_presets import get_workflow_preset, resolve_loras_for_preset
+        preset = get_workflow_preset(preset_id)
+        if not preset:
+            return jsonify({"error": f"Preset '{preset_id}' not found"}), 404
+        loras = resolve_loras_for_preset(preset_id)
+        return jsonify({"preset": {"id": preset_id, **preset}, "resolved_loras": loras})
+    except ImportError:
+        return jsonify({"error": "Presets not available"}), 500
+
+
+# ── Character detection endpoints ────────────────────────────────────────
+
+@image_gen_bp.route("/api/image-gen/detect-characters", methods=["POST"])
+def detect_characters():
+    """
+    Detect character names in a prompt and return suggested LoRAs.
+    
+    Body (JSON):
+        prompt: str — The text to scan for character names
+    
+    Returns:
+        detected: bool
+        characters: [{key, name, lora_file, weight, trigger_words, franchise, base}]
+        suggested_checkpoint: str | null
+        suggested_preset_id: str | null
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    prompt = data.get("prompt", "").strip()
+    if not prompt:
+        return jsonify({"error": "prompt is required"}), 400
+
+    router = _get_router()
+    result = router.detect_characters(prompt)
+    return jsonify(result)
+
+
+@image_gen_bp.route("/api/image-gen/characters", methods=["GET"])
+def list_characters():
+    """
+    List all characters the system can auto-detect.
+    Returns their aliases, franchise, and LoRA info.
+    """
+    router = _get_router()
+    characters = router.get_detectable_characters()
+    return jsonify({
+        "characters": characters,
+        "total": len(characters),
+    })

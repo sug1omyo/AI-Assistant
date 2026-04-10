@@ -2,6 +2,11 @@
 
 import uuid
 
+from fastapi import APIRouter, Depends, Form, Header, HTTPException, UploadFile
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from apps.api.dependencies import db_session
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +34,8 @@ async def upload_document(
     title: str = Form(...),
     sensitivity_level: str = Form("internal"),
     language: str = Form("en"),
+    db: AsyncSession = Depends(db_session),
+    x_tenant_id: str = Header(...),
     auth: AuthContext = Depends(auth_context),
     db: AsyncSession = Depends(db_session),
 ) -> dict:
@@ -60,6 +67,7 @@ async def upload_document(
     if len(content) == 0:
         raise HTTPException(400, "File is empty")
 
+    tenant_id = uuid.UUID(x_tenant_id)
     tenant_id = auth.tenant_id
 
     # Enforce: non-admins cannot upload restricted docs
@@ -94,6 +102,11 @@ async def upload_document(
 @router.get("/jobs/{job_id}")
 async def get_job_status(
     job_id: str,
+    db: AsyncSession = Depends(db_session),
+    x_tenant_id: str = Header(...),
+) -> dict:
+    """Check the status of an ingestion job."""
+    tenant_id = uuid.UUID(x_tenant_id)
     auth: AuthContext = Depends(auth_context),
     db: AsyncSession = Depends(db_session),
 ) -> dict:
@@ -107,12 +120,15 @@ async def get_job_status(
 
 @router.get("/", response_model=DocumentListResponse)
 async def list_documents(
+    db: AsyncSession = Depends(db_session),
+    x_tenant_id: str = Header(...),
     auth: AuthContext = Depends(auth_context),
     db: AsyncSession = Depends(db_session),
     skip: int = 0,
     limit: int = 20,
 ) -> DocumentListResponse:
     """List all ingested documents for a tenant."""
+    tenant_id = uuid.UUID(x_tenant_id)
     tenant_id = auth.tenant_id
 
     total = await db.scalar(
@@ -144,6 +160,11 @@ async def list_documents(
 @router.delete("/{document_id}", status_code=204)
 async def delete_document(
     document_id: str,
+    db: AsyncSession = Depends(db_session),
+    x_tenant_id: str = Header(...),
+) -> None:
+    """Delete a document and all its versions/chunks (cascade)."""
+    tenant_id = uuid.UUID(x_tenant_id)
     auth: AuthContext = Depends(auth_context),
     db: AsyncSession = Depends(db_session),
 ) -> None:

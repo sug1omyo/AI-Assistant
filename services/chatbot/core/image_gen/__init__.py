@@ -1,4 +1,4 @@
-﻿"""
+"""
 Image Generation Engine â€” Modern multi-provider system.
 
 Architecture:

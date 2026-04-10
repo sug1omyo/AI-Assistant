@@ -4,6 +4,21 @@ Hiển thị real-time stats về API usage
 """
 from flask import Blueprint, jsonify, make_response
 
+# Import utilities
+_config_dir = Path(__file__).parent
+_app_dir = _config_dir.parent
+_root_dir = _app_dir.parent
+for _p in (str(_config_dir), str(_app_dir), str(_root_dir)):
+    if _p not in sys.path:
+        sys.path.append(_p)
+
+try:
+    from config.rate_limiter import get_rate_limit_stats
+    from config.response_cache import get_all_cache_stats
+except ModuleNotFoundError:
+    # Fallback when another `config` package shadows app/config on sys.path.
+    from rate_limiter import get_rate_limit_stats
+    from response_cache import get_all_cache_stats
 # Import utilities (prefer package-relative imports, fallback to stubs)
 try:
     from .rate_limiter import get_rate_limit_stats

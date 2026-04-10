@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from uuid import UUID
 
 from libs.core.models import DocumentChunk
 from libs.core.providers.base import EmbeddingProvider

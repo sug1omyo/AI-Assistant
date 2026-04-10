@@ -16,6 +16,7 @@ import pytest
 from libs.core.models import DocumentChunk, DocumentVersion, VersionStatus
 from libs.embedding.service import EmbeddingService, EmbedResult
 
+
 # ---------------------------------------------------------------------------
 # Fake embedding provider
 # ---------------------------------------------------------------------------
@@ -281,6 +282,10 @@ class TestIndexingServiceUnit:
 
         with patch(
             "libs.embedding.indexer.SqlDocumentChunkRepository"
+        ) as MockChunkRepo, patch(
+            "libs.embedding.indexer.SqlDocumentVersionRepository"
+        ):
+            mock_repo = MockChunkRepo.return_value
         ) as mock_chunk_repo_cls, patch(
             "libs.embedding.indexer.SqlDocumentVersionRepository"
         ):
@@ -309,6 +314,10 @@ class TestIndexingServiceUnit:
 
         with patch(
             "libs.embedding.indexer.SqlDocumentChunkRepository"
+        ) as MockChunkRepo, patch(
+            "libs.embedding.indexer.SqlDocumentVersionRepository"
+        ):
+            mock_repo = MockChunkRepo.return_value
         ) as mock_chunk_repo_cls, patch(
             "libs.embedding.indexer.SqlDocumentVersionRepository"
         ):
@@ -336,6 +345,8 @@ class TestIndexingServiceUnit:
             "libs.embedding.indexer.SqlDocumentChunkRepository"
         ), patch(
             "libs.embedding.indexer.SqlDocumentVersionRepository"
+        ) as MockVerRepo:
+            mock_ver_repo = MockVerRepo.return_value
         ) as mock_ver_repo_cls:
             mock_ver_repo = mock_ver_repo_cls.return_value
             mock_ver_repo.get_by_id = AsyncMock(return_value=None)
@@ -359,6 +370,8 @@ class TestIndexingServiceUnit:
             "libs.embedding.indexer.SqlDocumentChunkRepository"
         ), patch(
             "libs.embedding.indexer.SqlDocumentVersionRepository"
+        ) as MockVerRepo:
+            mock_ver_repo = MockVerRepo.return_value
         ) as mock_ver_repo_cls:
             mock_ver_repo = mock_ver_repo_cls.return_value
             mock_ver_repo.mark_superseded = AsyncMock(return_value=2)
@@ -383,6 +396,10 @@ class TestIndexingServiceUnit:
 
         with patch(
             "libs.embedding.indexer.SqlDocumentChunkRepository"
+        ) as MockChunkRepo, patch(
+            "libs.embedding.indexer.SqlDocumentVersionRepository"
+        ):
+            mock_repo = MockChunkRepo.return_value
         ) as mock_chunk_repo_cls, patch(
             "libs.embedding.indexer.SqlDocumentVersionRepository"
         ):
@@ -417,6 +434,8 @@ class TestIndexingServiceUnit:
             "libs.embedding.indexer.SqlDocumentChunkRepository"
         ), patch(
             "libs.embedding.indexer.SqlDocumentVersionRepository"
+        ) as MockVerRepo:
+            mock_ver_repo = MockVerRepo.return_value
         ) as mock_ver_repo_cls:
             mock_ver_repo = mock_ver_repo_cls.return_value
             mock_ver_repo.mark_superseded = AsyncMock(return_value=0)

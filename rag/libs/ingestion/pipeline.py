@@ -197,6 +197,10 @@ async def process_ingestion_job(
     await db.flush()
 
     try:
+        # ── Stage 1: Fetch / Load ────────────────────────────────
+        job.metadata_ = {**job.metadata_, "current_stage": "fetch"}
+        await db.flush()
+
         collector = SpanCollector() if settings.ragops.tracing_enabled else None
 
         # ── Stage 1: Fetch / Load ────────────────────────────
@@ -209,6 +213,14 @@ async def process_ingestion_job(
         content = response.read()
         response.close()
         response.release_conn()
+
+        logger.info("Stage 1 (fetch): %d bytes from %s", len(content), version.storage_key)
+
+        # ── Stage 2: Parse ───────────────────────────────────────
+        job.metadata_ = {**job.metadata_, "current_stage": "parse"}
+        await db.flush()
+
+        parse_result = parse_document(content, version.filename)
         if collector:
             collector.add_span(
                 "fetch", duration_ms=int((time.perf_counter() - t_stage) * 1000),
@@ -232,6 +244,11 @@ async def process_ingestion_job(
             "Stage 2 (parse): %d elements extracted", len(parse_result.elements)
         )
 
+        # ── Stage 3: Normalize ───────────────────────────────────
+        job.metadata_ = {**job.metadata_, "current_stage": "normalize"}
+        await db.flush()
+
+        parse_result = normalize_parse_result(parse_result)
         # ── Stage 3: Normalize ───────────────────────────────
         job.metadata_ = {**job.metadata_, "current_stage": "normalize"}
         await db.flush()
@@ -284,6 +301,9 @@ async def process_ingestion_job(
         job.metadata_ = {**job.metadata_, "current_stage": "extract_metadata"}
         await db.flush()
 
+        extracted_meta = extract_metadata(parse_result, version.filename)
+        # Merge extracted metadata into version metadata
+        version.metadata_ = {**version.metadata_, **extracted_meta}
         t_stage = time.perf_counter()
         extracted_meta = extract_metadata(parse_result, version.filename)
         # Merge extracted metadata into version metadata
@@ -314,6 +334,12 @@ async def process_ingestion_job(
             length=len(artifact_bytes),
             content_type="application/json",
         )
+        logger.info("Stage 5 (persist): raw text + parsed JSON stored")
+
+        # ── Stage 6: Chunk & Index ───────────────────────────────
+        job.metadata_ = {**job.metadata_, "current_stage": "chunk_index"}
+        await db.flush()
+
         if collector:
             collector.add_span(
                 "persist", duration_ms=int((time.perf_counter() - t_stage) * 1000),

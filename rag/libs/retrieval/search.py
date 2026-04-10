@@ -226,6 +226,7 @@ async def vector_search_from_embedding(
                 version_id=row.version_id,
                 content=row.content,
                 score=score,
+                metadata=row.chunk_metadata or {},
                 metadata=chunk_meta,
                 filename=row.filename,
                 chunk_index=row.chunk_index,
