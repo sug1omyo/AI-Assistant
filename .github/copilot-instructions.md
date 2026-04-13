@@ -1,0 +1,151 @@
+# GitHub Copilot Instructions — AI-Assistant
+
+## Repository identity
+
+Python microservices platform. Four active services: **ChatBot (5000)**, MCP Server (stdio), Stable Diffusion (7861), Edit Image/ComfyUI (8100). The chatbot is the primary development area. Image workflow services are functional and should not be touched for chatbot-only tasks.
+
+## Default focus
+
+Unless a task explicitly targets image generation, stable diffusion, or ComfyUI workflows, stay inside:
+
+- `services/chatbot/`
+- `services/shared_env.py`
+- `services/mcp-server/`
+- `app/config/`
+- `app/src/`
+
+Do **not** edit `ComfyUI/`, `image_pipeline/`, `services/stable-diffusion/`, or `services/edit-image/` for chatbot tasks.
+
+## Entry points
+
+| Service | Port | Entry point |
+|---|---|---|
+| ChatBot (Flask default) | 5000 | `services/chatbot/chatbot_main.py` |
+| ChatBot (all modes) | 5000 | `services/chatbot/run.py` |
+| MCP Server | stdio | `services/mcp-server/server.py` |
+| Stable Diffusion | 7861 | `services/stable-diffusion/` |
+| Edit Image | 8100 | `services/edit-image/` |
+
+Chatbot startup modes (set via env before launching `run.py`):
+- *(none)* → Flask legacy monolith
+- `USE_NEW_STRUCTURE=true` → Flask modular app factory
+- `USE_FASTAPI=true` → FastAPI + uvicorn
+
+## Environment loading contract
+
+**One loader, one call per service.** `services/shared_env.py` → `load_shared_env(__file__)`.
+
+- Loads `app/config/.env_{env}` (env defaults to `dev`) or falls back to `app/config/.env`.
+- Never add a second `load_dotenv` call that overrides shared env values in any service file.
+- `run.py` additionally loads `services/chatbot/.env` without override for chatbot-local keys.
+
+## Chatbot architecture
+
+```
+routes/stream.py        PRIMARY: SSE endpoint POST /chat/stream
+routes/main.py          /, /chat, /clear, /history, /api/generate-title
+routes/image_gen.py     /api/image-gen/* — multi-provider image gen
+routes/admin.py         /admin — admin panel
+routes/user_auth.py     Login/register/quota
+routes/stable_diffusion.py  SD proxy routes
+routes/async_routes.py  /chat/async — async SSE
+routes/qr_payment.py    QR payment routes
+core/chatbot.py         ChatbotAgent v1 — if/elif model routing
+core/chatbot_v2.py      ChatbotAgent v2 — ModelRegistry-based
+core/tools.py           Tool functions: web search, reverse image, SauceNAO
+core/config.py          All API keys and configuration constants
+core/thinking_generator.py  Thinking modes + ThinkTagParser
+core/stream_contract.py SSE complete-event payload builder
+core/agentic/           Multi-thinking pipeline (4-agent council)
+core/image_gen/         Multi-provider image gen router
+config/                 Service-level MongoDB config, model presets, features.json
+database/               Repository pattern DB access, query caching
+src/handlers/           Multimodal handler, advanced image gen handler
+src/utils/              Utility modules (imgbb, SD client, MCP integration)
+src/rag/                RAG subsystem (ingest, embeddings, retrieval)
+fastapi_app/            FastAPI path (USE_FASTAPI=true) — separate from Flask
+app/                    Nested Flask modular app (USE_NEW_STRUCTURE=true)
+```
+
+**Warning — two config layers:** `core/config.py` (API keys from env) vs `config/mongodb_config.py` + `config/mongodb_helpers.py` (MongoDB setup, imported by `chatbot_main.py` via importlib). Do not confuse `services/chatbot/config/` with `app/config/`.
+
+The Flask SSE path (`routes/stream.py`) and the FastAPI path (`fastapi_app/`) are parallel implementations. Do not merge them.
+
+## MCP server
+
+- Transport: `stdio` (FastMCP). Not HTTP. Port 8000 in some older docs is a legacy artifact.
+- Active server: `services/mcp-server/server.py`.
+- Tools: `services/mcp-server/tools/advanced_tools.py`.
+
+## Dependency profiles
+
+- `venv-core` + `app/requirements/profile_core_services.txt` → chatbot, MCP server.
+- `venv-image` + `app/requirements/profile_image_ai_services.txt` → image/video services.
+
+Never install image-ai packages into `venv-core` and vice versa.
+
+## Tests and CI
+
+- Run chatbot tests: `cd services/chatbot && pytest tests/ -v` (activate `venv-core`).
+- CI lint scope: `services/ app/src/` — ComfyUI, private, venv excluded.
+- Workflow files: `.github/workflows/tests.yml`, `ci-cd.yml`, `security-scan.yml`.
+
+## Doc-sync rule
+
+After changing **ports, entry points, runtime commands, or env variable names**, update `README.md` service table and any affected script READMEs. The main `README.md` is authoritative where script docs conflict.
+
+## Known inconsistencies (do not propagate)
+
+- `app/scripts/README.md` lists Stable Diffusion on 7860 and Edit Image on 7861 — both are wrong. Correct ports: SD=7861, Edit Image=8100.
+- `speech2text` (5001) and `text2sql` (5002) are in archived scripts only; these services no longer exist in `services/`.
+- MCP port 8000 in `app/scripts/README.md` is stale; server uses stdio.
+
+## Search tool cascade (do not break)
+
+Web search: SerpAPI (Google/Bing/Baidu) → Google CSE fallback.  
+Reverse image: Google Lens → Google Reverse Image → Yandex.  
+Auto-trigger: activated when query contains real-time keywords (price, weather, news, etc.).
+
+## Working style
+
+For chatbot tasks, trace the real request path before editing:
+1. UI / assets / templates
+2. Flask/FastAPI route entry point
+3. Core router / provider / tool code
+4. Response formatting
+5. Docs / tests / workflows
+
+Prefer minimal, reversible edits. Include verification steps. Note likely impacted workflows.
+
+## Skill system
+
+This repository has 15 skills in `.github/skills/`. **Before starting work, read the matching skill file at `.github/skills/{name}/SKILL.md`.** Skills contain file monitors, checklists, and rules — not just descriptions.
+
+| Task category | Read this skill first |
+|---|---|
+| Routing / streaming | `core-chatbot-routing-audit` |
+| Env / config | `shared-env-contract` |
+| Provider / model | `provider-env-matrix` |
+| Search / reverse image | `search-tool-cascade` |
+| MCP tools | `mcp-tool-authoring` |
+| Thinking modes | `thinking-mode-routing` |
+| Response shapes | `tool-response-contract` |
+| UI wiring | `chat-ui-sync` |
+| Logging / errors | `observability-log-hygiene` |
+| Dependencies | `requirements-profile-selection` |
+| CI / workflows | `workflow-impact-guard` |
+| Startup / health | `service-health-check-audit` |
+| Docs drift | `docs-drift-sync` |
+| Test scope | `test-impact-mapper` |
+| Uncertain | `skills-dispatch-map` |
+
+**Mandatory secondary skills:** After any behavior change, also read `docs-drift-sync` and `test-impact-mapper`. For cross-cutting changes, combine skills in the order listed by `skills-dispatch-map`.
+
+## What Copilot must not do
+
+- Do not hardcode API keys, ports, or file paths. Read from env.
+- Do not touch image pipeline or ComfyUI for chatbot-only tasks.
+- Do not add a `load_dotenv` call that overrides the shared env loader.
+- Do not add HTTP transport to the MCP server.
+- Do not merge the Flask SSE path with the FastAPI path.
+- Do not update only code without updating docs when runtime behavior changes.

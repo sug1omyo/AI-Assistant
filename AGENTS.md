@@ -1,0 +1,291 @@
+# AGENTS.md — AI-Assistant
+
+Repository: https://github.com/SkastVnT/AI-Assistant  
+Language: Python microservices  
+Primary focus: **Core chatbot, tool routing, shared env, MCP integration**
+
+---
+
+## What this repo is
+
+A Python microservices platform with four active services. The chatbot is the primary development area. Image workflow services exist and are functional — do not touch them for chatbot-only tasks.
+
+---
+
+## Service map
+
+| Service | Port | Entry point | venv profile |
+|---|---|---|---|
+| ChatBot | **5000** | `services/chatbot/chatbot_main.py` (Flask default) or `run.py` (all modes) | `venv-core` |
+| MCP Server | **stdio** | `services/mcp-server/server.py` | `venv-core` |
+| Stable Diffusion | **7861** | `services/stable-diffusion/` | `venv-image` |
+| Edit Image (ComfyUI) | **8100** | `services/edit-image/` | `venv-image` |
+
+---
+
+## Startup modes (chatbot only)
+
+| Env flag | Mode |
+|---|---|
+| *(none set)* | Flask legacy monolith — entry via `chatbot_main.py` |
+| `USE_NEW_STRUCTURE=true` | Flask modular app factory — entry via `run.py` |
+| `USE_FASTAPI=true` | FastAPI + uvicorn — entry via `run.py` |
+
+`run.py` is the universal dispatcher. `chatbot_main.py` is the Flask monolith that also works as a direct entry point.
+
+---
+
+## Environment loading — single contract
+
+**Authoritative loader: `services/shared_env.py` → `load_shared_env(__file__)`**
+
+- Resolves `app/config/.env_{env}` where `env` defaults to `"dev"`.
+- Falls back to `app/config/.env`.
+- **Never** duplicate `load_dotenv` calls across service files or hardcode `.env` paths.
+- `run.py` additionally loads `services/chatbot/.env` **without override** for service-local keys (FAL_API_KEY, STEPFUN_API_KEY, etc.) that are not in the shared env.
+- Call `load_shared_env(__file__)` **once**, early, before any module that reads env at import time.
+
+---
+
+## Dependency profiles
+
+| Profile | venv | Requirements |
+|---|---|---|
+| core-services | `venv-core` | `app/requirements/profile_core_services.txt` |
+| image-ai-services | `venv-image` | `app/requirements/profile_image_ai_services.txt` |
+
+Chatbot and MCP work → `venv-core`. Image generation workflows → `venv-image`. Do not mix.
+
+---
+
+## File map
+
+### Safe to edit for chatbot tasks
+
+```
+services/chatbot/
+  chatbot_main.py           Flask entry point (legacy monolith)
+  run.py                    Dispatcher for all startup modes
+  core/
+    config.py               All API keys and config constants (reads env)
+    chatbot.py              ChatbotAgent class (v1, if/elif routing)
+    chatbot_v2.py           ChatbotAgent v2 (ModelRegistry-based)
+    tools.py                Tool functions: web search, reverse image, SauceNAO
+    streaming.py            SSE / streaming helpers
+    stream_contract.py      SSE complete-event payload builder
+    stream_metrics.py       Stream timing and metrics
+    thinking_generator.py   Thinking mode logic + ThinkTagParser
+    base_chat.py            Base chat class (ModelConfig, ChatContext)
+    async_chat.py           AsyncChatbotAgent for async routes
+    extensions.py           Flask extensions (MongoDB, cache, logger)
+    db_helpers.py           Database helpers
+    error_handler.py        Centralized error handling
+    feature_flags.py        Runtime feature flags
+    user_auth.py            User auth logic (passwords, quotas)
+    http_logging.py         HTTP request/response logging
+    private_logger.py       Private activity logger
+    image_storage.py        Image storage helpers
+    google_drive_service.py Google Drive integration
+    rag_settings.py         RAG settings
+    agentic/                Multi-thinking pipeline
+      orchestrator.py       CouncilOrchestrator (4-agent loop)
+      agents/               Planner, Researcher, Critic, Synthesizer
+      contracts.py          AgentRole, RunStatus, CouncilResult
+      blackboard.py         Shared state between agents
+      config.py             Agentic-specific config
+      xai_native/           xAI native research mode
+    image_gen/              Image generation orchestration
+      orchestrator.py       Multi-provider image gen router
+      providers/            fal.ai, BFL, Replicate, StepFun, etc.
+      intent.py             Image request detection
+  routes/
+    stream.py               PRIMARY: POST /chat/stream (SSE)
+    main.py                 /, /chat, /clear, /history, /api/generate-title
+    conversations.py        Conversation CRUD
+    mcp.py                  /api/mcp/* — MCP proxy routes
+    image_gen.py            /api/image-gen/* — multi-provider image gen
+    images.py               /images/* — image storage
+    memory.py               /memory/* — AI memory
+    models.py               Model list and status
+    auth.py                 Auth endpoints
+    stable_diffusion.py     SD proxy routes (sd_bp)
+    admin.py                /admin — admin panel + user management
+    user_auth.py            Login/register/quota endpoints
+    qr_payment.py           QR payment routes (VietQR)
+    async_routes.py         /chat/async — async SSE streaming
+  config/                   Service-level config (NOT core/config.py)
+    mongodb_config.py       MongoDB client setup
+    mongodb_helpers.py      ConversationDB, MessageDB, MemoryDB, FileDB
+    mongodb_schema.py       Schema definitions
+    model_presets.py        SD model presets and categories
+    features.json           Feature flag defaults
+  database/                 Database abstraction layer
+    repositories/           Repository pattern for DB access
+    helpers.py              DB utility functions
+    cache/                  Query caching
+  src/
+    audio_transcription.py  STT via Whisper API
+    ocr_integration.py      OCR via Vision APIs
+    video_generation.py     OpenAI Sora 2 video
+    handlers/               Multimodal + advanced image gen handlers
+    utils/                  Utility modules (imgbb, SD client, MCP, etc.)
+    rag/                    RAG subsystem (ingest, embeddings, service, etc.)
+  fastapi_app/              FastAPI mode (USE_FASTAPI=true only)
+    routers/                chat, stream, conversations, memory, images,
+                            video, rag, council_stream, xai_native_stream
+  app/                      Nested Flask app (modular mode)
+    middleware/             auth.py, rate_limiter.py
+    routes/                 Modular route files (chat, video, memory, etc.)
+    controllers/            Business logic controllers
+    services/               Service layer
+  templates/
+    index.html              Chat UI
+    admin.html              Admin panel
+    login.html              Login page
+  static/
+    css/app.css             Main stylesheet
+    css/image-gen-v2.css    Image gen modal styles
+    js/main.js              Orchestration, event bindings
+    js/mcp.js               MCP sidebar
+    js/language-switcher.js Language toggle
+    js/modules/             api-service, chat-manager, message-renderer,
+                            image-gen-v2, video-gen, memory-manager,
+                            ui-utils, file-handler, export-handler, etc.
+  tests/                    Unit + integration tests
+
+services/shared_env.py      Shared environment loader
+services/mcp-server/
+  server.py                 Active MCP server (FastMCP, stdio)
+  server_enhanced.py        Enhanced variant (additional tools)
+  server_v2_memory.py       V2 with memory tools
+  tools/advanced_tools.py   MCP tool implementations
+
+app/config/                 Centralized config (.env, config.yml, model_config.py,
+                            rate_limiter.py, response_cache.py, firebase_config.py)
+app/src/                    Shared modules (utils, database, cache, security, health)
+```
+
+**Structural warning — two config directories:**
+
+- `services/chatbot/core/config.py` — API keys and constants (read from env). This is the primary config.
+- `services/chatbot/config/` — MongoDB setup, model presets, feature flags. Legacy but actively imported by `chatbot_main.py`.
+
+**Structural warning — nested `app/` inside chatbot:**
+`services/chatbot/app/` is a modular Flask app with its own middleware, routes, controllers, and services layer. It is used in `USE_NEW_STRUCTURE=true` mode. Do not confuse it with the root `app/` directory.
+
+### Do not touch for chatbot-only tasks
+
+```
+ComfyUI/                    External dependency subtree — do not modify
+app/ComfyUI/                ComfyUI within app context
+image_pipeline/             Image pipeline internals
+services/stable-diffusion/  SDXL stack
+services/edit-image/        ComfyUI-based image editing
+venv-core/                  Generated — never edit manually
+venv-image/                 Generated — never edit manually
+private/                    Internal data/submodule
+```
+
+---
+
+## Operational rules
+
+1. **Chatbot-only task** → edit only `services/chatbot/`, `services/shared_env.py`, `services/mcp-server/`, `app/config/`, `app/src/`. Do not touch image service files.
+
+2. **Shared env** is loaded once per process. Do not add a second `load_dotenv` that overrides it. The one allowed exception is `run.py` loading `services/chatbot/.env` without override.
+
+3. **Primary streaming endpoint**: `routes/stream.py` → `POST /chat/stream`. FastAPI equivalent lives in `fastapi_app/`. Do not merge these paths.
+
+4. **Adding a new tool**: update `core/tools.py`, `core/config.py` (for any new API key), tool-routing in `core/chatbot.py` or the relevant route handler, and the search tools table in `README.md`.
+
+5. **Adding a new MCP tool**: update `services/mcp-server/server.py` or `tools/advanced_tools.py`. MCP transport is `stdio` — do not add HTTP listeners.
+
+6. **Run tests**: `cd services/chatbot && pytest tests/ -v` (activate `venv-core` first).
+
+7. **CI lint scope**: `services/ app/src/` — ComfyUI, private, and venv directories are excluded.
+
+8. **After changing ports, entry points, or commands**: update `README.md` service table to match.
+
+9. **Secrets and keys**: always read from env vars. Never hardcode API keys, URLs, or ports.
+
+---
+
+## Known doc inconsistencies
+
+- `app/scripts/README.md` lists Stable Diffusion on 7860 and Edit Image on 7861. Main `README.md` says 7861 and 8100. **Main README is authoritative.**
+- Older scripts reference `speech2text` (5001) and `text2sql` (5002) — these are archived services no longer in `services/`.
+- MCP port 8000 appears in `app/scripts/README.md` but the server uses `stdio`. Do not add HTTP transport.
+
+---
+
+## Skill dispatch
+
+Skills live in `.github/skills/{name}/SKILL.md`. **Read the matching skill file before editing code.** Each skill contains file monitors, checklists, and domain-specific rules.
+
+| Task involves… | Read `.github/skills/{name}/SKILL.md` |
+|---|---|
+| Route, blueprint, SSE, Flask/FastAPI | `core-chatbot-routing-audit` |
+| Env vars, `.env` loading, secrets | `shared-env-contract` |
+| Startup failure, port drift, health | `service-health-check-audit` |
+| Search tool, fallback, auto-trigger | `search-tool-cascade` |
+| MCP tool, resource, prompt | `mcp-tool-authoring` |
+| Thinking mode, agentic pipeline | `thinking-mode-routing` |
+| LLM provider, API key, model registry | `provider-env-matrix` |
+| Return shape, SSE payload, response contract | `tool-response-contract` |
+| UI control, selector, frontend wiring | `chat-ui-sync` |
+| Log statement, error handling, bare except | `observability-log-hygiene` |
+| Python package, profile, venv | `requirements-profile-selection` |
+| CI impact, workflow, security scan | `workflow-impact-guard` |
+| Docs vs runtime drift | `docs-drift-sync` |
+| Which tests to run | `test-impact-mapper` |
+| Uncertain which skill | `skills-dispatch-map` |
+
+**How to use skills:**
+
+1. Match the task to the table above. Most tasks need 1–2 skills.
+2. Read the SKILL.md file **before** writing any code.
+3. Follow the skill's checklist and monitor table — they list which files to verify.
+4. After any behavior change, also read `docs-drift-sync` and `test-impact-mapper`.
+5. For multi-domain tasks, load skills in the order given by `skills-dispatch-map`.
+
+---
+
+## Working style
+
+1. Trace the full path before editing: UI → route → router/provider/tool → response formatting → docs/tests.
+2. Prefer minimal edits that preserve existing architecture.
+3. Treat response shapes and env loading as contracts.
+4. When behavior changes, update docs and identify verification steps.
+5. Always mention risks and affected workflows.
+
+## Standard response shape
+
+After making or proposing a change, summarize using:
+
+- **Goal** — what was requested
+- **Findings** — what was discovered
+- **Files touched** — changed files
+- **Risks** — what could break
+- **Verification** — minimum steps to confirm
+- **Doc updates** — which docs need syncing
+
+---
+
+## Repository truths (most important)
+
+| Fact | Value |
+|---|---|
+| Default chatbot port | 5000 |
+| Primary chat endpoint | `POST /chat/stream` (SSE) |
+| Shared env file | `app/config/.env` or `app/config/.env_dev` |
+| Shared env loader | `services/shared_env.py` — one call per service |
+| Core venv | `venv-core` |
+| Image venv | `venv-image` |
+| Thinking modes | `instant`, `think`, `deep-think`, `multi-thinking` |
+| Web search stack | SerpAPI (primary) → Google CSE (fallback) |
+| Reverse image stack | Google Lens → Google Reverse → Yandex |
+| Image gen providers | fal.ai FLUX + BFL/Black Forest Labs |
+| Video gen provider | OpenAI Sora 2 (requires OPENAI_API_KEY) |
+| MCP transport | stdio (FastMCP) |
+| Flask streaming | SSE via `routes/stream.py` |
+| FastAPI mode | Opt-in via `USE_FASTAPI=true` |

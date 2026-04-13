@@ -1,0 +1,244 @@
+---
+name: core-chatbot-routing-audit
+description: "Audit and safely edit the core chatbot request path — route registration, blueprint wiring, provider routing, tool dispatch, SSE streaming, UI-to-backend wiring, and Flask vs FastAPI parity. Use when: adding or changing a chat route, modifying provider selection, wiring a new tool into the UI, debugging broken streaming, reviewing blueprint registration, or checking Flask/FastAPI endpoint parity."
+---
+
+# Core Chatbot Routing Audit
+
+## When to use this skill
+
+- Adding, removing, or renaming a chatbot route or endpoint.
+- Changing provider routing or model selection logic.
+- Wiring a new tool (search, image, MCP) into the chat pipeline.
+- Debugging broken SSE streaming or missing UI controls.
+- Checking whether a Flask route has a FastAPI equivalent (or vice versa).
+- Reviewing blueprint registration order or URL prefix conflicts.
+- Verifying that a frontend JS call still matches its backend endpoint.
+
+## Mandatory first step
+
+**Trace the real request path before editing anything.** Identify:
+1. Which entry point handles the request (Flask blueprint or FastAPI router).
+2. Which core module processes it (chatbot.py, tools.py, thinking_generator.py).
+3. Which UI element triggers it (template HTML, static JS module).
+4. What response shape the frontend expects (JSON, SSE events, redirect).
+
+---
+
+## File map — likely touch points
+
+### Entry points
+
+| File | Role |
+|---|---|
+| `services/chatbot/chatbot_main.py` | Flask monolith — registers blueprints, starts app |
+| `services/chatbot/run.py` | Dispatcher — selects Flask legacy / Flask modular / FastAPI |
+| `services/chatbot/fastapi_app/__init__.py` | FastAPI app factory — `create_app()`, includes routers |
+
+### Flask blueprints — `services/chatbot/routes/`
+
+| File | Blueprint | Key routes |
+|---|---|---|
+| `routes/stream.py` | `stream_bp` | **`POST /chat/stream`** (SSE primary), `GET /chat/stream/models`, `GET /chat/stream/metrics` |
+| `routes/main.py` | `main_bp` | `GET /`, `POST /chat`, `POST /clear`, `GET /history`, `POST /api/generate-title`, `POST /api/extract-file-text` |
+| `routes/conversations.py` | `conversations_bp` | Conversation CRUD |
+| `routes/mcp.py` | `mcp_bp` | `/api/mcp/*` — enable, disable, list-files, add-folder, fetch-url, ocr-extract |
+| `routes/image_gen.py` | `image_gen_bp` | `/api/image-gen/*` — generate, edit, gallery, providers, styles |
+| `routes/images.py` | `images_bp` | `/images/*` — storage and retrieval |
+| `routes/memory.py` | `memory_bp` | `/memory/*` — AI memory management |
+| `routes/models.py` | `models_bp` | Model list and status |
+| `routes/auth.py` | `auth_bp` | Auth endpoints |
+| `routes/stable_diffusion.py` | `sd_bp` | SD proxy routes |
+| `routes/admin.py` | `admin_bp` | `/admin` — admin panel, user management |
+| `routes/user_auth.py` | `user_auth_bp` | Login, register, quota endpoints |
+| `routes/qr_payment.py` | `qr_bp` | QR payment routes (VietQR) |
+| `routes/async_routes.py` | `async_bp` | `/chat/async` — async SSE streaming |
+
+### FastAPI routers — `services/chatbot/fastapi_app/routers/`
+
+| File | Key routes |
+|---|---|
+| `routers/chat.py` | `POST /chat` — main chat handler, council mode, xAI native |
+| `routers/stream.py` | `POST /chat/stream` — SSE streaming |
+| `routers/conversations.py` | Conversation CRUD |
+| `routers/memory.py` | Memory endpoints |
+| `routers/images.py` | Image storage |
+| `routers/video.py` | Sora 2 video generation |
+| `routers/rag.py` | RAG search |
+| `routers/council_stream.py` | Multi-agent council streaming |
+| `routers/xai_native_stream.py` | xAI native research streaming |
+
+### Core logic — `services/chatbot/core/`
+
+| File | Role |
+|---|---|
+| `core/chatbot.py` | `ChatbotAgent.chat()` — provider dispatch, tool routing |
+| `core/tools.py` | Tool implementations: `google_search_tool`, `serpapi_web_search`, `serpapi_reverse_image`, `serpapi_image_search`, `saucenao_search_tool`, `reverse_image_search` |
+| `core/config.py` | All API keys and constants (read from env) |
+| `core/thinking_generator.py` | Thinking mode logic (instant/think/deep-think/multi-thinking) |
+| `core/streaming.py` | SSE stream helpers and event formatting |
+| `core/extensions.py` | Flask extensions shared across blueprints |
+| `core/error_handler.py` | Centralized error handling |
+
+### UI layer
+
+| File | Role |
+|---|---|
+| `templates/index.html` | Chat UI — fetch calls, EventSource, form submission |
+| `static/js/modules/api-service.js` | Core API client — `sendMessage()`, `sendStreamMessage()` |
+| `static/js/modules/image-gen-v2.js` | Image gen API calls |
+| `static/js/mcp.js` | MCP panel API calls |
+| `static/js/main.js` | Video gen, gallery, title gen, file extract calls |
+
+---
+
+## Provider routing — how model selection works
+
+```
+Client sends { model: "grok" | "openai" | "deepseek" | "qwen" | "gemini" | "<name>-local" }
+  → ChatbotAgent.chat()
+    → model == "grok"     → chat_with_grok()     [GROK_API_KEY, xAI API]
+    → model == "openai"   → chat_with_openai()   [OPENAI_API_KEY]
+    → model == "deepseek" → chat_with_deepseek()  [DEEPSEEK_API_KEY]
+    → model == "qwen"     → chat_with_qwen()     [QWEN_API_KEY]
+    → model == "gemini"   → chat_with_gemini()   [GOOGLE_API_KEY]
+    → model.endswith("-local") → chat_with_local_model()
+```
+
+Default model: `grok` (configured in `core/config.py`).
+
+---
+
+## Tool dispatch — how tools are triggered
+
+### Explicit tool selection (UI button → `tools` parameter)
+
+| UI button | Tool ID | Function |
+|---|---|---|
+| 🔍 Web Search | `google-search` | `google_search_tool()` or `serpapi_web_search()` |
+| Lens | `serpapi-reverse-image` | `serpapi_reverse_image()` → cascade |
+| Bing | `serpapi-bing` | `serpapi_web_search(engine="bing")` |
+| Baidu | `serpapi-baidu` | `serpapi_web_search(engine="baidu")` |
+| Img Search | `serpapi-images` | `serpapi_image_search()` |
+| SauceNAO | `saucenao` | `saucenao_search_tool()` |
+
+### Auto-trigger (realtime keyword detection in `routes/stream.py`)
+
+Vietnamese patterns: giá, tỷ giá, thời tiết, tin tức, hôm nay, bitcoin, vàng, chứng khoán…  
+English patterns: price, weather, news, latest, today, stock, bitcoin, crypto, gold…
+
+When detected → auto-injects `google_search_tool()` results into context.
+
+### Search cascade order (do not break)
+
+- **Web**: SerpAPI Google → SerpAPI Bing/Baidu → Google CSE fallback
+- **Reverse image**: Google Lens → Google Reverse Image → Yandex
+
+---
+
+## SSE streaming contract
+
+`POST /chat/stream` returns `text/event-stream` with these event types:
+
+| Event | Payload | When |
+|---|---|---|
+| `thinking_start` | `{}` | Thinking mode activated |
+| `thinking` | `{ content }` | Each thinking token/step |
+| `thinking_end` | `{}` | Thinking complete |
+| `chunk` | `{ content }` | Response text fragment |
+| `complete` | `{ full_response, metadata }` | Final response + model info |
+| `suggestions` | `{ suggestions: [...] }` | Follow-up suggestions |
+| `error` | `{ error, message }` | Error occurred |
+
+**Frontend contract**: `static/js/modules/api-service.js` → `sendStreamMessage()` parses these events. Changing event names or payload shapes **will break the UI**.
+
+---
+
+## UI-to-backend endpoint map
+
+| JS call site | Method | URL | Backend handler |
+|---|---|---|---|
+| `api-service.js` | POST | `/chat` | `routes/main.py` or `routers/chat.py` |
+| `api-service.js` | POST | `/chat/stream` | `routes/stream.py` or `routers/stream.py` |
+| `api-service.js` | GET | `/chat/stream/models` | `routes/stream.py` |
+| `main.js` | POST | `/api/generate-title` | `routes/main.py` |
+| `main.js` | POST | `/api/extract-file-text` | `routes/main.py` |
+| `main.js` | POST | `/api/video/generate` | `routes/main.py` or `routers/video.py` |
+| `image-gen-v2.js` | POST | `/api/image-gen/generate` | `routes/image_gen.py` |
+| `image-gen-v2.js` | GET | `/api/image-gen/gallery` | `routes/image_gen.py` |
+| `image-gen-v2.js` | GET | `/api/image-gen/providers` | `routes/image_gen.py` |
+| `mcp.js` | POST | `/api/mcp/enable` | `routes/mcp.py` |
+| `mcp.js` | GET | `/api/mcp/list-files` | `routes/mcp.py` |
+| `mcp.js` | POST | `/api/mcp/add-folder` | `routes/mcp.py` |
+| `mcp.js` | POST | `/api/mcp/fetch-url` | `routes/mcp.py` |
+
+---
+
+## Monitor — what can silently break
+
+1. **Blueprint registration order** — a new blueprint with an overlapping prefix can shadow existing routes.
+2. **SSE event names** — renaming events (e.g. `chunk` → `token`) breaks `api-service.js` parsing.
+3. **Response shape changes** — adding/removing keys in `complete` event payload can break UI rendering.
+4. **Tool ID mismatch** — UI sends tool IDs from `index.html`; backend matches by string. A rename on either side silently disables the tool.
+5. **Auto-search keyword lists** — adding/removing patterns in `routes/stream.py` changes when web search fires.
+6. **Provider method signature** — changing params in `chat_with_grok()` etc. can break the dispatch in `ChatbotAgent.chat()`.
+7. **Flask/FastAPI drift** — a route added to Flask but not FastAPI (or vice versa) creates mode-dependent behavior.
+8. **Static file caching** — browser-cached JS may call old endpoints after a rename.
+
+---
+
+## Safe to touch
+
+- `services/chatbot/core/` — chatbot logic, tools, config, streaming, thinking.
+- `services/chatbot/routes/` — Flask blueprints.
+- `services/chatbot/fastapi_app/routers/` — FastAPI equivalents.
+- `services/chatbot/templates/` — Chat UI HTML.
+- `services/chatbot/static/js/` — Frontend JS modules.
+- `services/chatbot/src/` — STT, OCR, video gen, RAG helpers.
+- `services/chatbot/tests/` — Unit tests.
+
+## Do not touch unless the task explicitly requires it
+
+- `services/stable-diffusion/` — SDXL stack.
+- `services/edit-image/` — ComfyUI-based editing.
+- `ComfyUI/` and `app/ComfyUI/` — External dependency.
+- `image_pipeline/` — Image pipeline internals.
+- `services/shared_env.py` — Only if env loading logic needs changing.
+- `app/config/.env*` — Only to add new variable placeholders.
+
+---
+
+## Required output after each change
+
+When using this skill, structure your response with:
+
+1. **Route impact** — Which endpoints changed? New, modified, or removed?
+2. **UI impact** — Does any JS call site need updating? Will the response shape change?
+3. **Provider impact** — Does this affect model routing or tool dispatch?
+4. **Flask/FastAPI parity** — If you changed a Flask route, does the FastAPI equivalent need the same change?
+5. **Verification steps** — How to confirm the change works.
+
+---
+
+## Pre-patch checklist
+
+Before making changes:
+
+- [ ] Identified the exact entry point (Flask blueprint or FastAPI router).
+- [ ] Traced the request path from UI → route → core → response.
+- [ ] Checked if the endpoint is called from `api-service.js`, `main.js`, `mcp.js`, `image-gen-v2.js`, or `index.html`.
+- [ ] Confirmed the current SSE event names and response shapes used by the frontend.
+- [ ] Checked for auto-search trigger patterns that may be affected.
+
+## Post-patch checklist
+
+After making changes:
+
+- [ ] `pytest services/chatbot/tests/ -v` passes.
+- [ ] `/chat/stream` still returns valid SSE events with correct event names.
+- [ ] All JS fetch calls in `static/js/` and `templates/` still match backend route paths.
+- [ ] Tool IDs in `index.html` still match what `core/tools.py` and `routes/stream.py` expect.
+- [ ] If a Flask route changed, the FastAPI equivalent was reviewed (update or document the gap).
+- [ ] If a new route was added, blueprint registration in `chatbot_main.py` is confirmed.
+- [ ] If a response shape changed, `api-service.js` event parsing was updated.
+- [ ] No image-pipeline or ComfyUI files were modified for a chatbot-only change.
