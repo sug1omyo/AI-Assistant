@@ -37,6 +37,7 @@ from fastapi_app.routers import (
     images,
     video,
     rag,
+    skills,
 )
 
 logger = logging.getLogger("chatbot.fastapi")
@@ -104,6 +105,7 @@ def create_app() -> FastAPI:
     app.include_router(images.router, tags=["Images"])
     app.include_router(video.router, prefix="/api/video", tags=["Video Generation"])
     app.include_router(rag.router, prefix="/api/rag", tags=["RAG"])
+    app.include_router(skills.router, tags=["Skills"])
 
     # --- Root health check ---
     @app.get("/health")

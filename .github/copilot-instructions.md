@@ -50,6 +50,7 @@ routes/user_auth.py     Login/register/quota
 routes/stable_diffusion.py  SD proxy routes
 routes/async_routes.py  /chat/async — async SSE
 routes/qr_payment.py    QR payment routes
+routes/skills.py        /api/skills/* — runtime skill CRUD + session activation
 core/chatbot.py         ChatbotAgent v1 — if/elif model routing
 core/chatbot_v2.py      ChatbotAgent v2 — ModelRegistry-based
 core/tools.py           Tool functions: web search, reverse image, SauceNAO

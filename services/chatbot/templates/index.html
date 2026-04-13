@@ -664,6 +664,28 @@ try {
                     </div>
                     <input type="hidden" id="thinkingModeValue" value="instant">
                 </div>
+
+                <!-- Skill selector -->
+                <div id="skillSelectorContainer" style="position: relative;">
+                    <button class="topbar__btn" id="skillSelectorBtn" title="Skill" style="width: auto; gap: 4px; padding: 6px 10px; display: flex; font-size: 14px;">
+                        <span id="skillSelectorIcon"><i data-lucide="book-open" class="lucide"></i></span>
+                        <span id="skillSelectorLabel" style="font-size: 13px; font-weight: 500;">Skill</span>
+                    </button>
+                    <div id="skillSelectorDropdown" class="model-dropdown hidden" style="right: 0; left: auto; min-width: 280px; top: calc(100% + 4px);">
+                        <div class="model-dropdown__group">
+                            <div class="model-dropdown__group-label">Skills</div>
+                            <div class="skill-option model-dropdown__item active" id="skillNoneOption" data-skill-id="">
+                                <span class="model-dropdown__item-icon"><i data-lucide="circle-off" class="lucide"></i></span>
+                                <div class="model-dropdown__item-info">
+                                    <div class="model-dropdown__item-name">None</div>
+                                    <div class="model-dropdown__item-desc">No skill — default behavior</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="skillListContainer"></div>
+                    </div>
+                    <input type="hidden" id="activeSkillId" value="">
+                </div>
             </div>
 
             <div class="topbar__right">
@@ -750,6 +772,8 @@ try {
         <!-- Input Area -->
         <div class="input-area">
             <div class="input-area__wrapper">
+                <!-- Active skill badge -->
+                <div class="active-skill-badge" id="activeSkillBadge" style="display: none;"></div>
                 <!-- Active tools display -->
                 <div class="active-tools" id="activeToolsDisplay"></div>
 
@@ -1931,6 +1955,23 @@ try {
     }
 
     // ════════════════════════════════════════════════════════════
+    // SKILL SELECTOR
+    // ════════════════════════════════════════════════════════════
+    let skillManager = null;
+
+    async function initSkillSelector() {
+        try {
+            const { SkillManager } = await import("{{ url_for('static', filename='js/modules/skill-manager.js') }}");
+            skillManager = new SkillManager();
+            await skillManager.init();
+            window.skillManager = skillManager;
+            window.getActiveSkillId = () => skillManager.getActiveSkillId();
+        } catch (err) {
+            console.warn('[SkillSelector] Init failed:', err.message);
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════
     // BRANCH CONVERSATION
     // ════════════════════════════════════════════════════════════
     function createBranchConversation() {
@@ -2070,6 +2111,7 @@ try {
     document.addEventListener('DOMContentLoaded', () => {
         initThinkingMode();
         initToolsMenu();
+        initSkillSelector();
         selectStyle('anime_xl');
 
         // Welcome suggestions

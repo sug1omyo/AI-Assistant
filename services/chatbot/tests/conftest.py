@@ -62,3 +62,28 @@ def sample_image_params():
         'height': 512,
         'sampler': 'Euler a'
     }
+
+
+@pytest.fixture(autouse=True)
+def _reset_skill_singletons():
+    """Reset skill system singletons between tests to prevent state leakage."""
+    import core.skills.registry as _reg
+    import core.skills.router as _rtr
+    import core.skills.session as _ses
+
+    # Save original state
+    old_registry = _reg._registry
+    old_router = _rtr._router
+    old_store = _ses._store
+
+    # Reset to None so each test gets a fresh singleton (or the test builds its own)
+    _reg._registry = None
+    _rtr._router = None
+    _ses._store = None
+
+    yield
+
+    # Restore original state (in case a test relies on process-level singletons)
+    _reg._registry = old_registry
+    _rtr._router = old_router
+    _ses._store = old_store

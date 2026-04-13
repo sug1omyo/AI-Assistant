@@ -2013,6 +2013,55 @@ body.light-mode .message__content pre {
 
 .active-tool-badge button:hover { opacity: 1; }
 
+/* ── Active skill badge (input area) ──────────────────────── */
+.active-skill-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--warning, #f59e0b);
+  background: rgba(245, 158, 11, 0.08);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.15);
+}
+
+.active-skill-badge:empty { display: none; }
+
+.skill-badge__clear {
+  background: none;
+  border: none;
+  color: var(--warning, #f59e0b);
+  cursor: pointer;
+  font-size: 14px;
+  opacity: 0.6;
+  margin-left: 2px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.skill-badge__clear:hover { opacity: 1; }
+
+/* Auto-routed skill badge variant */
+.active-skill-badge.auto-routed {
+  color: var(--info, #6366f1);
+  background: rgba(99, 102, 241, 0.08);
+  border-bottom-color: rgba(99, 102, 241, 0.15);
+}
+
+.active-skill-badge.auto-routed .skill-badge__clear {
+  color: var(--info, #6366f1);
+}
+
+/* ── Skill selector (topbar) ──────────────────────────────── */
+#skillSelectorBtn.skill-active {
+  color: var(--warning, #f59e0b);
+}
+
+#skillSelectorBtn.skill-active #skillSelectorLabel {
+  color: var(--warning, #f59e0b);
+}
+
 /* ── Context / Mode selector ───────────────────────────────── */
 .context-selector {
   display: flex;
@@ -2735,6 +2784,12 @@ body.light-mode .message__content pre {
   }
   #thinkingModeLabel {
     font-size: 12px !important;
+  }
+  #skillSelectorLabel {
+    display: none;
+  }
+  #skillSelectorBtn {
+    padding: 6px 8px !important;
   }
 
   /* Message actions always visible on mobile (no hover on touch) */

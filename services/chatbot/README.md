@@ -134,6 +134,16 @@ Advanced multi-model intelligent chatbot with **Multi-Provider Image Generation 
 - **Inline Code**: Variables and functions with \`backticks\`
 - **All Modes Supported**: Works in Casual, Programming, Lifestyle, Psychological modes
 
+### 🎯 Runtime Skill System (NEW! ⭐)
+
+- **11 Built-in Skills**: coding-assistant, research-web, realtime-search, creative-writer, counselor, prompt-engineer, mcp-file-helper, repo-analyzer, research-analyst, shopping-advisor, code-expert
+- **Auto-Routing**: AI automatically detects the best skill from your message keywords and score threshold
+- **Explicit Selection**: Pick a skill from the topbar dropdown — overrides auto-routing
+- **Session Persistence**: Activated skills persist for the session until cleared
+- **Skill Overrides**: Each skill can set model, thinking mode, system prompt, tool preferences, and context window
+- **SSE Metadata**: The `metadata` SSE event includes `skill_id`, `skill_source` (explicit/session/auto/none), `auto_score`, and `auto_keywords`
+- **REST API**: Full CRUD at `/api/skills/*` — list, get, activate, deactivate, clear
+
 </details>
 
 <details>
@@ -431,6 +441,127 @@ DEBUG=0
 1. Click "📥 Tải chat" button
 2. PDF includes messages, images, and metadata
 3. Saved automatically to downloads
+
+## 🎯 Runtime Skill System
+
+Skills are pre-configured personas that override model selection, system prompts, thinking modes, tool preferences, and context window for each chat request. The system ships with 11 built-in skills defined as YAML files and supports runtime registration via the API.
+
+### Architecture
+
+```
+resolve_skill()          Precedence: explicit > session > auto-route > none
+  ├── explicit           Frontend sends skill_id in the request body
+  ├── session            SkillSessionStore keeps the last-activated skill per session
+  └── auto-route         SkillRouter scores the message against keyword triggers
+        ↓
+apply_skill_overrides()  Merges the resolved skill into the request context
+  → model, thinking_mode, system_prompt, tools, context_window, tags
+```
+
+**Core modules** (`core/skills/`):
+
+| Module | Responsibility |
+|---|---|
+| `registry.py` | `SkillRegistry` — singleton store for all registered skills |
+| `router.py` | `SkillRouter` — keyword scoring, `RouteMatch`, threshold gate |
+| `resolver.py` | `resolve_skill()` — precedence chain, metadata (`skill_source`) |
+| `applicator.py` | `apply_skill_overrides()` — merges skill config into request |
+| `session.py` | `SkillSessionStore` — thread-safe in-memory session→skill map |
+| `__init__.py` | Public API re-exports |
+
+### Built-in Skills
+
+| Skill ID | Priority | Trigger Keywords (sample) |
+|---|---|---|
+| `coding-assistant` | 10 | code, debug, function, bug, refactor |
+| `code-expert` | 11 | architecture, design pattern, algorithm |
+| `research-web` | 8 | search, find, look up, research |
+| `realtime-search` | 12 | today, weather, news, price, latest |
+| `creative-writer` | 7 | write, story, poem, creative, essay |
+| `counselor` | 6 | stress, anxiety, feeling, advice |
+| `prompt-engineer` | 9 | prompt, system prompt, instruction |
+| `mcp-file-helper` | 8 | file, folder, read file, MCP |
+| `repo-analyzer` | 9 | repository, codebase, project structure |
+| `research-analyst` | 10 | analyze, compare, evaluate, report |
+| `shopping-advisor` | 7 | buy, price, recommend, compare products |
+
+Skills are loaded from `core/skills/builtin/*.yaml` on first access.
+
+### Auto-Routing
+
+When no explicit skill is provided and no session skill is active, the router scores the user message against all enabled skills:
+
+- **Minimum message length**: 3 words (shorter messages skip auto-routing)
+- **Score threshold**: 1.05 (sum of keyword match weights must exceed this)
+- **Keyword matching**: Case-insensitive substring match against the message
+- **Tie-breaking**: Highest priority skill wins when scores are equal
+
+The auto-routed skill is reported in SSE metadata as `skill_source: "auto"` with `auto_score` and `auto_keywords`.
+
+### Resolution Priority
+
+```
+1. Explicit  — request body contains "skill": "coding-assistant"
+2. Session   — user previously activated a skill via /api/skills/activate
+3. Auto-route — router matched keywords above threshold
+4. None      — no skill applied, default behavior
+```
+
+Each level is skipped if the skill is disabled or no longer registered (stale session binding).
+
+### API Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/skills` | List all registered skills (optional `?tag=X` filter) |
+| `GET` | `/api/skills/<id>` | Get a single skill definition |
+| `POST` | `/api/skills/activate` | Activate a skill for the session `{"skill_id": "..."}` |
+| `POST` | `/api/skills/deactivate` | Deactivate the session skill |
+| `GET` | `/api/skills/active` | Get the currently active session skill |
+
+### SSE Metadata
+
+The `POST /chat/stream` endpoint emits a `metadata` SSE event containing:
+
+```json
+{
+  "skill_id": "coding-assistant",
+  "skill_source": "auto",
+  "auto_score": 2.1,
+  "auto_keywords": ["code", "debug"]
+}
+```
+
+`skill_source` values: `"explicit"`, `"session"`, `"auto"`, `"none"`.
+
+### YAML Skill Schema
+
+```yaml
+id: my-custom-skill
+name: My Custom Skill
+description: What this skill does
+enabled: true
+priority: 8
+tags: [coding, tools]
+trigger_keywords:
+  - keyword: "example"
+    weight: 1.0
+overrides:
+  model: "gpt-4o"               # optional — override model
+  thinking_mode: "think"         # optional — instant/think/deep-think
+  context_window: 8192           # optional — max context tokens
+  system_prompt: "You are..."    # optional — prepended to system prompt
+  blocked_tools: ["web_search"]  # optional — tools to disable
+  preferred_tools: ["mcp"]       # optional — tools to prefer
+```
+
+### Known Limitations
+
+1. **Keyword substring matching**: "code" matches "unicode", "api" matches "capital". A word-boundary approach would fix this but introduces its own edge cases with non-Latin scripts.
+2. **No session persistence**: Session skill bindings are in-memory and lost on server restart. The frontend re-sends the skill on each request, so this is acceptable for the current UI flow.
+3. **Unbounded session store**: No TTL or eviction — long-running servers with many unique sessions will accumulate entries. Acceptable for single-user or low-traffic deployments.
+4. **Flask/FastAPI tag filter parity**: Flask uses `?tag=a&tag=b`, FastAPI uses `?tag=a,b`. Both work but clients must know which backend they target.
+5. **No custom skill upload**: Skills can only be registered via the Python API or YAML files on disk — there is no REST endpoint to upload new YAML definitions at runtime.
 
 ## 🐛 Troubleshooting
 

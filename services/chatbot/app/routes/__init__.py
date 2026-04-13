@@ -63,6 +63,7 @@ def _register_original_blueprints(app: Flask) -> None:
         ('routes.async_routes', 'async_bp', None),
         ('routes.mcp', 'mcp_bp', '/api/mcp'),
         ('routes.qr_payment', 'qr_bp', None),
+        ('routes.skills', 'skills_bp', None),
     ]
     
     for module_name, bp_attr, url_prefix in blueprint_imports:

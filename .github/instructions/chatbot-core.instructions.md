@@ -59,6 +59,7 @@ You are working inside the core chatbot layer. The image pipeline, Stable Diffus
 | `routes/admin.py` | `/admin` — admin panel, user management |
 | `routes/user_auth.py` | Login, register, quota endpoints |
 | `routes/qr_payment.py` | QR payment routes (VietQR) |
+| `routes/skills.py` | `/api/skills/*` — runtime skill management |
 | `routes/async_routes.py` | `/chat/async` — async SSE streaming |
 
 ### Other key directories

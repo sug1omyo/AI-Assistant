@@ -21,6 +21,8 @@ from core.extensions import logger
 from core.streaming import StreamEvent
 from core.base_chat import ModelConfig, ModelProvider, ChatContext
 from core.async_chat import AsyncChatbotAgent
+from core.skills.resolver import resolve_skill
+from core.skills.applicator import apply_skill_overrides
 
 # Check MCP availability
 MCP_AVAILABLE = False
@@ -187,6 +189,26 @@ def chat_async():
         if 'session_id' not in session:
             session['session_id'] = str(uuid.uuid4())
         
+        # ── Runtime Skill Resolution + Application ────────────────────
+        skill_overrides = resolve_skill(
+            message=message,
+            explicit_skill_id=data.get('skill'),
+            session_id=session.get('session_id'),
+            auto_route=True,
+        )
+        applied = apply_skill_overrides(
+            data=data or {},
+            skill_overrides=skill_overrides,
+            language=language,
+        )
+        model = applied.model
+        context = applied.context
+        deep_thinking = applied.deep_thinking
+        custom_prompt = applied.custom_prompt
+
+        if applied.was_applied:
+            logger.info(f"[Async] Skill applied: {applied.skill_id}")
+
         # MCP Integration
         if MCP_AVAILABLE:
             try:
@@ -194,6 +216,10 @@ def chat_async():
                 if mcp_client and mcp_client.enabled:
                     mcp_selected_files = data.get('mcp_selected_files', [])
                     message = inject_code_context(message, mcp_client, mcp_selected_files)
+                elif applied.prefer_mcp and mcp_client:
+                    mcp_selected_files = data.get('mcp_selected_files', [])
+                    message = inject_code_context(message, mcp_client, mcp_selected_files)
+                    logger.info(f"[MCP] Skill '{applied.skill_id}' triggered MCP context injection")
             except Exception as e:
                 logger.warning(f"[MCP] Error injecting context: {e}")
         
@@ -272,6 +298,26 @@ def chat_async_stream():
         if 'session_id' not in session:
             session['session_id'] = str(uuid.uuid4())
         
+        # ── Runtime Skill Resolution + Application ────────────────────
+        skill_overrides = resolve_skill(
+            message=message,
+            explicit_skill_id=data.get('skill'),
+            session_id=session.get('session_id'),
+            auto_route=True,
+        )
+        applied = apply_skill_overrides(
+            data=data or {},
+            skill_overrides=skill_overrides,
+            language=language,
+        )
+        model = applied.model
+        context = applied.context
+        deep_thinking = applied.deep_thinking
+        custom_prompt = applied.custom_prompt
+
+        if applied.was_applied:
+            logger.info(f"[AsyncSSE] Skill applied: {applied.skill_id}")
+
         # MCP Integration
         if MCP_AVAILABLE:
             try:
@@ -279,6 +325,10 @@ def chat_async_stream():
                 if mcp_client and mcp_client.enabled:
                     mcp_selected_files = data.get('mcp_selected_files', [])
                     message = inject_code_context(message, mcp_client, mcp_selected_files)
+                elif applied.prefer_mcp and mcp_client:
+                    mcp_selected_files = data.get('mcp_selected_files', [])
+                    message = inject_code_context(message, mcp_client, mcp_selected_files)
+                    logger.info(f"[MCP] Skill '{applied.skill_id}' triggered MCP context injection")
             except Exception as e:
                 logger.warning(f"[MCP] Error injecting context: {e}")
         

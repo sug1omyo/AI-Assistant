@@ -34,6 +34,8 @@ from core.thinking_generator import (
     ThinkTagParser, detect_category,
     generate_thinking_summary, REASONING_PREFIX
 )
+from core.skills.resolver import resolve_skill
+from core.skills.applicator import apply_skill_overrides
 
 # Check MCP availability
 MCP_AVAILABLE = False
@@ -245,24 +247,33 @@ def chat_stream():
             data = request.args.to_dict()
         
         message = data.get('message', '')
-        model = data.get('model', 'grok')
-        context = data.get('context', 'casual')
-        deep_thinking = str(data.get('deep_thinking', 'false')).lower() == 'true'
         language = data.get('language', 'vi')
-        custom_prompt = data.get('custom_prompt', '')
         memory_ids = data.get('memory_ids', [])
         mcp_selected_files = data.get('mcp_selected_files', [])
         history = data.get('history')
 
-        # Map thinking_mode (from frontend) to backend behavior
-        thinking_mode = data.get('thinking_mode', 'auto')
-        if thinking_mode in ('thinking', 'deep', 'multi-thinking'):
-            deep_thinking = True
-        elif thinking_mode in ('instant', 'auto'):
-            # auto: parse <think> tags if model produces them, but don't force
-            # instant: no thinking at all
-            deep_thinking = False
-        
+        # ── Runtime Skill Resolution + Application ────────────────────
+        skill_overrides = resolve_skill(
+            message=message,
+            explicit_skill_id=data.get('skill'),
+            session_id=session.get('session_id'),
+            auto_route=str(data.get('skill_auto_route', 'true')).lower() != 'false',
+        )
+        applied = apply_skill_overrides(
+            data=data,
+            skill_overrides=skill_overrides,
+            language=language,
+        )
+        model = applied.model
+        context = applied.context
+        thinking_mode = applied.thinking_mode
+        deep_thinking = applied.deep_thinking
+        custom_prompt = applied.custom_prompt
+        tools = applied.tools
+
+        if applied.was_applied:
+            logger.info(f"[SSE:{request_id}] Skill applied: {applied.skill_id}")
+
         # Extract images for vision models (base64 data URLs from frontend)
         images = data.get('images', [])
         if images and not isinstance(images, list):
@@ -299,6 +310,10 @@ def chat_stream():
                 mcp_client = get_mcp_client()
                 if mcp_client and mcp_client.enabled:
                     message = inject_code_context(message, mcp_client, mcp_selected_files)
+                elif applied.prefer_mcp and mcp_client:
+                    # Skill prefers MCP context — inject even without user toggle
+                    message = inject_code_context(message, mcp_client, mcp_selected_files)
+                    logger.info(f"[MCP] Skill '{applied.skill_id}' triggered MCP context injection")
             except Exception as e:
                 logger.warning(f"[MCP] Error injecting context: {e}")
         
@@ -318,12 +333,7 @@ def chat_stream():
                         logger.error(f"Error loading memory {mem_id}: {e}")
         
         # ── Tool execution (auto web search) ──────────────────────────
-        tools = data.get('tools', [])
-        if isinstance(tools, str):
-            try:
-                tools = json.loads(tools)
-            except Exception:
-                tools = []
+
         _search_performed = False
 
         if _needs_web_search(data.get('message', message), tools):
@@ -466,17 +476,24 @@ def chat_stream():
                     ).format()
                 
                 # Send metadata
-                yield _emit("metadata", {
+                metadata_payload = {
                     "model": model,
                     "context": context,
                     "deep_thinking": deep_thinking,
                     "thinking_mode": thinking_mode,
+                    "skill": applied.skill_id,
+                    "skill_name": applied.skill_name,
+                    "skill_source": skill_overrides.source,
                     "stream_backend": stream_backend,
                     "stream_contract_version": stream_contract_version,
                     "web_search": _search_performed,
                     "streaming": True,
                     "timestamp": datetime.now().isoformat()
-                })
+                }
+                if skill_overrides.source == "auto":
+                    metadata_payload["skill_auto_score"] = skill_overrides.auto_route_score
+                    metadata_payload["skill_auto_keywords"] = skill_overrides.auto_route_keywords
+                yield _emit("metadata", metadata_payload)
                 
                 # ── Thinking Phase ──
                 # Real AI reasoning via <think> tags or native reasoning_content
@@ -822,3 +839,26 @@ def list_streaming_models():
 def stream_metrics():
     """Return in-memory stream telemetry snapshot."""
     return get_stream_metrics_snapshot()
+
+
+@stream_bp.route('/chat/stream/skills', methods=['GET'])
+def list_skills():
+    """Legacy alias — redirects to /api/skills. Kept for backward compat."""
+    from core.skills.registry import get_skill_registry
+
+    registry = get_skill_registry()
+    skills = []
+    for s in registry.list_ui_visible():
+        skills.append({
+            'id': s.id,
+            'name': s.name,
+            'description': s.description,
+            'default_model': s.default_model,
+            'default_thinking_mode': s.default_thinking_mode,
+            'default_context': s.default_context,
+            'preferred_tools': s.preferred_tools,
+            'blocked_tools': s.blocked_tools,
+            'tags': s.tags,
+            'enabled': s.enabled,
+        })
+    return {'skills': skills}

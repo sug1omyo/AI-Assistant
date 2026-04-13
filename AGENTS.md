@@ -98,6 +98,13 @@ services/chatbot/
       orchestrator.py       Multi-provider image gen router
       providers/            fal.ai, BFL, Replicate, StepFun, etc.
       intent.py             Image request detection
+    skills/                 Runtime skill system
+      registry.py           SkillDefinition, SkillRegistry, builtin YAML loader
+      router.py             SkillRouter — auto-detect best skill (keyword + threshold)
+      resolver.py           resolve_skill() — explicit > session > auto-route
+      applicator.py         apply_skill_overrides() — merge skill into request
+      session.py            SkillSessionStore (in-memory per-session binding)
+      builtin/              11 built-in YAML skill definitions
   routes/
     stream.py               PRIMARY: POST /chat/stream (SSE)
     main.py                 /, /chat, /clear, /history, /api/generate-title
@@ -112,6 +119,7 @@ services/chatbot/
     admin.py                /admin — admin panel + user management
     user_auth.py            Login/register/quota endpoints
     qr_payment.py           QR payment routes (VietQR)
+    skills.py               /api/skills/* — runtime skill management
     async_routes.py         /chat/async — async SSE streaming
   config/                   Service-level config (NOT core/config.py)
     mongodb_config.py       MongoDB client setup
@@ -132,7 +140,8 @@ services/chatbot/
     rag/                    RAG subsystem (ingest, embeddings, service, etc.)
   fastapi_app/              FastAPI mode (USE_FASTAPI=true only)
     routers/                chat, stream, conversations, memory, images,
-                            video, rag, council_stream, xai_native_stream
+                            video, rag, council_stream, xai_native_stream,
+                            skills
   app/                      Nested Flask app (modular mode)
     middleware/             auth.py, rate_limiter.py
     routes/                 Modular route files (chat, video, memory, etc.)
@@ -150,7 +159,8 @@ services/chatbot/
     js/language-switcher.js Language toggle
     js/modules/             api-service, chat-manager, message-renderer,
                             image-gen-v2, video-gen, memory-manager,
-                            ui-utils, file-handler, export-handler, etc.
+                            skill-manager, ui-utils, file-handler,
+                            export-handler, etc.
   tests/                    Unit + integration tests
 
 services/shared_env.py      Shared environment loader

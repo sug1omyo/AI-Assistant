@@ -34,6 +34,7 @@ Use this table to find the minimum test set for a changed file.
 | `routes/mcp.py` | Manual: call MCP proxy routes | No dedicated unit test; verify via inspector |
 | `routes/image_gen.py` | `test_image_orchestration`, `test_endpoint_orchestrator_integration` | Image generation pipeline |
 | `routes/memory.py` | `test_integration` | Memory persistence through DB |
+| `routes/skills.py` | `test_skills_api` | Skill management endpoints |
 | `core/chatbot.py` | `test_api_integration`, `test_integration`, `test_llm_clients`, `test_multi_turn_followup` | Model routing and tool dispatch |
 | `core/chatbot_v2.py` | Same as `core/chatbot.py` | V2 agent |
 | `core/tools.py` | `test_api_integration` + manual search-tool check | Tool functions are mocked in CI; verify cascade manually |
@@ -45,6 +46,7 @@ Use this table to find the minimum test set for a changed file.
 | `core/error_handler.py` | `test_app` | Error middleware |
 | `core/agentic/**` | `test_agentic_*` (all 9 files) | Multi-agent orchestration |
 | `fastapi_app/**` | `test_rag_router`, `test_rag_chat_integration`, `test_rag_e2e`, `test_endpoint_orchestrator_integration` | FastAPI-only path |
+| `fastapi_app/routers/skills.py` | `test_skills_api` | FastAPI skill endpoints |
 | `src/rag/**` | `test_ingest`, `test_retrieval`, `test_rag_*` | RAG pipeline |
 | `src/audio_transcription.py` | Manual only | No dedicated test |
 | `src/ocr_integration.py` | Manual only | No dedicated test |

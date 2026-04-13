@@ -1121,9 +1121,15 @@ class ChatBotApp {
                         customPrompt: agentConfig ? agentConfig.systemPrompt : '',
                         images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
                         tools: activeTools,
+                        skill: window.skillManager ? window.skillManager.getActiveSkillId() : '',
                     },
                     this.currentAbortController.signal,
                     {
+                        onMetadata: (data) => {
+                            if (window.skillManager && data.skill_source === 'auto' && data.skill) {
+                                window.skillManager.showAutoRouted(data.skill, data.skill_name, data.skill_auto_keywords);
+                            }
+                        },
                         onThinkingStart: (data) => {
                             thinkingReceived = true;
                             // Create thinking container on-demand if not already present

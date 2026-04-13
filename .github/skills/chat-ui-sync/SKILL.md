@@ -133,6 +133,7 @@ User action → event listener (main.js) → API call (api-service.js) → Flask
 |------------|-----------|---------|---------------|
 | Model selector | `#modelDropdown` items `[data-model]` | `#modelSelect` hidden select + `#modelSelectorLabel` | `model` |
 | Thinking mode | `#thinkingModeDropdown` items `[data-mode]` | `#thinkingModeValue` hidden input | `thinking_mode` |
+| Skill selector | `#skillSelectorDropdown` `.skill-option[data-skill-id]` | `#activeSkillId` hidden input + server session | Session-level via `/api/skills/activate` |
 | Context | `#contextSelect` (hidden) | Always `"casual"` | `context` |
 
 ### Tool buttons
@@ -171,6 +172,10 @@ User action → event listener (main.js) → API call (api-service.js) → Flask
 | Feature flags | `index.html` inline | `/api/features` | GET |
 | MCP resources | `mcp.js` | `/api/mcp/resources` | GET |
 | MCP invoke | `mcp.js` | `/api/mcp/invoke` | POST |
+| Skill list | `skill-manager.js` | `/api/skills` | GET |
+| Skill activate | `skill-manager.js` | `/api/skills/activate` | POST |
+| Skill deactivate | `skill-manager.js` | `/api/skills/deactivate` | POST |
+| Skill active | `skill-manager.js` | `/api/skills/active` | GET |
 
 ---
 
@@ -194,6 +199,8 @@ This is the critical contract. The frontend assembles the body in `api-service.j
 | `custom_prompt` | `custom_prompt` | str | `""` |
 | `tools` | `tools` | array of strings | `[]` |
 | `images` | `images` | array of base64 data URLs | `[]` |
+| `skill` | `skill` | str (skill ID) | `""` |
+| `skill_auto_route` | `skill_auto_route` | str `"true"`/`"false"` | `"true"` |
 
 **Known quirk — `thinking_mode` default mismatch:** Frontend defaults to `"instant"`, backend defaults to `"auto"`. Both resolve to `deep_thinking = false`, so behavior matches. Do not "fix" this by changing either default without testing both paths.
 
@@ -203,7 +210,7 @@ This is the critical contract. The frontend assembles the body in `api-service.j
 
 | SSE Event | Frontend Callback | Renderer Method | Key Data Fields |
 |-----------|-------------------|-----------------|-----------------|
-| `metadata` | (informational, not dispatched to named callback) | — | `model`, `context`, `thinking_mode`, `web_search` |
+| `metadata` | `callbacks.onMetadata(data)` | `skillManager.showAutoRouted()` (when `skill_source === "auto"`) | `model`, `context`, `thinking_mode`, `skill`, `skill_name`, `skill_source`, `skill_auto_score`, `skill_auto_keywords`, `web_search` |
 | `thinking_start` | `callbacks.onThinkingStart(data)` | `createThinkingSection()` | `category`, `timestamp`, `[mode]`, `[label]` |
 | `thinking` | `callbacks.onThinking(data)` | `addThinkingStep()` | `step`, `step_index`, `is_reasoning_chunk`, `[trajectory_id]` |
 | `thinking_end` | `callbacks.onThinkingEnd(data)` | `endThinkingBlock()` | `summary`, `steps`, `duration_ms`, `[rounds]` |

@@ -52,6 +52,7 @@ description: "Audit and safely edit the core chatbot request path — route regi
 | `routes/admin.py` | `admin_bp` | `/admin` — admin panel, user management |
 | `routes/user_auth.py` | `user_auth_bp` | Login, register, quota endpoints |
 | `routes/qr_payment.py` | `qr_bp` | QR payment routes (VietQR) |
+| `routes/skills.py` | `skills_bp` | `/api/skills/*` — skill list, get, activate, deactivate |
 | `routes/async_routes.py` | `async_bp` | `/chat/async` — async SSE streaming |
 
 ### FastAPI routers — `services/chatbot/fastapi_app/routers/`

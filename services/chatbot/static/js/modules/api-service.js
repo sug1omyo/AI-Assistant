@@ -119,6 +119,8 @@ export class APIService {
             language: language,
             custom_prompt: params.customPrompt || '',
             tools: params.tools || [],
+            skill: params.skill || '',
+            skill_auto_route: params.skillAutoRoute !== false ? 'true' : 'false',
         };
 
         // Include images for vision models (base64 data URLs)
@@ -160,6 +162,9 @@ export class APIService {
                         try {
                             const data = JSON.parse(dataStr);
                             switch (currentEvent) {
+                                case 'metadata':
+                                    if (callbacks.onMetadata) callbacks.onMetadata(data);
+                                    break;
                                 case 'thinking_start':
                                     if (callbacks.onThinkingStart) callbacks.onThinkingStart(data);
                                     break;

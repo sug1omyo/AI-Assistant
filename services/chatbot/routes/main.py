@@ -22,6 +22,8 @@ from core.extensions import MONGODB_ENABLED, logger
 from core.chatbot import get_chatbot
 from core.tools import google_search_tool, github_search_tool
 from core.private_logger import log_chat, log_interaction
+from core.skills.resolver import resolve_skill
+from core.skills.applicator import apply_skill_overrides
 from app.middleware.auth import require_login
 
 # Check MCP availability
@@ -207,6 +209,27 @@ def chat():
         if not message:
             return jsonify({'error': 'Tin nháº¯n trá»‘ng'}), 400
         
+        # ── Runtime Skill Resolution + Application ────────────────────
+        skill_overrides = resolve_skill(
+            message=message,
+            explicit_skill_id=data.get('skill') if hasattr(data, 'get') else None,
+            session_id=session.get('session_id'),
+            auto_route=True,
+        )
+        applied = apply_skill_overrides(
+            data=dict(data) if hasattr(data, 'to_dict') else (data or {}),
+            skill_overrides=skill_overrides,
+            language=language,
+        )
+        model = applied.model
+        context = applied.context
+        deep_thinking = applied.deep_thinking
+        custom_prompt = applied.custom_prompt
+        tools = applied.tools
+
+        if applied.was_applied:
+            logger.info(f"[CHAT] Skill applied: {applied.skill_id}")
+
         # MCP Integration: Inject code context
         if MCP_AVAILABLE:
             try:
@@ -229,6 +252,9 @@ def chat():
 
                     logger.info(f"[MCP] Injecting code context")
                     message = inject_code_context(message, mcp_client, mcp_selected_files)
+                elif applied.prefer_mcp and mcp_client:
+                    message = inject_code_context(message, mcp_client, mcp_selected_files)
+                    logger.info(f"[MCP] Skill '{applied.skill_id}' triggered MCP context injection")
             except Exception as e:
                 logger.warning(f"[MCP] Error injecting context: {e}")
         
