@@ -41,6 +41,7 @@ from fastapi_app.routers import (
     skills,
     last30days,
     hermes,
+    admin,
 )
 
 logger = logging.getLogger("chatbot.fastapi")
@@ -121,6 +122,16 @@ def create_app() -> FastAPI:
             return templates.TemplateResponse("index.html", {"request": request})
         return HTMLResponse("<h1>AI Chatbot (FastAPI)</h1><p>Templates directory not found.</p>")
 
+    @app.get("/login", response_class=HTMLResponse)
+    async def login_page(request: Request):
+        """Render login page. If already authenticated, redirect to home."""
+        if request.session.get("authenticated"):
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url="/", status_code=302)
+        if templates:
+            return templates.TemplateResponse("login.html", {"request": request})
+        return HTMLResponse("<h1>Login</h1><p>login.html template not found.</p>", status_code=200)
+
     @app.get("/favicon.ico", include_in_schema=False)
     async def favicon():
         ico = CHATBOT_DIR / "static" / "favicon.ico"
@@ -129,6 +140,18 @@ def create_app() -> FastAPI:
         return HTMLResponse("", status_code=204)
 
     # --- Auth endpoints ---
+    @app.get("/logout")
+    async def logout(request: Request):
+        """Clear session and redirect to login."""
+        from fastapi.responses import RedirectResponse
+        username = request.session.get("username", "unknown")
+        request.session.clear()
+        import logging as _log
+        _log.getLogger(__name__).info(f"[Auth] Logout: {username}")
+        response = RedirectResponse(url="/login", status_code=302)
+        response.delete_cookie("display_name")
+        return response
+
     @app.get("/api/auth/me")
     async def auth_me(request: Request):
         """Return current session user info (FastAPI/session-middleware path)."""
@@ -145,6 +168,51 @@ def create_app() -> FastAPI:
                 "display_name": sess.get("display_name"),
             },
         }
+
+    @app.post("/api/auth/login")
+    async def auth_login(request: Request):
+        """Authenticate user and create session."""
+        from fastapi.responses import JSONResponse, Response
+        import uuid as _uuid
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        username = (body.get("username") or "").strip()
+        password = body.get("password") or ""
+        if not username or not password:
+            return JSONResponse({"success": False, "message": "Vui lòng nhập đầy đủ thông tin"}, status_code=400)
+        try:
+            from core.user_auth import authenticate_user
+            db = None
+            try:
+                from core.extensions import get_db
+                db = get_db()
+            except Exception:
+                try:
+                    from config.mongodb_config import mongodb_client
+                    db = mongodb_client.db
+                except Exception:
+                    pass
+            user = authenticate_user(db, username, password) if db is not None else None
+        except Exception as e:
+            logger.warning(f"[Auth] Login DB error: {e}")
+            user = None
+        if user:
+            request.session.clear()
+            request.session["authenticated"] = True
+            request.session["user_id"] = user["user_id"]
+            request.session["username"] = user["username"]
+            request.session["user_role"] = user["role"]
+            request.session["display_name"] = user["display_name"]
+            request.session["session_id"] = str(_uuid.uuid4())
+            logger.info(f"[Auth] Login success: {username} (role={user['role']})")
+            redirect_url = "/admin" if user["role"] == "admin" else "/"
+            resp = JSONResponse({"success": True, "redirect": redirect_url, "user": user})
+            resp.set_cookie("display_name", user["display_name"], max_age=86400 * 30, httponly=False, samesite="lax")
+            return resp
+        logger.warning(f"[Auth] Login failed: {username}")
+        return JSONResponse({"success": False, "message": "Sai tên đăng nhập hoặc mật khẩu"}, status_code=401)
 
     # --- Misc API stubs (non-critical, polled by frontend on load) ---
     @app.get("/api/local-models-status")
@@ -170,6 +238,39 @@ def create_app() -> FastAPI:
     async def sd_negative_presets():
         """Return stable diffusion negative prompt presets."""
         return {"success": True, "presets": _NEGATIVE_PRESETS_DATA}
+
+    @app.get("/api/features")
+    async def get_features():
+        """Return public feature flag states for frontend UI decisions."""
+        try:
+            from core.feature_flags import features
+            features.reload()
+            return {
+                "quota": features.quota_enabled,
+                "video": features.video_enabled,
+                "video_requires_payment": features.video_requires_payment,
+                "payment": features.payment_enabled,
+                "qr": features.qr_enabled,
+                "registration": features.allow_registration,
+            }
+        except Exception as e:
+            logger.warning(f"[features] Could not load feature flags: {e}")
+            return {
+                "quota": False, "video": False, "video_requires_payment": False,
+                "payment": False, "qr": False, "registration": True,
+            }
+
+    @app.get("/admin", response_class=HTMLResponse)
+    async def admin_page(request: Request):
+        """Render admin dashboard (requires admin role)."""
+        from fastapi.responses import RedirectResponse
+        if not request.session.get("authenticated"):
+            return RedirectResponse(url="/login", status_code=302)
+        if request.session.get("user_role") != "admin":
+            return RedirectResponse(url="/", status_code=302)
+        if templates:
+            return templates.TemplateResponse("admin.html", {"request": request})
+        return HTMLResponse("<h1>Admin</h1><p>admin.html template not found.</p>")
 
     @app.post("/api/generate-title")
     async def generate_title(request: Request):
@@ -224,6 +325,7 @@ def create_app() -> FastAPI:
     app.include_router(skills.router, tags=["Skills"])
     app.include_router(last30days.router, tags=["Tools"])
     app.include_router(hermes.router, tags=["Tools"])
+    app.include_router(admin.router, tags=["Admin"])
 
     # --- Root health check ---
     @app.get("/health")
