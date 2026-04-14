@@ -102,6 +102,18 @@ def create_app() -> FastAPI:
     templates_dir = CHATBOT_DIR / "templates"
     templates = Jinja2Templates(directory=str(templates_dir)) if templates_dir.exists() else None
 
+    # Inject a Flask-compatible url_for into Jinja2 globals so that
+    # {{ url_for('static', filename='css/app.css') }} works unchanged.
+    if templates:
+        def _url_for(name: str, **kwargs) -> str:
+            if name == 'static':
+                path = kwargs.get('filename', kwargs.get('path', ''))
+                return f"/static/{path}"
+            # Other named routes: best-effort path construction
+            path = kwargs.get('filename', kwargs.get('path', ''))
+            return f"/{name}/{path}" if path else f"/{name}"
+        templates.env.globals['url_for'] = _url_for
+
     # --- Page routes ---
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
