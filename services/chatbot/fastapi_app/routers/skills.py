@@ -61,6 +61,30 @@ async def list_skills(include_disabled: bool = False, tag: Optional[str] = None)
     return {'skills': result, 'total': len(result)}
 
 
+@router.get("/api/skills/active")
+async def get_active_skill(request: Request):
+    """Get the currently active skill for this session."""
+    session_id = _get_session_id(request)
+    if not session_id:
+        return {'skill_id': None, 'active': False}
+
+    active_id = get_session_skill(session_id)
+    if not active_id:
+        return {'skill_id': None, 'active': False}
+
+    registry = get_skill_registry()
+    skill = registry.get(active_id)
+    if skill is None:
+        clear_session_skill(session_id)
+        return {'skill_id': None, 'active': False}
+
+    return {
+        'skill_id': skill.id,
+        'skill_name': skill.name,
+        'active': True,
+    }
+
+
 @router.get("/api/skills/{skill_id}")
 async def get_skill(skill_id: str):
     """Fetch a single skill by id."""
@@ -136,27 +160,3 @@ async def deactivate_skill(request: Request):
         logger.info(f"[Skills] Deactivated skill for session {session_id[:8]}...")
 
     return {'success': True, 'had_active': had_active}
-
-
-@router.get("/api/skills/active")
-async def get_active_skill(request: Request):
-    """Get the currently active skill for this session."""
-    session_id = _get_session_id(request)
-    if not session_id:
-        return {'skill_id': None, 'active': False}
-
-    active_id = get_session_skill(session_id)
-    if not active_id:
-        return {'skill_id': None, 'active': False}
-
-    registry = get_skill_registry()
-    skill = registry.get(active_id)
-    if skill is None:
-        clear_session_skill(session_id)
-        return {'skill_id': None, 'active': False}
-
-    return {
-        'skill_id': skill.id,
-        'skill_name': skill.name,
-        'active': True,
-    }

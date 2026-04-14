@@ -128,6 +128,49 @@ def create_app() -> FastAPI:
             return FileResponse(str(ico))
         return HTMLResponse("", status_code=204)
 
+    # --- Auth endpoints ---
+    @app.get("/api/auth/me")
+    async def auth_me(request: Request):
+        """Return current session user info (FastAPI/session-middleware path)."""
+        sess = request.session
+        if not sess.get("authenticated"):
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"authenticated": False}, status_code=401)
+        return {
+            "authenticated": True,
+            "user": {
+                "user_id": sess.get("user_id"),
+                "username": sess.get("username"),
+                "role": sess.get("user_role"),
+                "display_name": sess.get("display_name"),
+            },
+        }
+
+    # --- Misc API stubs (non-critical, polled by frontend on load) ---
+    @app.get("/api/local-models-status")
+    async def local_models_status():
+        """Report whether local transformer models are available."""
+        try:
+            from core.model_loader import model_loader  # type: ignore
+            return {"available": True, "models": model_loader.get_available_models()}
+        except ImportError:
+            return {
+                "available": False,
+                "error": "Local models not available. Install: pip install torch transformers accelerate",
+            }
+
+    _NEGATIVE_PRESETS_DATA = [
+        {"id": "quality", "label": "Quality Fix", "prompt": "worst quality, low quality, normal quality, lowres, blurry, jpeg artifacts, watermark, text, signature, cropped, out of frame, duplicate, mutation, deformed"},
+        {"id": "anatomy", "label": "Anatomy Fix", "prompt": "bad anatomy, bad hands, missing fingers, extra fingers, fused fingers, too many fingers, missing limbs, extra limbs, malformed limbs, floating limbs, disconnected limbs"},
+        {"id": "face", "label": "Face Fix", "prompt": "bad face, disfigured face, mutated face, blurry face, extra face, cloned face, deformed eyes, crossed eyes, asymmetrical eyes"},
+        {"id": "nsfw", "label": "SFW Filter", "prompt": "nsfw, nude, naked, sexual, explicit, pornographic, lewd, erotic, suggestive, revealing clothing, underwear, bikini, lingerie"},
+    ]
+
+    @app.get("/api/sd-negative-presets")
+    async def sd_negative_presets():
+        """Return stable diffusion negative prompt presets."""
+        return {"success": True, "presets": _NEGATIVE_PRESETS_DATA}
+
     # --- Routers ---
     app.include_router(chat.router, tags=["Chat"])
     app.include_router(council_stream.router, tags=["Council Streaming"])
