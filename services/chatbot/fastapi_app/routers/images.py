@@ -7,7 +7,8 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 
 from fastapi_app.dependencies import get_gallery_session_id
 from fastapi_app.models import SaveImageRequest
@@ -109,3 +110,110 @@ async def delete_image(filename: str):
     if meta.exists():
         meta.unlink()
     return {"success": True, "message": "Image deleted"}
+
+
+# ---------------------------------------------------------------------------
+# Gallery upload to DB / cloud
+# ---------------------------------------------------------------------------
+
+class GalleryUploadBody(BaseModel):
+    filename: str
+
+
+@router.post("/api/gallery/upload-db")
+async def upload_image_to_db(body: GalleryUploadBody, request: Request):
+    """Upload a locally stored image + metadata to MongoDB/Firebase/ImgBB."""
+    import json as _json
+    import re as _re
+
+    filename = body.filename.strip()
+    if not filename or not _re.match(r"^[a-zA-Z0-9_\-\.]+$", filename):
+        raise HTTPException(400, "Invalid filename")
+
+    filepath = IMAGE_STORAGE_DIR / filename
+    if not filepath.exists() or not filepath.resolve().is_relative_to(IMAGE_STORAGE_DIR.resolve()):
+        raise HTTPException(404, "Image not found locally")
+
+    raw_bytes = filepath.read_bytes()
+    image_b64 = base64.b64encode(raw_bytes).decode()
+
+    meta_path = filepath.with_suffix(".json")
+    local_payload: dict = {}
+    if meta_path.exists():
+        try:
+            local_payload = _json.loads(meta_path.read_text("utf-8"))
+        except Exception:
+            pass
+
+    session_id = get_gallery_session_id(request)
+    metadata = local_payload.get("metadata", local_payload if isinstance(local_payload, dict) else {})
+    metadata["filename"] = filename
+    metadata.setdefault("session_id", session_id)
+
+    try:
+        from core.image_storage import store_generated_image
+        result = store_generated_image(
+            image_base64=image_b64,
+            prompt=metadata.get("prompt", ""),
+            negative_prompt=metadata.get("negative_prompt", ""),
+            metadata=metadata,
+            raw_legacy_payload=local_payload if isinstance(local_payload, dict) else {},
+        )
+    except Exception as e:
+        logger.error(f"[UploadDB] store_generated_image error: {e}")
+        raise HTTPException(500, "Failed to upload to database")
+
+    db_status = {
+        "mongodb": bool(result.get("saved_to_mongodb")),
+        "firebase": bool(result.get("saved_to_firebase")),
+    }
+
+    merged = {
+        **(local_payload if isinstance(local_payload, dict) else {}),
+        "filename": filename,
+        "created_at": local_payload.get("created_at", datetime.now().isoformat()),
+        "cloud_url": result.get("imgbb_url") or local_payload.get("cloud_url"),
+        "drive_url": result.get("drive_url") or local_payload.get("drive_url"),
+        "drive_file_id": result.get("drive_file_id") or local_payload.get("drive_file_id"),
+        "db_status": db_status,
+        "metadata": metadata,
+    }
+    try:
+        meta_path.write_text(_json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "filename": filename,
+        "imageURL": result.get("drive_url") or result.get("imgbb_url") or f"/storage/images/{filename}",
+        "cloud_url": result.get("imgbb_url"),
+        "drive_url": result.get("drive_url"),
+        "db_status": db_status,
+        "storage_result": result,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Upload to ImgBB
+# ---------------------------------------------------------------------------
+
+class ImgBBUploadBody(BaseModel):
+    image: str  # base64-encoded image data
+    name: str | None = None
+
+
+@router.post("/api/upload-imgbb")
+async def upload_to_imgbb(body: ImgBBUploadBody):
+    """Upload a base64 image to ImgBB and return the URL."""
+    if not body.image:
+        raise HTTPException(400, "No image data provided")
+    try:
+        from core.image_storage import upload_to_imgbb as _imgbb_upload
+        url = _imgbb_upload(body.image, body.name)
+        if url:
+            return {"success": True, "url": url}
+        return JSONResponse(status_code=500, content={"success": False, "error": "Upload failed"})
+    except Exception as e:
+        logger.error(f"[UploadImgBB] Error: {e}")
+        raise HTTPException(500, "Failed to upload image")

@@ -43,6 +43,8 @@ from fastapi_app.routers import (
     hermes,
     admin,
     image_gen,
+    mcp,
+    main_extras,
 )
 
 logger = logging.getLogger("chatbot.fastapi")
@@ -328,6 +330,8 @@ def create_app() -> FastAPI:
     app.include_router(hermes.router, tags=["Tools"])
     app.include_router(admin.router, tags=["Admin"])
     app.include_router(image_gen.router, tags=["Image Generation"])
+    app.include_router(mcp.router)
+    app.include_router(main_extras.router)
 
     # --- Root health check ---
     @app.get("/health")
