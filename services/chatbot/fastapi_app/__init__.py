@@ -42,6 +42,7 @@ from fastapi_app.routers import (
     last30days,
     hermes,
     admin,
+    image_gen,
 )
 
 logger = logging.getLogger("chatbot.fastapi")
@@ -326,6 +327,7 @@ def create_app() -> FastAPI:
     app.include_router(last30days.router, tags=["Tools"])
     app.include_router(hermes.router, tags=["Tools"])
     app.include_router(admin.router, tags=["Admin"])
+    app.include_router(image_gen.router, tags=["Image Generation"])
 
     # --- Root health check ---
     @app.get("/health")
