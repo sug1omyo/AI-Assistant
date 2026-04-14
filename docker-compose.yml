@@ -1,0 +1,138 @@
+# AI-Assistant — Docker Compose (Core Services)
+#
+# Usage:
+#   docker compose up -d                     # chatbot + mongodb only
+#   docker compose --profile tools up -d     # + last30days sidecar
+#   docker compose --profile hermes up -d    # + hermes agent sidecar
+#   docker compose --profile all up -d       # everything
+#
+# Env:
+#   Copy app/config/.env.example → app/config/.env and fill in API keys.
+#   Copy services/chatbot/.env.example → services/chatbot/.env for service-local keys.
+#
+# NOTE: Image generation services (Stable Diffusion, ComfyUI) are NOT included.
+#       They require GPU access and venv-image. Run them separately.
+
+services:
+  # ─── MongoDB ────────────────────────────────────────────────────────
+  mongodb:
+    image: mongo:7
+    container_name: ai-assistant-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-changeme}
+      MONGO_INITDB_DATABASE: ai_assistant
+    volumes:
+      - mongodb_data:/data/db
+      - ./app/docker/mongo-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ─── ChatBot (primary service) ─────────────────────────────────────
+  chatbot:
+    build:
+      context: ./services/chatbot
+      dockerfile: Dockerfile
+    container_name: ai-assistant-chatbot
+    restart: unless-stopped
+    ports:
+      - "${CHATBOT_PORT:-5000}:5000"
+    env_file:
+      - ./app/config/.env
+      - ./services/chatbot/.env
+    environment:
+      MONGODB_URI: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-changeme}@mongodb:27017/ai_assistant?authSource=admin
+      MONGODB_DB_NAME: ai_assistant
+      FLASK_PORT: "5000"
+      # Optional: set USE_FASTAPI=true or USE_NEW_STRUCTURE=true
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - chatbot_storage:/app/Storage
+      - chatbot_logs:/app/logs
+
+  # ─── last30days — Social Research Sidecar (optional) ───────────────
+  # Activate with: docker compose --profile tools up -d
+  last30days-setup:
+    image: python:3.12-slim
+    container_name: ai-assistant-last30days-setup
+    profiles: ["tools", "all"]
+    volumes:
+      - last30days_repo:/opt/last30days
+      - ./services/chatbot/vendor/last30days:/setup:ro
+    command: >
+      bash -c "
+        if [ ! -f /opt/last30days/.cloned ]; then
+          apt-get update && apt-get install -y git;
+          git clone https://github.com/mvanhorn/last30days-skill.git /opt/last30days/repo;
+          cd /opt/last30days/repo && pip install -r requirements.txt 2>/dev/null || true;
+          touch /opt/last30days/.cloned;
+          echo 'last30days setup complete';
+        else
+          echo 'last30days already cloned';
+        fi
+      "
+    restart: "no"
+
+  # ─── Hermes Agent — Advanced AI Sidecar (optional) ─────────────────
+  # Activate with: docker compose --profile hermes up -d
+  # Requires: HERMES_API_KEY in env, Hermes repo cloned to vendor/hermes/repo
+  hermes:
+    build:
+      context: ./vendor/hermes
+      dockerfile: Dockerfile
+    container_name: ai-assistant-hermes
+    profiles: ["hermes", "all"]
+    restart: unless-stopped
+    ports:
+      - "${HERMES_PORT:-8080}:8080"
+    env_file:
+      - ./app/config/.env
+    environment:
+      HERMES_PORT: "8080"
+      HERMES_API_KEY: ${HERMES_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    volumes:
+      - hermes_data:/app/data
+
+  # ─── Redis (optional, for caching/RAG) ─────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: ai-assistant-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+
+volumes:
+  mongodb_data:
+  chatbot_storage:
+  chatbot_logs:
+  last30days_repo:
+  hermes_data:
+  redis_data:

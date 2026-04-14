@@ -5394,6 +5394,20 @@ except ImportError as e:
     logger.warning(f"Could not register skills blueprint: {e}")
 
 try:
+    from routes.last30days import last30days_bp
+    app.register_blueprint(last30days_bp)
+    logger.info("Registered last30days blueprint (social research)")
+except ImportError as e:
+    logger.warning(f"Could not register last30days blueprint: {e}")
+
+try:
+    from routes.hermes import hermes_bp
+    app.register_blueprint(hermes_bp)
+    logger.info("Registered hermes blueprint (agent sidecar)")
+except ImportError as e:
+    logger.warning(f"Could not register hermes blueprint: {e}")
+
+try:
     from core.user_auth import init_admin_users
     _seed_db = get_db()
     if _seed_db is not None:

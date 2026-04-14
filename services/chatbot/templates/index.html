@@ -835,6 +835,10 @@ try {
                                             <span class="tools-grid__icon"><i data-lucide="image" class="lucide"></i></span>
                                             <span class="tools-grid__label">Img Search</span>
                                         </button>
+                                        <button class="tools-grid__item" id="last30daysBtn" title="Social Media Research (last30days)">
+                                            <span class="tools-grid__icon"><i data-lucide="bar-chart-3" class="lucide"></i></span>
+                                            <span class="tools-grid__label">Social Research</span>
+                                        </button>
                                         <button class="tools-grid__item" id="configAgentBtn" title="Config Agent">
                                             <span class="tools-grid__icon"><i data-lucide="settings" class="lucide"></i></span>
                                             <span class="tools-grid__label">Agent</span>
@@ -1890,6 +1894,7 @@ try {
             { id: 'serpapiBingBtn', tool: 'serpapi-bing' },
             { id: 'serpapiBaiduBtn', tool: 'serpapi-baidu' },
             { id: 'serpapiImagesBtn', tool: 'serpapi-images' },
+            { id: 'last30daysBtn', tool: 'last30days-research' },
         ];
         toolBindings.forEach(({ id, tool }) => {
             const el = document.getElementById(id);

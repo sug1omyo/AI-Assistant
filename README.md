@@ -459,12 +459,17 @@ app\scripts\start-all.bat
 ### 5. Docker
 
 ```bash
-docker-compose -f app/config/docker-compose.yml up -d
-# hoặc lightweight:
-docker-compose -f app/config/docker-compose.light.yml up -d
+# Core services (chatbot + MongoDB)
+docker compose up -d
+
+# Với optional tools
+docker compose --profile tools up -d    # + last30days
+docker compose --profile hermes up -d   # + Hermes agent
 
 curl http://localhost:5000/health
 ```
+
+Chi tiết: [docs/deployment_last30days_hermes.md](docs/deployment_last30days_hermes.md)
 
 ---
 
@@ -664,8 +669,41 @@ CI: `.github/workflows/tests.yml` — `pytest tests/ -v --tb=short --timeout=60`
 
 ---
 
+## Optional Tools & Sidecars
+
+Hai công cụ tùy chọn có thể được kích hoạt cùng chatbot:
+
+| Tool | Type | Port | Env flag | Description |
+|---|---|---|---|---|
+| **last30days** | Subprocess | — | `LAST30DAYS_ENABLED=true` | Multi-source social media research (Reddit, X, YouTube, HN, etc.) |
+| **Hermes Agent** | HTTP sidecar | 8080 | `HERMES_ENABLED=true` | Advanced AI agent với tool registry, memory, subagent delegation |
+
+Cả hai đều **tùy chọn** — chatbot hoạt động bình thường khi chúng tắt.
+
+### Docker Compose
+
+```bash
+# Chatbot + MongoDB only
+docker compose up -d
+
+# + last30days
+docker compose --profile tools up -d
+
+# + Hermes
+docker compose --profile hermes up -d
+
+# Everything
+docker compose --profile all up -d
+```
+
+📖 Chi tiết đầy đủ: [docs/deployment_last30days_hermes.md](docs/deployment_last30days_hermes.md)
+
+---
+
 ## Tài liệu liên quan
 
+- [docs/deployment_last30days_hermes.md](docs/deployment_last30days_hermes.md) — Deployment guide cho last30days + Hermes
+- [services/chatbot/docs/last30days_integration.md](services/chatbot/docs/last30days_integration.md) — last30days tool integration
 - [services/chatbot/README.md](services/chatbot/README.md) — Chi tiết chatbot service + skill system
 - [app/scripts/README.md](app/scripts/README.md) — Script vận hành
 - [app/requirements/README.md](app/requirements/README.md) — Dependency profiles

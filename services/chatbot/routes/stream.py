@@ -332,6 +332,17 @@ def chat_stream():
                     except Exception as e:
                         logger.error(f"Error loading memory {mem_id}: {e}")
         
+        # ── Command detection: /last30days <topic> ──────────────────────
+        _raw_text = data.get('message', '').strip()
+        if _raw_text.lower().startswith('/last30days'):
+            _cmd_topic = _raw_text[len('/last30days'):].strip()
+            if _cmd_topic:
+                tools = list(set(tools) | {'last30days-research'})
+                # Use extracted topic as the message for the tool
+                data['message'] = _cmd_topic
+                message = _cmd_topic
+                logger.info("[Stream] /last30days command detected, topic=%r", _cmd_topic)
+
         # ── Tool execution (auto web search) ──────────────────────────
 
         _search_performed = False
@@ -437,6 +448,41 @@ def chat_stream():
                     logger.info("[Stream] SerpAPI image search completed")
             except Exception as e:
                 logger.warning(f"[Stream] SerpAPI image search failed: {e}")
+
+        # ── last30days — Social Media Research ──
+        if 'last30days-research' in tools:
+            try:
+                from core.last30days_tool import run_last30days_research, parse_research_params
+                _l30d_raw = data.get('message', message)
+                _l30d_params = parse_research_params(_l30d_raw)
+                _l30d_topic = _l30d_params["topic"]
+                _l30d_depth = _l30d_params["depth"]
+                _l30d_days = _l30d_params["days"]
+                _l30d_sources = _l30d_params["sources"]
+
+                logger.info(
+                    "[Stream] last30days starting: topic=%r depth=%s days=%d",
+                    _l30d_topic[:60], _l30d_depth, _l30d_days,
+                )
+                _l30d_result = run_last30days_research(
+                    _l30d_topic,
+                    depth=_l30d_depth,
+                    days=_l30d_days,
+                    sources=_l30d_sources,
+                )
+                if _l30d_result and not _l30d_result.startswith("❌"):
+                    message = (
+                        f"{message}\n\n---\n"
+                        f"📋 KẾT QUẢ SOCIAL RESEARCH (last30days):\n{_l30d_result}\n---\n"
+                        f"Hãy phân tích kết quả nghiên cứu từ nhiều nền tảng ở trên. "
+                        f"Tổng hợp các quan điểm, xu hướng, và sentiment chính."
+                    )
+                    _search_performed = True
+                    logger.info("[Stream] last30days research completed")
+                elif _l30d_result:
+                    logger.warning(f"[Stream] last30days research returned error: {_l30d_result[:200]}")
+            except Exception as e:
+                logger.warning(f"[Stream] last30days research failed: {e}")
 
         # ── Auto reverse-image search when images attached + search intent ──
         _IMAGE_SEARCH_PATTERNS = [
