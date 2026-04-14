@@ -363,11 +363,22 @@ export class MessageRenderer {
 
         // Avatar
         const avatarDiv = document.createElement('div');
-        avatarDiv.className = 'message__avatar';
         if (isUser) {
-            avatarDiv.textContent = '👤';
+            avatarDiv.className = 'message__avatar message__avatar--user';
+            // Try to show custom avatar photo if available
+            const cu = typeof _currentUser !== 'undefined' && _currentUser;
+            if (cu && cu.avatar_data) {
+                avatarDiv.style.background = 'transparent';
+                const img = document.createElement('img');
+                img.src = cu.avatar_data;
+                img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:50%;';
+                avatarDiv.appendChild(img);
+            } else {
+                avatarDiv.innerHTML = '<svg class="avatar-user-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>';
+            }
         } else {
-            avatarDiv.textContent = this.modelIcons[model] || '🤖';
+            avatarDiv.className = 'message__avatar message__avatar--agent';
+            avatarDiv.innerHTML = '<img src="/static/icons/favicon.svg" class="avatar-img" alt="" draggable="false">';
         }
         messageDiv.appendChild(avatarDiv);
 
@@ -486,8 +497,8 @@ export class MessageRenderer {
 
         // Avatar
         const avatarDiv = document.createElement('div');
-        avatarDiv.className = 'message__avatar';
-        avatarDiv.textContent = '👤';
+        avatarDiv.className = 'message__avatar message__avatar--user';
+        avatarDiv.innerHTML = '<svg class="avatar-user-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>';
         messageDiv.appendChild(avatarDiv);
 
         // Body wrapper
@@ -737,348 +748,146 @@ export class MessageRenderer {
     }
     
     /**
-     * Create thinking process section (collapsible, with live animation)
+     * Create a compact thinking pill that opens the side panel on click.
+     * API-compatible replacement for the old inline thinking block.
      */
     createThinkingSection(thinkingProcess, isLoading = false) {
-        const container = document.createElement('div');
-        container.className = 'thinking-container';
+        const pill = document.createElement('div');
+        pill.className = 'thinking-pill' + (isLoading ? ' thinking-pill--loading' : ' thinking-pill--done');
+        pill._stepsData = [];
+        pill._startTime = Date.now();
+        pill._durationMs = 0;
+        pill._finalized = !isLoading;
+        pill._summary = '';
+
         if (isLoading) {
-            container.dataset.loading = 'true';
-            container.classList.add('thinking--loading');
-        }
-        
-        const header = document.createElement('div');
-        header.className = 'thinking-header';
-        
-        const headerLeft = document.createElement('div');
-        headerLeft.className = 'thinking-header__left';
-        
-        const icon = document.createElement('span');
-        icon.className = 'thinking-icon';
-        icon.innerHTML = isLoading
-            ? '<span class="thinking-icon__pulse"></span>'
-            : '🧠';
-        
-        const title = document.createElement('span');
-        title.className = 'thinking-title';
-        title.textContent = isLoading ? 'Đang suy nghĩ...' : 'Quá trình suy nghĩ';
-        
-        const badge = document.createElement('span');
-        badge.className = 'thinking-badge' + (isLoading ? ' thinking-badge--loading' : ' thinking-badge--done');
-        badge.textContent = isLoading ? 'Đang phân tích' : 'Hoàn thành';
-        
-        const timer = document.createElement('span');
-        timer.className = 'thinking-timer';
-        timer.textContent = '';
-        
-        // Live timer when loading
-        if (isLoading) {
-            const startTime = Date.now();
-            container._timerInterval = setInterval(() => {
-                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-                timer.textContent = elapsed + 's';
+            pill.innerHTML = `
+                <div class="thinking-pill__dots">
+                    <span></span><span></span><span></span>
+                </div>
+                <span class="thinking-pill__label">Đang suy nghĩ</span>
+                <span class="thinking-pill__timer"></span>
+            `;
+            pill._timerInterval = setInterval(() => {
+                // Self-healing: stop if finalized or detached from DOM
+                if (pill._finalized || !pill.isConnected) {
+                    clearInterval(pill._timerInterval);
+                    pill._timerInterval = null;
+                    return;
+                }
+                const elapsed = ((Date.now() - pill._startTime) / 1000).toFixed(1);
+                const timerEl = pill.querySelector('.thinking-pill__timer');
+                if (timerEl) timerEl.textContent = elapsed + 's';
             }, 100);
-        }
-        
-        headerLeft.appendChild(icon);
-        headerLeft.appendChild(title);
-        headerLeft.appendChild(badge);
-        headerLeft.appendChild(timer);
-        
-        const toggle = document.createElement('span');
-        toggle.className = 'thinking-toggle-arrow';
-        toggle.innerHTML = '&#9660;';  // ▼
-        
-        header.appendChild(headerLeft);
-        header.appendChild(toggle);
-        
-        const content = document.createElement('div');
-        content.className = 'thinking-content thinking-content--open';
-        
-        const stepsContainer = document.createElement('div');
-        stepsContainer.className = 'thinking-steps';
-        content.appendChild(stepsContainer);
-        
-        if (isLoading) {
-            // Will be populated by live thinking events
-        } else if (thinkingProcess) {
-            if (typeof thinkingProcess === 'string') {
-                const pre = document.createElement('pre');
-                pre.className = 'thinking-steps__pre';
-                pre.textContent = thinkingProcess;
-                stepsContainer.appendChild(pre);
-            } else if (Array.isArray(thinkingProcess)) {
-                thinkingProcess.forEach(step => {
-                    const stepEl = document.createElement('div');
-                    stepEl.className = 'thinking-step thinking-step--done';
-                    stepEl.textContent = step;
-                    stepsContainer.appendChild(stepEl);
-                });
-            } else {
-                stepsContainer.textContent = JSON.stringify(thinkingProcess, null, 2);
+        } else {
+            pill.innerHTML = `
+                <span class="thinking-pill__done-icon">🧠</span>
+                <span class="thinking-pill__label">Đã suy nghĩ xong</span>
+                <span class="thinking-pill__timer"></span>
+                <span class="thinking-pill__chevron">›</span>
+            `;
+            if (thinkingProcess) {
+                if (typeof thinkingProcess === 'string') {
+                    pill._stepsData.push({ text: thinkingProcess, isReasoning: false, tid: null, done: true });
+                } else if (Array.isArray(thinkingProcess)) {
+                    thinkingProcess.forEach(step => {
+                        pill._stepsData.push({ text: typeof step === 'string' ? step : JSON.stringify(step), isReasoning: false, tid: null, done: true });
+                    });
+                }
             }
         }
-        
-        // Toggle functionality — read state from DOM to stay in sync with finalizeThinking()
-        header.addEventListener('click', () => {
-            const isCurrentlyOpen = content.classList.contains('thinking-content--open');
-            content.classList.toggle('thinking-content--open', !isCurrentlyOpen);
-            content.classList.toggle('thinking-content--collapsed', isCurrentlyOpen);
-            toggle.style.transform = isCurrentlyOpen ? 'rotate(-90deg)' : 'rotate(0deg)';
 
-            const requestId = container.dataset.requestId || '';
-            if (requestId) {
-                this._updateThinkingState(requestId, prev => ({ ...prev, outerOpen: !isCurrentlyOpen }));
+        pill.addEventListener('click', () => {
+            if (!window.ThinkingPanel) return;
+            if (pill.classList.contains('thinking-pill--panel-open')) {
+                window.ThinkingPanel.close();
+            } else {
+                window.ThinkingPanel.open(pill);
             }
         });
-        
-        container.appendChild(header);
-        container.appendChild(content);
-        
-        return container;
+
+        return pill;
     }
-    
+
     /**
-     * Add a live thinking step to the thinking container
-     * Supports structured format: **Title**\nDescription
-     * @param {HTMLElement} container - thinking container
-     * @param {string} stepText - step text content (may contain **bold** markers)
-     * @param {boolean} isReasoningChunk - if true, append to existing reasoning block
-     * @param {string|null} trajectoryId - trajectory identifier for per-block routing
+     * Add a live thinking step to the thinking pill and side panel.
      */
     addThinkingStep(container, stepText, isReasoningChunk = false, trajectoryId = null) {
-        const stepsContainer = container.querySelector('.thinking-steps');
-        if (!stepsContainer) return;
-        
+        if (!container || !Array.isArray(container._stepsData)) return;
+
+        const tid = trajectoryId || '_default';
         if (isReasoningChunk) {
-            // Route token to the correct per-trajectory reasoning block
-            const tid = trajectoryId || '_default';
-            const selector = `.thinking-step--reasoning[data-tid="${tid}"]`;
-            let reasoningBlock = stepsContainer.querySelector(selector);
-            if (!reasoningBlock) {
-                reasoningBlock = document.createElement('div');
-                reasoningBlock.className = 'thinking-step thinking-step--active thinking-step--reasoning';
-                reasoningBlock.dataset.tid = tid;
-                reasoningBlock.textContent = '';
-                stepsContainer.appendChild(reasoningBlock);
-            }
-            reasoningBlock.textContent += stepText;
-        } else {
-            // Mark previous non-reasoning steps as done
-            const prevSteps = stepsContainer.querySelectorAll('.thinking-step--active:not(.thinking-step--reasoning)');
-            prevSteps.forEach(s => {
-                s.classList.remove('thinking-step--active');
-                s.classList.add('thinking-step--done');
-            });
-            // Also mark active reasoning blocks as done (trajectory finished)
-            stepsContainer.querySelectorAll('.thinking-step--reasoning.thinking-step--active').forEach(s => {
-                s.classList.remove('thinking-step--active');
-                s.classList.add('thinking-step--done');
-            });
-            
-            const step = document.createElement('div');
-            step.className = 'thinking-step thinking-step--active';
-            
-            // Parse **Title**\nDescription format
-            const boldMatch = stepText.match(/^\*\*(.+?)\*\*\n?([\s\S]*)$/);
-            if (boldMatch) {
-                const titleEl = document.createElement('div');
-                titleEl.className = 'thinking-step__title';
-                titleEl.textContent = boldMatch[1];
-                step.appendChild(titleEl);
-                
-                if (boldMatch[2] && boldMatch[2].trim()) {
-                    const descEl = document.createElement('div');
-                    descEl.className = 'thinking-step__desc';
-                    descEl.textContent = boldMatch[2].trim();
-                    step.appendChild(descEl);
-                }
+            // Append to the last open reasoning block for this trajectory
+            const existing = container._stepsData.slice().reverse().find(s => s.isReasoning && s.tid === tid && !s.done);
+            if (existing) {
+                existing.text += stepText;
             } else {
-                step.textContent = stepText;
+                container._stepsData.push({ text: stepText, isReasoning: true, tid, done: false });
             }
-            
-            stepsContainer.appendChild(step);
+        } else {
+            // Mark everything prior as done, then add new step
+            container._stepsData.forEach(s => { s.done = true; });
+            container._stepsData.push({ text: stepText, isReasoning: false, tid: null, done: false });
         }
-        
-        // Auto-scroll the thinking content
-        const content = container.querySelector('.thinking-content');
-        if (content) {
-            content.scrollTop = content.scrollHeight;
-        }
+
+        if (window.ThinkingPanel) window.ThinkingPanel.onStep(container, stepText, isReasoningChunk, trajectoryId);
     }
-    
+
     /**
-     * Finalize thinking section - stop timer, update UI
+     * Finalize thinking pill — stop timer, update label to "Đã suy nghĩ xong (Xs)".
      */
     finalizeThinking(container, data = {}) {
-        // Stop timer
+        if (!container) return;
+
         if (container._timerInterval) {
             clearInterval(container._timerInterval);
             container._timerInterval = null;
         }
-        
-        container.classList.remove('thinking--loading');
-        container.removeAttribute('data-loading');
-        
-        const icon = container.querySelector('.thinking-icon');
-        const title = container.querySelector('.thinking-title');
-        const badge = container.querySelector('.thinking-badge');
-        const timer = container.querySelector('.thinking-timer');
-        
-        if (icon) icon.innerHTML = '🧠';
-        if (title) title.textContent = data.summary || 'Quá trình suy nghĩ';
-        if (badge) {
-            badge.textContent = 'Hoàn thành';
-            badge.className = 'thinking-badge thinking-badge--done';
-        }
-        if (timer && data.duration_ms) {
-            timer.textContent = (data.duration_ms / 1000).toFixed(1) + 's';
-        }
-        
-        // Mark all steps as done
-        const steps = container.querySelectorAll('.thinking-step--active');
-        steps.forEach(s => {
-            s.classList.remove('thinking-step--active');
-            s.classList.add('thinking-step--done');
-        });
 
-        if (!this.features.collapsibleThinking) {
-            return;
+        container._finalized = true;
+        container._durationMs = data.duration_ms || (Date.now() - container._startTime);
+        container._summary = data.summary || '';
+
+        if (Array.isArray(container._stepsData)) {
+            container._stepsData.forEach(s => { s.done = true; });
         }
 
-        const requestId = data.request_id || container.dataset.requestId || '';
-        if (requestId) {
-            container.dataset.requestId = requestId;
-        }
-        
-        // Convert each reasoning block into collapsible sections
-        container.querySelectorAll('.thinking-step--reasoning').forEach(block => {
-            const tid = block.dataset.tid || '';
-            const rawText = block.textContent;
-            if (!rawText.trim()) return;
+        container.classList.remove('thinking-pill--loading');
+        container.classList.add('thinking-pill--done');
 
-            // Parse tid format "r0_t1" → round 1, trajectory 2
-            const tidMatch = tid.match(/^r(\d+)_t(\d+)$/);
-            const roundNum = tidMatch ? parseInt(tidMatch[1]) + 1 : '?';
-            const trajNum = tidMatch ? parseInt(tidMatch[2]) + 1 : '?';
+        const durationText = container._durationMs
+            ? (container._durationMs / 1000).toFixed(1) + 's'
+            : '';
 
-            // Build header
-            const header = document.createElement('div');
-            header.className = 'thinking-reasoning__header';
-            header.innerHTML = `<span class="thinking-reasoning__label">🔍 Hướng ${trajNum} (vòng ${roundNum})</span><span class="thinking-reasoning__toggle">▶</span>`;
+        // Rebuild inner HTML cleanly — no surgical querySelector patching
+        container.innerHTML = `
+            <span class="thinking-pill__done-icon">🧠</span>
+            <span class="thinking-pill__label">Đã suy nghĩ xong</span>
+            ${durationText ? `<span class="thinking-pill__timer">${durationText}</span>` : ''}
+            <span class="thinking-pill__chevron">›</span>
+        `;
 
-            // Render content as markdown
-            const body = document.createElement('div');
-            body.className = 'thinking-reasoning__body';
-            if (typeof marked !== 'undefined') {
-                const rendered = marked.parse(rawText);
-                body.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rendered) : rendered;
-            } else {
-                body.textContent = rawText;
-            }
-
-            // Replace block inner content
-            block.textContent = '';
-            block.classList.add('thinking-step--collapsed');
-            block.appendChild(header);
-            block.appendChild(body);
-
-            // Toggle on header click
-            header.addEventListener('click', () => {
-                const isCollapsed = block.classList.toggle('thinking-step--collapsed');
-                block.classList.toggle('thinking-step--expanded', !isCollapsed);
-                header.querySelector('.thinking-reasoning__toggle').textContent = isCollapsed ? '▶' : '▼';
-
-                const reqId = container.dataset.requestId || '';
-                if (reqId) {
-                    const tidKey = block.dataset.tid || '_default';
-                    this._updateThinkingState(reqId, prev => ({
-                        ...prev,
-                        trajectories: {
-                            ...prev.trajectories,
-                            [tidKey]: !isCollapsed,
-                        },
-                    }));
-                }
-            });
-        });
-        
-        // After finalization: hide non-reasoning steps (noise) and keep section open
-        // so the collapsed trajectory 2-line previews remain visible.
-        container.querySelectorAll('.thinking-step--done:not(.thinking-step--reasoning)').forEach(s => {
-            s.style.display = 'none';
-        });
-
-        // Update the outer toggle state so clicking the header correctly collapses/expands
-        const content = container.querySelector('.thinking-content');
-        const toggle = container.querySelector('.thinking-toggle-arrow');
-        if (content) {
-            // Keep the thinking section open with compact trajectory previews
-            content.classList.add('thinking-content--open');
-            content.classList.remove('thinking-content--collapsed');
-        }
-        if (toggle) toggle.style.transform = 'rotate(0deg)';
-
-        this._ensureThinkingControls(container);
-
-        const persisted = requestId ? this._getThinkingState(requestId) : { outerOpen: true, trajectories: {} };
-        const outerOpen = persisted.outerOpen !== false;
-        if (content) {
-            content.classList.toggle('thinking-content--open', outerOpen);
-            content.classList.toggle('thinking-content--collapsed', !outerOpen);
-        }
-        if (toggle) toggle.style.transform = outerOpen ? 'rotate(0deg)' : 'rotate(-90deg)';
-
-        container.querySelectorAll('.thinking-step--reasoning').forEach(block => {
-            const tid = block.dataset.tid || '_default';
-            const expanded = persisted.trajectories?.[tid] === true;
-            this._setReasoningBlockExpanded(block, expanded);
-        });
+        if (window.ThinkingPanel) window.ThinkingPanel.onFinalize(container, data);
     }
-    
+
     /**
-     * Update thinking process content (for non-streaming fallback)
+     * Update thinking content (non-streaming fallback) — populate pill from static data.
      */
     updateThinkingContent(container, thinkingProcess) {
-        // Stop any running timer
+        if (!container) return;
         if (container._timerInterval) {
             clearInterval(container._timerInterval);
             container._timerInterval = null;
         }
-        
-        container.classList.remove('thinking--loading');
-        container.removeAttribute('data-loading');
-        
-        const icon = container.querySelector('.thinking-icon');
-        const title = container.querySelector('.thinking-title');
-        const badge = container.querySelector('.thinking-badge');
-        
-        if (icon) icon.innerHTML = '🧠';
-        if (title) title.textContent = 'Quá trình suy nghĩ';
-        if (badge) {
-            badge.textContent = 'Hoàn thành';
-            badge.className = 'thinking-badge thinking-badge--done';
+        container._stepsData = [];
+        if (typeof thinkingProcess === 'string') {
+            container._stepsData.push({ text: thinkingProcess, isReasoning: false, tid: null, done: true });
+        } else if (Array.isArray(thinkingProcess)) {
+            thinkingProcess.forEach(step => {
+                container._stepsData.push({ text: typeof step === 'string' ? step : JSON.stringify(step), isReasoning: false, tid: null, done: true });
+            });
         }
-        
-        const stepsContainer = container.querySelector('.thinking-steps');
-        if (stepsContainer) {
-            stepsContainer.innerHTML = '';
-            if (typeof thinkingProcess === 'string') {
-                const pre = document.createElement('pre');
-                pre.className = 'thinking-steps__pre';
-                pre.textContent = thinkingProcess;
-                stepsContainer.appendChild(pre);
-            } else if (Array.isArray(thinkingProcess)) {
-                thinkingProcess.forEach(step => {
-                    const stepEl = document.createElement('div');
-                    stepEl.className = 'thinking-step thinking-step--done';
-                    stepEl.textContent = step;
-                    stepsContainer.appendChild(stepEl);
-                });
-            } else {
-                stepsContainer.textContent = JSON.stringify(thinkingProcess, null, 2);
-            }
-        }
+        this.finalizeThinking(container, {});
     }
 
     /**
@@ -1430,7 +1239,7 @@ export class MessageRenderer {
         const statusContainer = document.createElement('div');
         statusContainer.className = 'message assistant';
         statusContainer.innerHTML = `
-            <div class="message__avatar">🎨</div>
+            <div class="message__avatar message__avatar--agent"><img src="/static/icons/favicon.svg" class="avatar-img" alt="" draggable="false"></div>
             <div class="message__body">
                 <div class="message-content">
                     <div class="igv2-stream-status">

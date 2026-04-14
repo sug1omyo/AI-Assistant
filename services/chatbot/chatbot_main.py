@@ -148,6 +148,8 @@ app = Flask(__name__)
 # Use persistent secret key from environment or generate a fixed one
 # This ensures sessions persist across server restarts
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'skylight-ai-assistant-secret-key-2025-persistent')
+# Always reload templates from disk so edits apply without restarting
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 
 # Configure static folder for Storage
 app.static_folder = str(CHATBOT_DIR / 'static')

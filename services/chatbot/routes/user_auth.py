@@ -17,7 +17,7 @@ from core.feature_flags import features
 from core.user_auth import (
     authenticate_user, create_user, init_admin_users,
     get_user_quota, check_image_quota, check_video_access,
-    create_payment_request, IMAGE_GEN_LIMIT,
+    create_payment_request, IMAGE_GEN_LIMIT, update_user_profile,
 )
 
 user_auth_bp = Blueprint('user_auth', __name__)
@@ -108,13 +108,24 @@ def get_current_user():
     """Get current authenticated user info."""
     if not session.get('authenticated'):
         return jsonify({'authenticated': False}), 401
+    db = _get_db()
+    username = session.get('username', '')
+    avatar_data = ''
+    bio = ''
+    if db is not None:
+        user_doc = db['users'].find_one({'username': username}, {'_id': 0, 'avatar_data': 1, 'bio': 1})
+        if user_doc:
+            avatar_data = user_doc.get('avatar_data', '')
+            bio = user_doc.get('bio', '')
     return jsonify({
         'authenticated': True,
         'user': {
             'user_id': session.get('user_id'),
-            'username': session.get('username'),
+            'username': username,
             'role': session.get('user_role'),
             'display_name': session.get('display_name'),
+            'avatar_data': avatar_data,
+            'bio': bio,
         }
     })
 
@@ -179,6 +190,38 @@ def change_password():
         logger.info(f"[Auth] Password changed: {username}")
         return jsonify({'success': True, 'message': 'Đổi mật khẩu thành công'})
     return jsonify({'success': False, 'message': 'Đổi mật khẩu thất bại'}), 500
+
+
+@user_auth_bp.route('/api/auth/update-profile', methods=['POST'])
+def update_profile():
+    """Update display name, avatar, and bio for the current user."""
+    if not session.get('authenticated'):
+        return jsonify({'success': False, 'message': 'Chưa đăng nhập'}), 401
+
+    data = request.get_json() or {}
+    display_name = data.get('display_name', '').strip()
+    avatar_data = data.get('avatar_data')   # base64 data URL, '' to clear, or None (unchanged)
+    bio = data.get('bio', '')
+
+    if display_name and len(display_name) > 50:
+        return jsonify({'success': False, 'message': 'Tên quá dài (tối đa 50 ký tự)'}), 400
+    if avatar_data and len(avatar_data) > 300_000:
+        return jsonify({'success': False, 'message': 'Ảnh quá lớn (tối đa ~200KB sau nén)'}), 400
+
+    db = _get_db()
+    username = session.get('username')
+    updated = update_user_profile(
+        db, username,
+        display_name=display_name or None,
+        avatar_data=avatar_data,
+        bio=bio,
+    )
+    if updated:
+        if display_name:
+            session['display_name'] = updated['display_name']
+        logger.info(f"[Auth] Profile updated: {username}")
+        return jsonify({'success': True, 'user': updated})
+    return jsonify({'success': False, 'message': 'Cập nhật thất bại'}), 500
 
 
 # ─── Public feature flags ─────────────────────────────────────────────────────

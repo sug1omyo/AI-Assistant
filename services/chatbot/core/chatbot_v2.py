@@ -403,6 +403,23 @@ class ChatbotAgent:
             
         except Exception as e:
             logger.error(f"[{model}] Streaming error: {e}")
+            # Attempt fallback to a different provider before surfacing the error
+            fallback_name = (config.fallback_model if config else None) if config else None
+            if fallback_name and fallback_name != model:
+                fallback_handler = self.registry.get_handler(fallback_name)
+                fallback_config = self.registry.get_config(fallback_name)
+                if fallback_handler and fallback_config and fallback_config.supports_streaming:
+                    logger.info(f"[{model}] Falling back to '{fallback_name}' for stream")
+                    try:
+                        full_response = ""
+                        for chunk in fallback_handler.chat(ctx, get_system_prompts, stream=True):
+                            if chunk and not chunk.startswith('\x02REASON\x03'):
+                                full_response += chunk
+                            yield chunk
+                        self._save_to_history(message, full_response, fallback_name, history)
+                        return
+                    except Exception as fe:
+                        logger.error(f"[{fallback_name}] Fallback streaming also failed: {fe}")
             yield f"âŒ Error: {str(e)}"
     
     def _save_to_history(

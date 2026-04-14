@@ -492,6 +492,8 @@ class ChatBotApp {
      * Load current chat into UI
      */
     loadCurrentChat() {
+        // Close thinking side panel when switching conversations
+        if (window.ThinkingPanel) window.ThinkingPanel.close();
         const session = this.chatManager.getCurrentSession();
         if (!session) return;
         
@@ -598,7 +600,7 @@ class ChatBotApp {
                 const choiceContainer = document.createElement('div');
                 choiceContainer.className = 'message assistant';
                 choiceContainer.innerHTML = `
-                    <div class="message__avatar">🎨</div>
+                    <div class="message__avatar message__avatar--agent"><img src="/static/icons/favicon.svg" class="avatar-img" alt="" draggable="false"></div>
                     <div class="message__body">
                         <div class="message-content">
                             <div class="igv2-provider-choice">
@@ -690,7 +692,7 @@ class ChatBotApp {
             const statusContainer = document.createElement('div');
             statusContainer.className = 'message assistant';
             statusContainer.innerHTML = `
-                <div class="message__avatar">🎨</div>
+                <div class="message__avatar message__avatar--agent"><img src="/static/icons/favicon.svg" class="avatar-img" alt="" draggable="false"></div>
                 <div class="message__body">
                     <div class="message-content">
                         <div class="igv2-stream-status">
@@ -820,7 +822,7 @@ class ChatBotApp {
                     const thinkingSection = this.messageRenderer.createThinkingSection(null, true);
                     const thinkMsgEl = document.createElement('div');
                     thinkMsgEl.className = 'message assistant';
-                    thinkMsgEl.innerHTML = '<div class="message__avatar">🧠</div><div class="message__body"><div class="message-content"></div></div>';
+                    thinkMsgEl.innerHTML = '<div class="message__avatar message__avatar--agent"><img src="/static/icons/favicon.svg" class="avatar-img" alt="" draggable="false"></div><div class="message__body"><div class="message-content"></div></div>';
                     thinkMsgEl.querySelector('.message-content').appendChild(thinkingSection);
                     elements.chatContainer.appendChild(thinkMsgEl);
                     elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
@@ -1042,7 +1044,7 @@ class ChatBotApp {
             const placeholder = document.createElement('div');
             placeholder.className = 'message assistant';
             placeholder.innerHTML = `
-                <div class="message__avatar">🤖</div>
+                <div class="message__avatar message__avatar--agent"><img src="/static/icons/favicon.svg" class="avatar-img" alt="" draggable="false"></div>
                 <div class="message__body">
                     <div class="message-content">
                         <div class="image-gen-loading" id="imageGenLoadingPlaceholder">
@@ -1058,6 +1060,8 @@ class ChatBotApp {
             elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
         }
         
+        // Close any open thinking panel when a new message is sent
+        if (window.ThinkingPanel) window.ThinkingPanel.close();
         // Thinking container created on-demand when thinking events arrive
         let thinkingContainer = null;
         
@@ -1095,8 +1099,8 @@ class ChatBotApp {
             streamMsgDiv.dataset.model = formValues.model || '';
             streamMsgDiv.style.display = 'none'; // Hidden until first chunk arrives
             const streamAvatar = document.createElement('div');
-            streamAvatar.className = 'message__avatar';
-            streamAvatar.textContent = this.messageRenderer.modelIcons[formValues.model] || '🤖';
+            streamAvatar.className = 'message__avatar message__avatar--agent';
+            streamAvatar.innerHTML = '<img src="/static/icons/favicon.svg" class="avatar-img" alt="" draggable="false">';
             streamMsgDiv.appendChild(streamAvatar);
             const streamBody = document.createElement('div');
             streamBody.className = 'message__body';
@@ -1197,6 +1201,10 @@ class ChatBotApp {
                                 thinkingContainer.remove();
                                 thinkingContainer = null;
                             }
+                            // Safeguard: stop timer if thinking_end event was never received
+                            if (thinkingContainer && this.messageRenderer.finalizeThinking) {
+                                this.messageRenderer.finalizeThinking(thinkingContainer, {});
+                            }
                         },
                         onSuggestions: (data) => {
                             if (data.items && data.items.length > 0) {
@@ -1258,8 +1266,8 @@ class ChatBotApp {
                 resultDiv.dataset.timestamp = responseTimestamp;
                 resultDiv.dataset.model = formValues.model || '';
                 const avatarDiv = document.createElement('div');
-                avatarDiv.className = 'message__avatar';
-                avatarDiv.textContent = '🤖';
+                avatarDiv.className = 'message__avatar message__avatar--agent';
+                avatarDiv.innerHTML = '<img src="/static/icons/favicon.svg" class="avatar-img" alt="" draggable="false">';
                 resultDiv.appendChild(avatarDiv);
                 const bodyDiv = document.createElement('div');
                 bodyDiv.className = 'message__body';
@@ -1884,7 +1892,8 @@ class ChatBotApp {
         if (!this.uiUtils.showConfirm('Bạn có chắc muốn xóa toàn bộ lịch sử chat này?')) {
             return;
         }
-        
+        // Close thinking side panel on clear
+        if (window.ThinkingPanel) window.ThinkingPanel.close();
         this.uiUtils.clearChat();
         // Show welcome screen again
         this.uiUtils.showWelcomeScreen();

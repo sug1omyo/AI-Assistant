@@ -289,16 +289,45 @@ def get_images():
                 pass
 
             for img in msg.get('images', []):
-                img_entry = {
-                    'url': img.get('url', ''),
-                    'cloud_url': img.get('cloud_url', ''),
-                    'caption': img.get('caption', ''),
-                    'name': img.get('caption', '') or f"Image from {msg.get('role', 'unknown')}",
-                    'user_id': msg_user,
-                    'created_at': msg.get('created_at'),
-                    'source': 'message',
-                    'conversation_id': conv_id,
-                }
+                # Images may be stored as base64 data-URL strings or as dicts with url/cloud_url
+                if isinstance(img, str):
+                    # base64 data-URL — generate a placeholder reference
+                    if img.startswith('data:image/'):
+                        img_entry = {
+                            'url': '',
+                            'cloud_url': '',
+                            'data_url': img[:64] + '...',  # truncated — never send full base64 to admin
+                            'is_base64': True,
+                            'caption': f"Ảnh gửi bởi {msg.get('role', 'user')}",
+                            'name': f"Ảnh gửi bởi {msg.get('role', 'user')}",
+                            'user_id': msg_user,
+                            'created_at': msg.get('created_at'),
+                            'source': 'message',
+                            'conversation_id': conv_id,
+                        }
+                    else:
+                        # plain URL string
+                        img_entry = {
+                            'url': img,
+                            'cloud_url': img,
+                            'caption': '',
+                            'name': f"Ảnh từ {msg.get('role', 'user')}",
+                            'user_id': msg_user,
+                            'created_at': msg.get('created_at'),
+                            'source': 'message',
+                            'conversation_id': conv_id,
+                        }
+                else:
+                    img_entry = {
+                        'url': img.get('url', '') if isinstance(img, dict) else '',
+                        'cloud_url': img.get('cloud_url', '') if isinstance(img, dict) else '',
+                        'caption': img.get('caption', '') if isinstance(img, dict) else '',
+                        'name': (img.get('caption', '') if isinstance(img, dict) else '') or f"Ảnh từ {msg.get('role', 'unknown')}",
+                        'user_id': msg_user,
+                        'created_at': msg.get('created_at'),
+                        'source': 'message',
+                        'conversation_id': conv_id,
+                    }
                 if search and search.lower() not in (img_entry.get('caption', '') + img_entry.get('name', '')).lower():
                     continue
                 images.append(img_entry)
@@ -321,6 +350,33 @@ def get_images():
                     'created_at': f.get('created_at'),
                     'source': 'upload',
                 })
+        except Exception:
+            pass
+
+        # Also look for generated images in content (AI-generated image URLs in assistant messages)
+        try:
+            import re as _re
+            url_pattern = _re.compile(r'https?://\S+\.(?:png|jpg|jpeg|gif|webp)(?:\?\S*)?', _re.IGNORECASE)
+            ai_gen_query = {'role': 'assistant', 'content': {'$regex': r'https?://', '$options': 'i'}}
+            if user_id:
+                ai_gen_query['conversation_id'] = {'$in': conv_ids} if conv_ids else {'$exists': False}
+            for msg in db.messages.find(ai_gen_query).sort('created_at', -1).limit(500):
+                content = msg.get('content', '')
+                for match in url_pattern.findall(content):
+                    caption_hint = (content[:60] + '...') if len(content) > 60 else content
+                    img_entry = {
+                        'url': match,
+                        'cloud_url': match,
+                        'caption': caption_hint,
+                        'name': 'AI Generated Image',
+                        'user_id': 'assistant',
+                        'created_at': msg.get('created_at'),
+                        'source': 'generated',
+                        'conversation_id': str(msg.get('conversation_id', '')),
+                    }
+                    if search and search.lower() not in img_entry['caption'].lower():
+                        continue
+                    images.append(img_entry)
         except Exception:
             pass
 
@@ -407,10 +463,45 @@ def get_logs():
             else:
                 query['$or'] = search_conditions
 
-        # Try chat_logs collection
+        # Try chat_logs collection first; fall back to messages collection
         col_name = 'chat_logs'
         if col_name not in db.list_collection_names():
-            return jsonify({'logs': [], 'total': 0, 'page': page})
+            # chat_logs collection doesn't exist — read from messages as interaction records
+            msg_query = {}
+            if user_id:
+                conv_ids = [str(c['_id']) for c in db.conversations.find({'user_id': user_id}, {'_id': 1})]
+                msg_query['conversation_id'] = {'$in': conv_ids}
+            if event == 'input':
+                msg_query['role'] = 'user'
+            elif event == 'output':
+                msg_query['role'] = 'assistant'
+            if search:
+                msg_query['content'] = {'$regex': search, '$options': 'i'}
+
+            # Build a conversation id → user_id cache to avoid per-message queries
+            conv_cache = {}
+            for c in db.conversations.find({}, {'_id': 1, 'user_id': 1, 'model': 1}):
+                conv_cache[str(c['_id'])] = {'user_id': c.get('user_id', ''), 'model': c.get('model', '')}
+
+            total = db.messages.count_documents(msg_query)
+            msgs = list(db.messages.find(msg_query)
+                        .sort('created_at', -1)
+                        .skip((page - 1) * per_page)
+                        .limit(per_page))
+            logs = []
+            for m in msgs:
+                conv_info = conv_cache.get(str(m.get('conversation_id', '')), {})
+                logs.append({
+                    '_id': str(m.get('_id', '')),
+                    'event': 'input' if m.get('role') == 'user' else 'output',
+                    'session_id': str(m.get('conversation_id', '')),
+                    'user_id': conv_info.get('user_id', ''),
+                    'model': conv_info.get('model', ''),
+                    'message': m.get('content', '')[:200] if m.get('role') == 'user' else '',
+                    'response': m.get('content', '')[:200] if m.get('role') == 'assistant' else '',
+                    'timestamp': m.get('created_at'),
+                })
+            return jsonify({'logs': logs, 'total': total, 'page': page})
 
         total = db[col_name].count_documents(query)
         logs = list(db[col_name].find(query)

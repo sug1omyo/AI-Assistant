@@ -145,6 +145,28 @@
     </div>
 <script>
     lucide.createIcons();
+
+    /* ── Auto-login from localStorage ── */
+    (function checkSavedSession() {
+        var saved = null;
+        try { saved = JSON.parse(localStorage.getItem('ai_session')); } catch(e) {}
+        if (!saved || !saved.username) return;                // nothing saved — show login UI
+        // Verify the Flask session is still alive
+        fetch('/api/auth/me', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function(r) {
+                if (r.ok) {
+                    return r.json().then(function(data) {
+                        var dest = (data.role === 'admin') ? '/admin' : '/';
+                        window.location.replace(dest);
+                    });
+                } else {
+                    // Session expired — clean up stored info
+                    localStorage.removeItem('ai_session');
+                }
+            })
+            .catch(function() { /* network error — stay on login page */ });
+    })();
+
     // Hide register tab if registration is disabled
     fetch('/api/features').then(r => r.json()).then(flags => {
         if (flags.registration === false) {
@@ -198,7 +220,18 @@
                 })
             });
             var data = await res.json();
-            if (data.success) { window.location.href = data.redirect || '/'; }
+            if (data.success) {
+                // Persist minimal session info for auto-login on next visit
+                try {
+                    var u = data.user || {};
+                    localStorage.setItem('ai_session', JSON.stringify({
+                        username: u.username || document.getElementById('loginUsername').value.trim(),
+                        role: u.role || 'user',
+                        display_name: u.display_name || ''
+                    }));
+                } catch(e) {}
+                window.location.href = data.redirect || '/';
+            }
             else { setAlert('loginAlert', data.message || 'Đăng nhập thất bại', 'err'); }
         } catch(err) { setAlert('loginAlert', 'Lỗi kết nối server', 'err'); }
         finally { btn.classList.remove('loading'); btn.disabled = false; }

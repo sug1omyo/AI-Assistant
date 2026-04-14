@@ -302,7 +302,7 @@
                 </div>
                 <div class="admin-sidebar__links">
                     <a href="/" class="admin-sidebar__link">← Về Chatbot</a>
-                    <a href="/logout" class="admin-sidebar__link">Đăng xuất</a>
+                    <a href="/logout" class="admin-sidebar__link" onclick="try{localStorage.removeItem('ai_session');}catch(e){}">Đăng xuất</a>
                 </div>
             </div>
         </aside>
@@ -815,15 +815,28 @@
         if (!data.images?.length) { grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><i data-lucide="image-off"></i><p>Không tìm thấy hình ảnh</p></div>'; lucide.createIcons({ nodes: [grid] }); return; }
         grid.innerHTML = data.images.map(img => {
             const src = img.cloud_url || img.url || '';
-            const thumb = src || '/static/css/placeholder.svg';
-            return `<div class="image-card" onclick="openLightbox('${src}')">
-                <img src="${thumb}" alt="${escapeHtml(img.caption || '')}" loading="lazy" onerror="this.style.display='none'">
+            if (img.is_base64) {
+                // Base64 image — show a placeholder icon, no clickable lightbox
+                return `<div class="image-card" title="Ảnh upload (base64 — không lưu URL)">
+                    <div style="height:160px;display:flex;align-items:center;justify-content:center;background:var(--bg-tertiary);">
+                        <i data-lucide="image" style="width:40px;height:40px;opacity:0.3;"></i>
+                    </div>
+                    <div class="image-card__info">
+                        <div class="image-card__title">${escapeHtml(img.name || 'User Upload')}</div>
+                        <div class="image-card__sub">${escapeHtml(img.user_id || 'anonymous')} · ${formatDate(img.created_at)} · <em>base64</em></div>
+                    </div>
+                </div>`;
+            }
+            const thumb = src || '';
+            return `<div class="image-card" onclick="${src ? `openLightbox('${src.replace(/'/g,"\\'")}')` : 'void(0)'}">
+                ${thumb ? `<img src="${thumb}" alt="${escapeHtml(img.caption || '')}" loading="lazy" onerror="this.style.display='none'">` : `<div style="height:160px;display:flex;align-items:center;justify-content:center;background:var(--bg-tertiary);"><i data-lucide="image" style="width:40px;height:40px;opacity:0.3;"></i></div>`}
                 <div class="image-card__info">
                     <div class="image-card__title">${escapeHtml(img.caption || img.name || 'Image')}</div>
                     <div class="image-card__sub">${escapeHtml(img.user_id || 'anonymous')} · ${formatDate(img.created_at)}</div>
                 </div>
             </div>`;
         }).join('');
+        lucide.createIcons({ nodes: [grid] });
         renderPagination('imagesPagination', data.total || 0, page, 24, (p) => loadImages(p));
     }
 

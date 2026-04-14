@@ -68,8 +68,8 @@ class AIService:
         
         # Model configurations
         self.models = {
-            'grok': {
-                'name': 'Grok',
+            'grok-beta': {
+                'name': 'Grok Beta',
                 'provider': 'xai',
                 'model_id': 'grok-beta',
                 'available': bool(self.grok_key),
@@ -148,17 +148,21 @@ class AIService:
             memories=memories
         )
         
-        # Route to appropriate provider
-        if provider == 'openai':
-            return self._chat_openai(message, model_config, system_prompt, history)
-        elif provider == 'deepseek':
-            return self._chat_deepseek(message, model_config, system_prompt, history)
-        elif provider == 'xai':
-            return self._chat_grok(message, model_config, system_prompt, history)
-        elif provider == 'google':
-            return self._chat_gemini(message, model_config, system_prompt, history, images)
-        else:
-            raise ValueError(f"Unknown provider: {provider}")
+        # Route to appropriate provider, with automatic fallback on failure
+        try:
+            return self._dispatch_to_provider(message, model_config, system_prompt, history, images)
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.warning(
+                f"[AIService] {model} ({provider}) failed: {e}. Trying fallback model."
+            )
+            fallback_name = self._get_fallback_model_excluding(model)
+            if fallback_name:
+                fallback_config = self.models[fallback_name]
+                logger.info(f"[AIService] Falling back to: {fallback_name}")
+                return self._dispatch_to_provider(message, fallback_config, system_prompt, history, images)
+            raise
 
     def chat_stream_callback(
         self,
@@ -441,6 +445,35 @@ class AIService:
             if config['available']:
                 return model_name
         return None
+
+    def _get_fallback_model_excluding(self, excluded: str) -> Optional[str]:
+        """Get first available model that is not the excluded one and not the same provider"""
+        excluded_provider = (self.models.get(excluded) or {}).get('provider')
+        for model_name, config in self.models.items():
+            if model_name != excluded and config['available'] and config['provider'] != excluded_provider:
+                return model_name
+        return None
+
+    def _dispatch_to_provider(
+        self,
+        message: str,
+        model_config: Dict,
+        system_prompt: str,
+        history: Optional[List[Dict]],
+        images: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Route a request to the correct provider method"""
+        provider = model_config['provider']
+        if provider == 'openai':
+            return self._chat_openai(message, model_config, system_prompt, history)
+        elif provider == 'deepseek':
+            return self._chat_deepseek(message, model_config, system_prompt, history)
+        elif provider == 'xai':
+            return self._chat_grok(message, model_config, system_prompt, history)
+        elif provider == 'google':
+            return self._chat_gemini(message, model_config, system_prompt, history, images)
+        else:
+            raise ValueError(f"Unknown provider: {provider}")
     
     def get_available_models(self) -> List[Dict[str, Any]]:
         """Get list of available models with their status"""

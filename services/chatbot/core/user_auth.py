@@ -406,3 +406,30 @@ def toggle_user_active(db, username, active):
         {"$set": {"is_active": active, "updated_at": datetime.utcnow()}},
     )
     return result.modified_count > 0
+
+
+def update_user_profile(db, username, display_name=None, avatar_data=None, bio=None):
+    """Update user profile fields (display_name, avatar_data, bio). Returns updated dict or None."""
+    if db is None:
+        return None
+    users_col = db["users"]
+    update_fields = {"updated_at": datetime.utcnow()}
+    if display_name is not None:
+        update_fields["display_name"] = display_name.strip() or username
+    if avatar_data is not None:
+        update_fields["avatar_data"] = avatar_data
+    if bio is not None:
+        update_fields["bio"] = bio.strip()[:200]
+    result = users_col.update_one({"username": username}, {"$set": update_fields})
+    if result.matched_count:
+        user = users_col.find_one(
+            {"username": username},
+            {"_id": 0, "display_name": 1, "avatar_data": 1, "bio": 1},
+        )
+        return {
+            "display_name": user.get("display_name", username),
+            "avatar_data": user.get("avatar_data", ""),
+            "bio": user.get("bio", ""),
+        }
+    return None
+
