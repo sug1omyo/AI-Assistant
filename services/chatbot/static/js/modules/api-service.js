@@ -128,6 +128,12 @@ export class APIService {
             body.images = params.images;
         }
 
+        // Include per-request model parameter overrides (null = use server defaults)
+        if (params.temperature != null) body.temperature = params.temperature;
+        if (params.temperatureDeep != null) body.temperature_deep = params.temperatureDeep;
+        if (params.maxTokensDeep != null) body.max_tokens_deep = params.maxTokensDeep;
+        if (params.topP != null) body.top_p = params.topP;
+
         const response = await fetch('/chat/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

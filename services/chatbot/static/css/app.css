@@ -1841,6 +1841,92 @@ body.light-mode .message__content pre {
   color: var(--text-tertiary);
 }
 
+/* ── Advanced Model Settings Panel ────────────────────────── */
+.adv-settings {
+  display: none;
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  border-radius: 12px;
+  padding: 14px 16px 12px;
+  margin-bottom: 8px;
+  animation: advFadeIn 0.15s ease;
+}
+.adv-settings--open {
+  display: block;
+}
+@keyframes advFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.adv-settings__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.adv-settings__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #a0a0b0);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.adv-settings__reset {
+  font-size: 11px;
+  color: var(--accent, #7c7cff);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.adv-settings__reset:hover {
+  background: rgba(124,124,255,0.12);
+}
+.adv-settings__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 20px;
+}
+@media (max-width: 600px) {
+  .adv-settings__grid { grid-template-columns: 1fr; }
+}
+.adv-settings__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.adv-settings__label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-primary, #e0e0e0);
+  font-weight: 500;
+}
+.adv-settings__value {
+  font-size: 11px;
+  color: var(--accent, #7c7cff);
+  font-weight: 600;
+  min-width: 50px;
+  text-align: right;
+}
+.adv-settings__slider {
+  width: 100%;
+  accent-color: var(--accent, #7c7cff);
+  cursor: pointer;
+  height: 4px;
+}
+.adv-settings__sub {
+  font-size: 10px;
+  color: var(--text-tertiary, #666);
+}
+/* Gear toggle button active state */
+.adv-settings__toggle.active {
+  color: var(--accent, #7c7cff);
+  background: rgba(124,124,255,0.1);
+}
+
 /* ── Tools Dropdown ────────────────────────────────────────── */
 .tools-dropdown {
   position: absolute;

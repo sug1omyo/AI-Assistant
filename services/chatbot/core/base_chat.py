@@ -57,6 +57,11 @@ class ChatContext:
     memories: Optional[List[Dict]] = None
     conversation_history: List[Dict] = field(default_factory=list)
     images: Optional[List[str]] = None  # base64 data-URLs for vision models
+    # Per-request parameter overrides (None = fall back to ModelConfig defaults)
+    temperature: Optional[float] = None
+    temperature_deep: Optional[float] = None
+    max_tokens_deep: Optional[int] = None
+    top_p: Optional[float] = None
 
 
 @dataclass
@@ -207,12 +212,12 @@ class BaseModelChat(ABC):
         self.retry_config = RetryConfig()
     
     @abstractmethod
-    def _call_api(self, messages: List[Dict], temperature: float, max_tokens: int) -> str:
+    def _call_api(self, messages: List[Dict], temperature: float, max_tokens: int, top_p: Optional[float] = None) -> str:
         """Make the actual API call"""
         pass
     
     @abstractmethod
-    def _call_api_stream(self, messages: List[Dict], temperature: float, max_tokens: int) -> Generator[str, None, None]:
+    def _call_api_stream(self, messages: List[Dict], temperature: float, max_tokens: int, top_p: Optional[float] = None) -> Generator[str, None, None]:
         """Make streaming API call"""
         pass
     
@@ -291,8 +296,13 @@ class BaseModelChat(ABC):
         system_prompt = self.build_system_prompt(ctx, prompts_getter)
         messages = self.build_messages(ctx, system_prompt)
         
-        temperature = self.config.temperature_deep if ctx.deep_thinking else self.config.temperature
-        max_tokens = self.config.max_tokens_deep if ctx.deep_thinking else self.config.max_tokens
+        if ctx.deep_thinking:
+            temperature = ctx.temperature_deep if ctx.temperature_deep is not None else self.config.temperature_deep
+            max_tokens = ctx.max_tokens_deep if ctx.max_tokens_deep is not None else self.config.max_tokens_deep
+        else:
+            temperature = ctx.temperature if ctx.temperature is not None else self.config.temperature
+            max_tokens = self.config.max_tokens
+        top_p = ctx.top_p
         
         retry_count = 0
         last_error = None
@@ -301,9 +311,9 @@ class BaseModelChat(ABC):
             try:
                 if stream and self.config.supports_streaming:
                     # Return generator for streaming
-                    return self._call_api_stream(messages, temperature, max_tokens)
+                    return self._call_api_stream(messages, temperature, max_tokens, top_p)
                 else:
-                    content = self._call_api(messages, temperature, max_tokens)
+                    content = self._call_api(messages, temperature, max_tokens, top_p)
                     return ChatResponse(
                         content=content,
                         model=self.config.name,
@@ -350,23 +360,18 @@ class OpenAICompatibleChat(BaseModelChat):
             base_url=config.base_url if config.base_url else None
         )
     
-    def _call_api(self, messages: List[Dict], temperature: float, max_tokens: int) -> str:
-        response = self.client.chat.completions.create(
-            model=self.config.model_id,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
+    def _call_api(self, messages: List[Dict], temperature: float, max_tokens: int, top_p: Optional[float] = None) -> str:
+        kwargs = dict(model=self.config.model_id, messages=messages, temperature=temperature, max_tokens=max_tokens)
+        if top_p is not None:
+            kwargs['top_p'] = top_p
+        response = self.client.chat.completions.create(**kwargs)
         return response.choices[0].message.content
     
-    def _call_api_stream(self, messages: List[Dict], temperature: float, max_tokens: int) -> Generator[str, None, None]:
-        stream = self.client.chat.completions.create(
-            model=self.config.model_id,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=True
-        )
+    def _call_api_stream(self, messages: List[Dict], temperature: float, max_tokens: int, top_p: Optional[float] = None) -> Generator[str, None, None]:
+        kwargs = dict(model=self.config.model_id, messages=messages, temperature=temperature, max_tokens=max_tokens, stream=True)
+        if top_p is not None:
+            kwargs['top_p'] = top_p
+        stream = self.client.chat.completions.create(**kwargs)
         for chunk in stream:
             if chunk.choices:
                 delta = chunk.choices[0].delta
@@ -383,19 +388,17 @@ class OpenAICompatibleChat(BaseModelChat):
 class QwenChat(BaseModelChat):
     """Chat implementation for Qwen API"""
     
-    def _call_api(self, messages: List[Dict], temperature: float, max_tokens: int) -> str:
+    def _call_api(self, messages: List[Dict], temperature: float, max_tokens: int, top_p: Optional[float] = None) -> str:
+        payload = {"model": self.config.model_id, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
+        if top_p is not None:
+            payload['top_p'] = top_p
         response = requests.post(
             "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {self.config.api_key}",
                 "Content-Type": "application/json"
             },
-            json={
-                "model": self.config.model_id,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens
-            },
+            json=payload,
             timeout=self.config.timeout
         )
         
@@ -403,20 +406,17 @@ class QwenChat(BaseModelChat):
             return response.json()['choices'][0]['message']['content']
         raise Exception(f"Qwen API error: {response.status_code}")
     
-    def _call_api_stream(self, messages: List[Dict], temperature: float, max_tokens: int) -> Generator[str, None, None]:
+    def _call_api_stream(self, messages: List[Dict], temperature: float, max_tokens: int, top_p: Optional[float] = None) -> Generator[str, None, None]:
+        payload = {"model": self.config.model_id, "messages": messages, "temperature": temperature, "max_tokens": max_tokens, "stream": True}
+        if top_p is not None:
+            payload['top_p'] = top_p
         response = requests.post(
             "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {self.config.api_key}",
                 "Content-Type": "application/json"
             },
-            json={
-                "model": self.config.model_id,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "stream": True
-            },
+            json=payload,
             timeout=self.config.timeout,
             stream=True
         )
@@ -462,7 +462,7 @@ class BloomVNChat(BaseModelChat):
         conversation += "Assistant:"
         return conversation
     
-    def _call_api(self, messages: List[Dict], temperature: float, max_tokens: int) -> str:
+    def _call_api(self, messages: List[Dict], temperature: float, max_tokens: int, top_p: Optional[float] = None) -> str:
         conversation = self._build_conversation(messages)
         
         response = requests.post(
@@ -473,7 +473,8 @@ class BloomVNChat(BaseModelChat):
                 "parameters": {
                     "max_new_tokens": max_tokens,
                     "temperature": temperature,
-                    "do_sample": True
+                    "do_sample": True,
+                    **({"top_p": top_p} if top_p is not None else {})
                 }
             },
             timeout=self.config.timeout
@@ -488,9 +489,9 @@ class BloomVNChat(BaseModelChat):
             raise Exception("BloomVN is loading, try again in 20-30 seconds")
         raise Exception(f"BloomVN API error: {response.status_code}")
     
-    def _call_api_stream(self, messages: List[Dict], temperature: float, max_tokens: int) -> Generator[str, None, None]:
+    def _call_api_stream(self, messages: List[Dict], temperature: float, max_tokens: int, top_p: Optional[float] = None) -> Generator[str, None, None]:
         # BloomVN doesn't support streaming, yield full response
-        content = self._call_api(messages, temperature, max_tokens)
+        content = self._call_api(messages, temperature, max_tokens, top_p)
         yield content
 
 

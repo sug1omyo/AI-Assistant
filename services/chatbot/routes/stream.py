@@ -289,6 +289,28 @@ def chat_stream():
         
         if images:
             logger.info(f"[STREAM] {len(images)} image(s) attached for vision")
+
+        # Extract per-request model parameter overrides
+        try:
+            _t = data.get('temperature')
+            temperature = float(_t) if _t is not None and 0.0 <= float(_t) <= 2.0 else None
+        except (TypeError, ValueError):
+            temperature = None
+        try:
+            _td = data.get('temperature_deep')
+            temperature_deep = float(_td) if _td is not None and 0.0 <= float(_td) <= 2.0 else None
+        except (TypeError, ValueError):
+            temperature_deep = None
+        try:
+            _mt = data.get('max_tokens_deep')
+            max_tokens_deep = int(_mt) if _mt is not None and 1 <= int(_mt) <= 131072 else None
+        except (TypeError, ValueError):
+            max_tokens_deep = None
+        try:
+            _tp = data.get('top_p')
+            top_p = float(_tp) if _tp is not None and 0.0 <= float(_tp) <= 1.0 else None
+        except (TypeError, ValueError):
+            top_p = None
         
         if not message:
             return Response(
@@ -688,7 +710,11 @@ def chat_stream():
                         memories=memories if memories else None,
                         language=language,
                         custom_prompt=custom_prompt,
-                        images=images
+                        images=images,
+                        temperature=temperature,
+                        temperature_deep=temperature_deep,
+                        max_tokens_deep=max_tokens_deep,
+                        top_p=top_p,
                     ):
                         if not chunk:
                             continue
