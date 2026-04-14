@@ -8,10 +8,11 @@ import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse, FileResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 # Ensure paths
@@ -85,7 +86,7 @@ def create_app() -> FastAPI:
     app.add_middleware(SessionMiddleware, secret_key=secret)
 
     # --- Static files ---
-    static_dir = CHATBOT_DIR / "Static"
+    static_dir = CHATBOT_DIR / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
@@ -96,6 +97,24 @@ def create_app() -> FastAPI:
             StaticFiles(directory=str(storage_dir)),
             name="image_storage",
         )
+
+    # --- Templates ---
+    templates_dir = CHATBOT_DIR / "templates"
+    templates = Jinja2Templates(directory=str(templates_dir)) if templates_dir.exists() else None
+
+    # --- Page routes ---
+    @app.get("/", response_class=HTMLResponse)
+    async def index(request: Request):
+        if templates:
+            return templates.TemplateResponse("index.html", {"request": request})
+        return HTMLResponse("<h1>AI Chatbot (FastAPI)</h1><p>Templates directory not found.</p>")
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        ico = CHATBOT_DIR / "static" / "favicon.ico"
+        if ico.exists():
+            return FileResponse(str(ico))
+        return HTMLResponse("", status_code=204)
 
     # --- Routers ---
     app.include_router(chat.router, tags=["Chat"])
