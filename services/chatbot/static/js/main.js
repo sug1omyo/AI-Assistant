@@ -1019,6 +1019,7 @@ class ChatBotApp {
         // Show loading with thinking mode indicator
         const thinkingMode = formValues.thinkingMode || 'instant';
         this.uiUtils.showLoading(thinkingMode);
+        if (window.showToolStatus) window.showToolStatus();
         
         // Add user message to chat
         const timestamp = this.uiUtils.formatTimestamp(new Date());
@@ -1479,6 +1480,7 @@ class ChatBotApp {
                 this.saveCurrentSession(true);
             }
         } finally {
+            if (window.hideToolStatus) window.hideToolStatus();
             this.uiUtils.hideLoading();
             this.currentAbortController = null;
         }

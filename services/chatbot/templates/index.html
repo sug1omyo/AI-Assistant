@@ -754,6 +754,7 @@ try {
                             <div class="typing-indicator__dot"></div>
                         </div>
                         <span id="loadingText" class="stop-text" data-lang-key="loading.thinking">Thinking...</span>
+                        <div id="toolStatusBar" class="tool-status-bar" style="display:none;"></div>
                         <button id="stopGenerationBtn" class="btn btn--ghost btn--sm" data-lang-key="loading.stop" style="margin-left: 8px;"><i data-lucide="square" class="lucide lucide-sm"></i> Stop</button>
                     </div>
                 </div>
@@ -794,68 +795,102 @@ try {
                                 <!-- Tools dropdown -->
                                 <div class="tools-dropdown" id="toolsMenuDropdown">
                                     <div class="tools-dropdown__header">Tools</div>
-                                    <div class="tools-grid">
-                                        <button class="tools-grid__item" id="imageGenToolBtn" title="Tạo hình ảnh">
-                                            <span class="tools-grid__icon"><i data-lucide="image" class="lucide"></i></span>
-                                            <span class="tools-grid__label">Image Gen</span>
+
+                                    <!-- Search -->
+                                    <div class="tools-category">
+                                        <div class="tools-category__label"><i data-lucide="search" class="lucide lucide-sm"></i> Search</div>
+                                        <div class="tools-grid tools-grid--3col">
+                                            <button class="tools-grid__item" id="googleSearchBtn" title="Google Search">
+                                                <span class="tools-grid__icon"><i data-lucide="search" class="lucide"></i></span>
+                                                <span class="tools-grid__label">Web Search</span>
+                                            </button>
+                                            <button class="tools-grid__item" id="serpapiBingBtn" title="Bing Search (SerpAPI)">
+                                                <span class="tools-grid__icon"><i data-lucide="globe" class="lucide"></i></span>
+                                                <span class="tools-grid__label">Bing</span>
+                                            </button>
+                                            <button class="tools-grid__item" id="serpapiBaiduBtn" title="Baidu Search (SerpAPI)">
+                                                <span class="tools-grid__icon"><i data-lucide="search-code" class="lucide"></i></span>
+                                                <span class="tools-grid__label">Baidu</span>
+                                            </button>
+                                            <button class="tools-grid__item" id="githubBtn" title="GitHub">
+                                                <span class="tools-grid__icon"><i data-lucide="github" class="lucide"></i></span>
+                                                <span class="tools-grid__label">GitHub</span>
+                                            </button>
+                                            <button class="tools-grid__item" id="serpapiImagesBtn" title="Google Images Search (SerpAPI)">
+                                                <span class="tools-grid__icon"><i data-lucide="image" class="lucide"></i></span>
+                                                <span class="tools-grid__label">Img Search</span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Image -->
+                                    <div class="tools-category">
+                                        <div class="tools-category__label"><i data-lucide="image" class="lucide lucide-sm"></i> Image</div>
+                                        <div class="tools-grid tools-grid--3col">
+                                            <button class="tools-grid__item" id="imageGenToolBtn" title="Tạo hình ảnh">
+                                                <span class="tools-grid__icon"><i data-lucide="sparkles" class="lucide"></i></span>
+                                                <span class="tools-grid__label">Image Gen</span>
+                                            </button>
+                                            <button class="tools-grid__item" id="img2imgToolBtn" title="Img2Img + DeepDanbooru">
+                                                <span class="tools-grid__icon"><i data-lucide="scan-eye" class="lucide"></i></span>
+                                                <span class="tools-grid__label">Img2Img</span>
+                                            </button>
+                                            <button class="tools-grid__item" id="googleLensBtn" title="Google Lens — Reverse Image (SerpAPI)">
+                                                <span class="tools-grid__icon"><i data-lucide="camera" class="lucide"></i></span>
+                                                <span class="tools-grid__label">Lens</span>
+                                            </button>
+                                            <button class="tools-grid__item" id="saucenaoBtn" title="SauceNAO Reverse Image Search">
+                                                <span class="tools-grid__icon"><i data-lucide="scan-search" class="lucide"></i></span>
+                                                <span class="tools-grid__label">SauceNAO</span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Reasoning -->
+                                    <div class="tools-category">
+                                        <div class="tools-category__label"><i data-lucide="brain" class="lucide lucide-sm"></i> Reasoning</div>
+                                        <div class="tools-grid tools-grid--3col">
+                                            <button class="tools-grid__item" id="deepResearchToolBtn" title="Deep Research — 4-Agent Council">
+                                                <span class="tools-grid__icon"><i data-lucide="telescope" class="lucide"></i></span>
+                                                <span class="tools-grid__label">Deep Research</span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Agent -->
+                                    <div class="tools-category">
+                                        <div class="tools-category__label"><i data-lucide="bot" class="lucide lucide-sm"></i> Agent</div>
+                                        <div class="tools-grid tools-grid--3col">
+                                            <button class="tools-grid__item" id="last30daysBtn" title="Social Media Research (last30days)">
+                                                <span class="tools-grid__icon"><i data-lucide="bar-chart-3" class="lucide"></i></span>
+                                                <span class="tools-grid__label">Social Research</span>
+                                            </button>
+                                            <button class="tools-grid__item" id="configAgentBtn" title="Config Agent">
+                                                <span class="tools-grid__icon"><i data-lucide="settings" class="lucide"></i></span>
+                                                <span class="tools-grid__label">Config</span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div class="tools-dropdown__divider"></div>
+
+                                    <!-- Utility actions -->
+                                    <div class="tools-dropdown__actions">
+                                        <button class="tools-dropdown__item" id="uploadFilesBtn" title="Upload files">
+                                            <span class="tools-dropdown__item-icon"><i data-lucide="paperclip" class="lucide"></i></span>
+                                            <div>
+                                                <div class="tools-dropdown__item-text">Upload Files</div>
+                                                <div class="tools-dropdown__item-sub">Attach images, docs, code</div>
+                                            </div>
                                         </button>
-                                        <button class="tools-grid__item" id="img2imgToolBtn" title="Img2Img + DeepDanbooru">
-                                            <span class="tools-grid__icon"><i data-lucide="scan-eye" class="lucide"></i></span>
-                                            <span class="tools-grid__label">Img2Img</span>
-                                        </button>
-                                        <button class="tools-grid__item" id="googleSearchBtn" title="Google Search">
-                                            <span class="tools-grid__icon"><i data-lucide="search" class="lucide"></i></span>
-                                            <span class="tools-grid__label">Web Search</span>
-                                        </button>
-                                        <button class="tools-grid__item" id="deepResearchToolBtn" title="Deep Research">
-                                            <span class="tools-grid__icon"><i data-lucide="telescope" class="lucide"></i></span>
-                                            <span class="tools-grid__label">Research</span>
-                                        </button>
-                                        <button class="tools-grid__item" id="githubBtn" title="GitHub">
-                                            <span class="tools-grid__icon"><i data-lucide="github" class="lucide"></i></span>
-                                            <span class="tools-grid__label">GitHub</span>
-                                        </button>
-                                        <button class="tools-grid__item" id="saucenaoBtn" title="SauceNAO Reverse Image Search">
-                                            <span class="tools-grid__icon"><i data-lucide="scan-search" class="lucide"></i></span>
-                                            <span class="tools-grid__label">SauceNAO</span>
-                                        </button>
-                                        <button class="tools-grid__item" id="googleLensBtn" title="Google Lens — Reverse Image (SerpAPI)">
-                                            <span class="tools-grid__icon"><i data-lucide="camera" class="lucide"></i></span>
-                                            <span class="tools-grid__label">Lens</span>
-                                        </button>
-                                        <button class="tools-grid__item" id="serpapiBingBtn" title="Bing Search (SerpAPI)">
-                                            <span class="tools-grid__icon"><i data-lucide="globe" class="lucide"></i></span>
-                                            <span class="tools-grid__label">Bing</span>
-                                        </button>
-                                        <button class="tools-grid__item" id="serpapiBaiduBtn" title="Baidu Search (SerpAPI)">
-                                            <span class="tools-grid__icon"><i data-lucide="search-code" class="lucide"></i></span>
-                                            <span class="tools-grid__label">Baidu</span>
-                                        </button>
-                                        <button class="tools-grid__item" id="serpapiImagesBtn" title="Google Images Search (SerpAPI)">
-                                            <span class="tools-grid__icon"><i data-lucide="image" class="lucide"></i></span>
-                                            <span class="tools-grid__label">Img Search</span>
-                                        </button>
-                                        <button class="tools-grid__item" id="last30daysBtn" title="Social Media Research (last30days)">
-                                            <span class="tools-grid__icon"><i data-lucide="bar-chart-3" class="lucide"></i></span>
-                                            <span class="tools-grid__label">Social Research</span>
-                                        </button>
-                                        <button class="tools-grid__item" id="configAgentBtn" title="Config Agent">
-                                            <span class="tools-grid__icon"><i data-lucide="settings" class="lucide"></i></span>
-                                            <span class="tools-grid__label">Agent</span>
-                                        </button>
-                                        <button class="tools-grid__item" id="uploadFilesBtn" title="Upload files">
-                                            <span class="tools-grid__icon"><i data-lucide="paperclip" class="lucide"></i></span>
-                                            <span class="tools-grid__label">Upload</span>
+                                        <button class="tools-dropdown__item" id="branchConversationBtn" title="Branch">
+                                            <span class="tools-dropdown__item-icon"><i data-lucide="git-branch" class="lucide"></i></span>
+                                            <div>
+                                                <div class="tools-dropdown__item-text">Branch conversation</div>
+                                                <div class="tools-dropdown__item-sub">Fork from current point</div>
+                                            </div>
                                         </button>
                                     </div>
-                                    <div class="tools-dropdown__divider"></div>
-                                    <button class="tools-dropdown__item" id="branchConversationBtn" title="Branch">
-                                        <span class="tools-dropdown__item-icon"><i data-lucide="git-branch" class="lucide"></i></span>
-                                        <div>
-                                            <div class="tools-dropdown__item-text">Branch conversation</div>
-                                            <div class="tools-dropdown__item-sub">Fork from current point</div>
-                                        </div>
-                                    </button>
                                 </div>
                             </div>
 
@@ -1937,8 +1972,9 @@ try {
         const icons = {
             'image-generation': '🎨', 'img2img': '🖼️',
             'google-search': '🔍', 'github': '📦', 'deep-research': '🔬',
-            'saucenao': '�', 'serpapi-reverse-image': '📸',
-            'serpapi-bing': '🅱️', 'serpapi-baidu': '🀄', 'serpapi-images': '�🖼️'
+            'saucenao': '🔎', 'serpapi-reverse-image': '📸',
+            'serpapi-bing': '🅱️', 'serpapi-baidu': '🀄', 'serpapi-images': '🖼️',
+            'last30days-research': '📊'
         };
         activeTools.forEach(tool => {
             const badge = document.createElement('span');
@@ -1958,6 +1994,39 @@ try {
         const d = document.getElementById('toolsMenuDropdown');
         if (d) d.classList.remove('open');
     }
+
+    // ════════════════════════════════════════════════════════════
+    // TOOL STATUS BAR — shows what tools are running during SSE
+    // ════════════════════════════════════════════════════════════
+    const toolStatusMessages = {
+        'google-search': '🔍 Searching the web…',
+        'serpapi-bing': '🔍 Searching Bing…',
+        'serpapi-baidu': '🔍 Searching Baidu…',
+        'serpapi-images': '🖼️ Searching images…',
+        'serpapi-reverse-image': '📸 Reverse image search…',
+        'saucenao': '🔎 Searching SauceNAO…',
+        'github': '📦 Searching GitHub…',
+        'image-generation': '🎨 Generating image…',
+        'img2img': '🖼️ Running Img2Img…',
+        'deep-research': '🔬 Deep research in progress…',
+        'last30days-research': '📊 Social media research…',
+    };
+
+    window.showToolStatus = function() {
+        const bar = document.getElementById('toolStatusBar');
+        if (!bar) return;
+        const active = window.getActiveTools ? window.getActiveTools() : [];
+        if (active.length === 0) { bar.style.display = 'none'; return; }
+        const msgs = active.map(t => toolStatusMessages[t]).filter(Boolean);
+        if (msgs.length === 0) { bar.style.display = 'none'; return; }
+        bar.innerHTML = msgs.map(m => `<span class="tool-status-item">${m}</span>`).join('');
+        bar.style.display = 'flex';
+    };
+
+    window.hideToolStatus = function() {
+        const bar = document.getElementById('toolStatusBar');
+        if (bar) { bar.innerHTML = ''; bar.style.display = 'none'; }
+    };
 
     // ════════════════════════════════════════════════════════════
     // SKILL SELECTOR

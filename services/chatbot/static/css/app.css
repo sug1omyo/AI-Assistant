@@ -1882,6 +1882,31 @@ body.light-mode .message__content pre {
   padding: 6px 8px;
 }
 
+.tools-grid--3col {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* ── Tool Categories ── */
+.tools-category {
+  padding: 0 4px;
+}
+
+.tools-category + .tools-category {
+  border-top: 1px solid var(--border-secondary);
+}
+
+.tools-category__label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 10px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary);
+}
+
 .tools-grid__item {
   display: flex;
   flex-direction: column;
@@ -2012,6 +2037,32 @@ body.light-mode .message__content pre {
 }
 
 .active-tool-badge button:hover { opacity: 1; }
+
+/* ── Tool Status Bar (shown during generation) ────────────── */
+.tool-status-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.tool-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-soft);
+  animation: toolStatusPulse 2s ease-in-out infinite;
+}
+
+@keyframes toolStatusPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
 
 /* ── Active skill badge (input area) ──────────────────────── */
 .active-skill-badge {
@@ -2899,7 +2950,8 @@ body.light-mode .message__content pre {
     border-radius: var(--radius-lg);
     z-index: 150;
   }
-  .tools-grid {
+  .tools-grid,
+  .tools-grid--3col {
     grid-template-columns: repeat(3, 1fr);
   }
 
@@ -3039,6 +3091,11 @@ body.light-mode .message__content pre {
   #imageGenV2Btn { display: none; }
 
   .welcome__title { font-size: 20px; }
+
+  .tools-grid,
+  .tools-grid--3col {
+    grid-template-columns: repeat(2, 1fr);
+  }
 
   .sidebar {
     width: 260px;
