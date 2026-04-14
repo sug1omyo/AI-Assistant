@@ -3739,6 +3739,24 @@ body.light-mode .message__content pre {
   height: 14px;
 }
 
+.suggestion-chip--loading {
+  pointer-events: none;
+  cursor: default;
+  opacity: 0.45;
+  min-width: 120px;
+  background: linear-gradient(90deg,
+    var(--bg-tertiary, rgba(255,255,255,0.04)) 25%,
+    rgba(255,255,255,0.08) 50%,
+    var(--bg-tertiary, rgba(255,255,255,0.04)) 75%);
+  background-size: 200% 100%;
+  animation: suggestion-shimmer 1.4s infinite;
+}
+
+@keyframes suggestion-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 /* ── File Staging Area ── */
 .file-staging {
   display: flex;

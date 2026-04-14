@@ -15,7 +15,7 @@ from core.extensions import MONGODB_ENABLED, ConversationDB, logger
 from core.db_helpers import get_user_id_from_session, set_active_conversation
 from core.chatbot import chatbots
 
-conversations_bp = Blueprint('conversations', __name__)
+conversations_bp = Blueprint('conversations_orig', __name__)
 
 
 @conversations_bp.route('/conversations', methods=['GET'])

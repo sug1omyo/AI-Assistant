@@ -1395,19 +1395,6 @@ class ChatBotApp {
 
             // ── Follow-up suggestions + Think Harder ──
             if (!streamFailed && this.messageRenderer.features?.suggestionChips !== false) {
-                // Client-side fallback suggestions when server sends none
-                if (streamSuggestions.length === 0 && responseContent) {
-                    const hasCode = responseContent.includes('```');
-                    const hasList = (responseContent.match(/\n- /g) || []).length >= 3;
-                    if (hasCode) {
-                        streamSuggestions = ['Giải thích chi tiết đoạn code này', 'Tối ưu hiệu suất được không?', 'Viết unit test cho code này'];
-                    } else if (hasList) {
-                        streamSuggestions = ['Phân tích chi tiết hơn từng mục', 'Cái nào quan trọng nhất?', 'Tóm tắt ngắn gọn hơn'];
-                    } else {
-                        streamSuggestions = ['Giải thích thêm chi tiết', 'Có ví dụ cụ thể không?', 'Áp dụng vào thực tế như thế nào?'];
-                    }
-                }
-
                 const suggestionsContainer = document.createElement('div');
                 suggestionsContainer.className = 'follow-up-suggestions';
 
@@ -1431,9 +1418,14 @@ class ChatBotApp {
                     suggestionsContainer.appendChild(thinkBtn);
                 }
 
-                // Follow-up suggestion chips (Grok-style with arrow)
-                if (streamSuggestions.length > 0) {
-                    streamSuggestions.forEach(text => {
+                // Append container early so Think Harder button shows immediately
+                elements.chatContainer.appendChild(suggestionsContainer);
+                if (window.lucide) lucide.createIcons({ nodes: [suggestionsContainer] });
+
+                const _renderChips = (suggestions) => {
+                    // Remove any skeleton loaders
+                    suggestionsContainer.querySelectorAll('.suggestion-chip--loading').forEach(el => el.remove());
+                    suggestions.forEach(text => {
                         const chip = document.createElement('button');
                         chip.className = 'suggestion-chip';
                         chip.innerHTML = `<span class="suggestion-chip__icon">↗</span><span class="suggestion-chip__text">${this._escapeHtml(text)}</span>`;
@@ -1444,12 +1436,46 @@ class ChatBotApp {
                         };
                         suggestionsContainer.appendChild(chip);
                     });
-                }
-
-                if (suggestionsContainer.children.length > 0) {
-                    elements.chatContainer.appendChild(suggestionsContainer);
-                    if (window.lucide) lucide.createIcons({ nodes: [suggestionsContainer] });
                     elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+                };
+
+                if (streamSuggestions.length > 0) {
+                    // Server already sent suggestions via SSE — render immediately
+                    _renderChips(streamSuggestions);
+                } else if (responseContent) {
+                    // Show skeleton placeholders while we fetch AI-generated suggestions
+                    for (let i = 0; i < 3; i++) {
+                        const s = document.createElement('span');
+                        s.className = 'suggestion-chip suggestion-chip--loading';
+                        s.innerHTML = '<span class="suggestion-chip__icon">↗</span><span class="suggestion-chip__text">…</span>';
+                        suggestionsContainer.appendChild(s);
+                    }
+                    elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+
+                    // Detect language from response
+                    const _lang = /[àáâãäåæçèéêëìíîïðñòóôõöøùúûüý]/i.test(responseContent) ? 'vi' : 'en';
+                    fetch('/api/chat/suggestions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            message: message.slice(0, 500),
+                            response: responseContent.slice(0, 1000),
+                            model: formValues.model,
+                            language: _lang,
+                        }),
+                        signal: AbortSignal.timeout(15000),
+                    })
+                    .then(r => r.ok ? r.json() : null)
+                    .then(data => {
+                        if (data?.suggestions?.length > 0) {
+                            _renderChips(data.suggestions);
+                        } else {
+                            suggestionsContainer.querySelectorAll('.suggestion-chip--loading').forEach(el => el.remove());
+                        }
+                    })
+                    .catch(() => {
+                        suggestionsContainer.querySelectorAll('.suggestion-chip--loading').forEach(el => el.remove());
+                    });
                 }
             }
             
