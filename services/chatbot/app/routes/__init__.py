@@ -50,29 +50,35 @@ def _register_original_blueprints(app: Flask) -> None:
     import logging
     logger = logging.getLogger(__name__)
     
+    # (module, bp_attr, url_prefix, name_override)
+    # name_override avoids conflicts with same-named v1 blueprints
     blueprint_imports = [
-        ('routes.user_auth', 'user_auth_bp', None),
-        ('routes.admin', 'admin_bp', None),
-        ('routes.images', 'images_bp', None),
-        ('routes.stream', 'stream_bp', None),
-        ('routes.memory', 'memory_bp', '/memory'),
-        ('routes.conversations', 'conversations_bp', None),
-        ('routes.stable_diffusion', 'sd_bp', None),
-        ('routes.image_gen', 'image_gen_bp', None),
-        ('routes.models', 'models_bp', None),
-        ('routes.async_routes', 'async_bp', None),
-        ('routes.mcp', 'mcp_bp', '/api/mcp'),
-        ('routes.qr_payment', 'qr_bp', None),
-        ('routes.skills', 'skills_bp', None),
+        ('routes.user_auth', 'user_auth_bp', None, None),
+        ('routes.admin', 'admin_bp', None, None),
+        ('routes.images', 'images_bp', None, None),
+        ('routes.stream', 'stream_bp', None, None),
+        ('routes.memory', 'memory_bp', '/memory', 'memory_legacy'),
+        ('routes.conversations', 'conversations_bp', None, 'conversations_legacy'),
+        ('routes.stable_diffusion', 'sd_bp', None, None),
+        ('routes.image_gen', 'image_gen_bp', None, None),
+        ('routes.models', 'models_bp', None, None),
+        ('routes.async_routes', 'async_bp', None, None),
+        ('routes.mcp', 'mcp_bp', '/api/mcp', None),
+        ('routes.qr_payment', 'qr_bp', None, None),
+        ('routes.skills', 'skills_bp', None, None),
     ]
     
-    for module_name, bp_attr, url_prefix in blueprint_imports:
+    for module_name, bp_attr, url_prefix, name_override in blueprint_imports:
         try:
             import importlib
             mod = importlib.import_module(module_name)
             bp = getattr(mod, bp_attr)
-            kwargs = {'url_prefix': url_prefix} if url_prefix else {}
+            kwargs = {}
+            if url_prefix:
+                kwargs['url_prefix'] = url_prefix
+            if name_override:
+                kwargs['name'] = name_override
             app.register_blueprint(bp, **kwargs)
-            logger.info(f"âœ… Registered original blueprint: {bp_attr}")
+            logger.info(f"✅ Registered original blueprint: {bp_attr}")
         except Exception as e:
-            logger.warning(f"âš ï¸ Could not register {bp_attr}: {e}")
+            logger.warning(f"⚠️ Could not register {bp_attr}: {e}")

@@ -560,7 +560,9 @@ class ComfyUIProvider(BaseImageProvider):
                     "sampler": "dpmpp_2m", "scheduler": "karras",
                     "vae": None,
                 }
-            raise RuntimeError("No checkpoints available in ComfyUI")
+            raise RuntimeError(
+                "No checkpoints available in ComfyUI. Add at least one model to ComfyUI/models/checkpoints."
+            )
 
         style_match = [(c, p) for c, p in candidates if p["style"] == style]
         pool = style_match if style_match else candidates
@@ -605,7 +607,13 @@ class ComfyUIProvider(BaseImageProvider):
 
     @property
     def is_available(self) -> bool:
-        return self.health_check()
+        if not self.health_check():
+            return False
+        try:
+            self._discover()
+            return bool(self._available_ckpts)
+        except Exception:
+            return False
 
     def generate(self, req: ImageRequest) -> ImageResult:
         t0 = time.time()
@@ -729,7 +737,7 @@ class ComfyUIProvider(BaseImageProvider):
 
         except Exception as e:
             logger.error("[ComfyUI] Error during generation", exc_info=True)
-            return ImageResult(success=False, error="Image generation failed", provider=self.name)
+            return ImageResult(success=False, error=f"Image generation failed: {e}", provider=self.name)
 
     def _build_lora_workflow(
         self, req: ImageRequest, seed: int, checkpoint: str, vae_name: str | None,
