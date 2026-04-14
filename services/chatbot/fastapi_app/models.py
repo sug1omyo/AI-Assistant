@@ -117,6 +117,11 @@ class ChatRequest(BaseModel):
     enable_x_search: bool = Field(
         False, description="Enable xAI server-side X/Twitter search tool",
     )
+    # ── Per-request model parameter overrides (None = use model defaults) ──
+    temperature: float | None = Field(None, ge=0.0, le=2.0, description="Temperature override for non-deep mode")
+    temperature_deep: float | None = Field(None, ge=0.0, le=2.0, description="Temperature override for deep-thinking mode")
+    max_tokens_deep: int | None = Field(None, ge=1, le=131072, description="Max tokens override for deep-thinking mode")
+    top_p: float | None = Field(None, ge=0.0, le=1.0, description="Top-p nucleus sampling override")
 
 
 class ChatResponse(BaseModel):

@@ -246,7 +246,11 @@ class ChatbotAgent:
         memories: Optional[List[Dict]] = None,
         language: str = 'vi',
         custom_prompt: Optional[str] = None,
-        images: Optional[List[str]] = None
+        images: Optional[List[str]] = None,
+        temperature: Optional[float] = None,
+        temperature_deep: Optional[float] = None,
+        max_tokens_deep: Optional[int] = None,
+        top_p: Optional[float] = None
     ) -> ChatContext:
         """Build chat context"""
         return ChatContext(
@@ -258,7 +262,11 @@ class ChatbotAgent:
             history=history,
             memories=memories,
             conversation_history=self.conversation_history,
-            images=images
+            images=images,
+            temperature=temperature,
+            temperature_deep=temperature_deep,
+            max_tokens_deep=max_tokens_deep,
+            top_p=top_p
         )
     
     def _chat_with_model(
@@ -329,7 +337,11 @@ class ChatbotAgent:
         memories: Optional[List[Dict]] = None,
         language: str = 'vi',
         custom_prompt: Optional[str] = None,
-        images: Optional[List[str]] = None
+        images: Optional[List[str]] = None,
+        temperature: Optional[float] = None,
+        temperature_deep: Optional[float] = None,
+        max_tokens_deep: Optional[int] = None,
+        top_p: Optional[float] = None
     ) -> Generator[str, None, None]:
         """
         Stream chat response in real-time
@@ -337,7 +349,7 @@ class ChatbotAgent:
         Yields:
             str: Response chunks as they arrive
         """
-        ctx = self._build_context(message, context, deep_thinking, history, memories, language, custom_prompt, images=images)
+        ctx = self._build_context(message, context, deep_thinking, history, memories, language, custom_prompt, images=images, temperature=temperature, temperature_deep=temperature_deep, max_tokens_deep=max_tokens_deep, top_p=top_p)
         
         # ── Auto-route to vision model when images are attached ──
         original_model = model
@@ -429,7 +441,11 @@ class ChatbotAgent:
         language: str = 'vi',
         custom_prompt: Optional[str] = None,
         enable_fallback: bool = True,
-        images: Optional[List[str]] = None
+        images: Optional[List[str]] = None,
+        temperature: Optional[float] = None,
+        temperature_deep: Optional[float] = None,
+        max_tokens_deep: Optional[int] = None,
+        top_p: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Main chat method with fallback support
@@ -452,7 +468,7 @@ class ChatbotAgent:
         if model in ['bloomvn-local', 'qwen1.5-local', 'qwen2.5-local']:
             return self._chat_with_local_model(message, model, context, deep_thinking, language)
         
-        ctx = self._build_context(message, context, deep_thinking, history, memories, language, custom_prompt, images=images)
+        ctx = self._build_context(message, context, deep_thinking, history, memories, language, custom_prompt, images=images, temperature=temperature, temperature_deep=temperature_deep, max_tokens_deep=max_tokens_deep, top_p=top_p)
         
         # ── Auto-route to vision model when images are attached ──
         if images and images:

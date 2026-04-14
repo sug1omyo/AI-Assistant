@@ -1019,6 +1019,7 @@ class ChatBotApp {
         // Show loading with thinking mode indicator
         const thinkingMode = formValues.thinkingMode || 'instant';
         this.uiUtils.showLoading(thinkingMode);
+        if (window.showToolStatus) window.showToolStatus();
         
         // Add user message to chat
         const timestamp = this.uiUtils.formatTimestamp(new Date());
@@ -1122,6 +1123,7 @@ class ChatBotApp {
                         images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
                         tools: activeTools,
                         skill: window.skillManager ? window.skillManager.getActiveSkillId() : '',
+                        ...window.getAdvancedModelParams(),
                     },
                     this.currentAbortController.signal,
                     {
@@ -1394,19 +1396,6 @@ class ChatBotApp {
 
             // ── Follow-up suggestions + Think Harder ──
             if (!streamFailed && this.messageRenderer.features?.suggestionChips !== false) {
-                // Client-side fallback suggestions when server sends none
-                if (streamSuggestions.length === 0 && responseContent) {
-                    const hasCode = responseContent.includes('```');
-                    const hasList = (responseContent.match(/\n- /g) || []).length >= 3;
-                    if (hasCode) {
-                        streamSuggestions = ['Giải thích chi tiết đoạn code này', 'Tối ưu hiệu suất được không?', 'Viết unit test cho code này'];
-                    } else if (hasList) {
-                        streamSuggestions = ['Phân tích chi tiết hơn từng mục', 'Cái nào quan trọng nhất?', 'Tóm tắt ngắn gọn hơn'];
-                    } else {
-                        streamSuggestions = ['Giải thích thêm chi tiết', 'Có ví dụ cụ thể không?', 'Áp dụng vào thực tế như thế nào?'];
-                    }
-                }
-
                 const suggestionsContainer = document.createElement('div');
                 suggestionsContainer.className = 'follow-up-suggestions';
 
@@ -1430,9 +1419,14 @@ class ChatBotApp {
                     suggestionsContainer.appendChild(thinkBtn);
                 }
 
-                // Follow-up suggestion chips (Grok-style with arrow)
-                if (streamSuggestions.length > 0) {
-                    streamSuggestions.forEach(text => {
+                // Append container early so Think Harder button shows immediately
+                elements.chatContainer.appendChild(suggestionsContainer);
+                if (window.lucide) lucide.createIcons({ nodes: [suggestionsContainer] });
+
+                const _renderChips = (suggestions) => {
+                    // Remove any skeleton loaders
+                    suggestionsContainer.querySelectorAll('.suggestion-chip--loading').forEach(el => el.remove());
+                    suggestions.forEach(text => {
                         const chip = document.createElement('button');
                         chip.className = 'suggestion-chip';
                         chip.innerHTML = `<span class="suggestion-chip__icon">↗</span><span class="suggestion-chip__text">${this._escapeHtml(text)}</span>`;
@@ -1443,12 +1437,46 @@ class ChatBotApp {
                         };
                         suggestionsContainer.appendChild(chip);
                     });
-                }
-
-                if (suggestionsContainer.children.length > 0) {
-                    elements.chatContainer.appendChild(suggestionsContainer);
-                    if (window.lucide) lucide.createIcons({ nodes: [suggestionsContainer] });
                     elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+                };
+
+                if (streamSuggestions.length > 0) {
+                    // Server already sent suggestions via SSE — render immediately
+                    _renderChips(streamSuggestions);
+                } else if (responseContent) {
+                    // Show skeleton placeholders while we fetch AI-generated suggestions
+                    for (let i = 0; i < 3; i++) {
+                        const s = document.createElement('span');
+                        s.className = 'suggestion-chip suggestion-chip--loading';
+                        s.innerHTML = '<span class="suggestion-chip__icon">↗</span><span class="suggestion-chip__text">…</span>';
+                        suggestionsContainer.appendChild(s);
+                    }
+                    elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+
+                    // Detect language from response
+                    const _lang = /[àáâãäåæçèéêëìíîïðñòóôõöøùúûüý]/i.test(responseContent) ? 'vi' : 'en';
+                    fetch('/api/chat/suggestions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            message: message.slice(0, 500),
+                            response: responseContent.slice(0, 1000),
+                            model: formValues.model,
+                            language: _lang,
+                        }),
+                        signal: AbortSignal.timeout(15000),
+                    })
+                    .then(r => r.ok ? r.json() : null)
+                    .then(data => {
+                        if (data?.suggestions?.length > 0) {
+                            _renderChips(data.suggestions);
+                        } else {
+                            suggestionsContainer.querySelectorAll('.suggestion-chip--loading').forEach(el => el.remove());
+                        }
+                    })
+                    .catch(() => {
+                        suggestionsContainer.querySelectorAll('.suggestion-chip--loading').forEach(el => el.remove());
+                    });
                 }
             }
             
@@ -1479,6 +1507,7 @@ class ChatBotApp {
                 this.saveCurrentSession(true);
             }
         } finally {
+            if (window.hideToolStatus) window.hideToolStatus();
             this.uiUtils.hideLoading();
             this.currentAbortController = null;
         }
@@ -3070,6 +3099,109 @@ document.addEventListener('DOMContentLoaded', () => {
     window.downloadChatAsPDF = () => app.exportHandler.downloadChatAsPDF(app.currentSession, app.chatManager.sessions);
     window.downloadChatAsJSON = () => app.exportHandler.downloadChatAsJSON(app.currentSession, app.chatManager.sessions);
     window.downloadChatAsText = () => app.exportHandler.downloadChatAsText(app.currentSession, app.chatManager.sessions);
+
+    // ── Advanced Model Settings panel ───────────────────────────────
+    (() => {
+        const ADV_STORAGE_KEY = 'adv_model_params';
+        const DEFAULTS = { temperature: 0.7, temperatureDeep: 0.5, maxTokensDeep: 4096, topP: null };
+
+        function loadAdv() {
+            try { return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem(ADV_STORAGE_KEY) || '{}')); }
+            catch { return Object.assign({}, DEFAULTS); }
+        }
+        function saveAdv(vals) {
+            localStorage.setItem(ADV_STORAGE_KEY, JSON.stringify(vals));
+        }
+
+        const panel   = document.getElementById('advSettingsPanel');
+        const togBtn  = document.getElementById('advSettingsBtn');
+        const resetBtn = document.getElementById('advSettingsReset');
+
+        const sliders = {
+            temperature:     document.getElementById('advTemperature'),
+            temperatureDeep: document.getElementById('advTemperatureDeep'),
+            maxTokensDeep:   document.getElementById('advMaxTokensDeep'),
+            topP:            document.getElementById('advTopP'),
+        };
+        const valueEls = {
+            temperature:     document.getElementById('advTemperatureVal'),
+            temperatureDeep: document.getElementById('advTemperatureDeepVal'),
+            maxTokensDeep:   document.getElementById('advMaxTokensDeepVal'),
+            topP:            document.getElementById('advTopPVal'),
+        };
+
+        function fmt(key, val) {
+            if (key === 'topP') return val >= 1 ? 'default' : String(val);
+            if (key === 'maxTokensDeep') return String(val);
+            return Number(val).toFixed(2);
+        }
+
+        function applyToUI(vals) {
+            for (const key of Object.keys(sliders)) {
+                const s = sliders[key];
+                const e = valueEls[key];
+                if (!s || !e) continue;
+                const v = (vals[key] != null) ? vals[key] : (key === 'topP' ? 1 : DEFAULTS[key]);
+                s.value = v;
+                e.textContent = fmt(key, v);
+            }
+        }
+
+        // Init from storage
+        const current = loadAdv();
+        applyToUI(current);
+
+        // Wire sliders
+        for (const [key, slider] of Object.entries(sliders)) {
+            if (!slider) continue;
+            slider.addEventListener('input', () => {
+                const val = parseFloat(slider.value);
+                valueEls[key].textContent = fmt(key, val);
+                const saved = loadAdv();
+                saved[key] = (key === 'topP' && val >= 1) ? null : val;
+                saveAdv(saved);
+            });
+        }
+
+        // Toggle panel
+        if (togBtn && panel) {
+            togBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const open = panel.classList.toggle('adv-settings--open');
+                panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+                togBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+                togBtn.classList.toggle('active', open);
+            });
+            // Close on outside click
+            document.addEventListener('click', (e) => {
+                if (!panel.contains(e.target) && e.target !== togBtn) {
+                    panel.classList.remove('adv-settings--open');
+                    panel.setAttribute('aria-hidden', 'true');
+                    togBtn.setAttribute('aria-expanded', 'false');
+                    togBtn.classList.remove('active');
+                }
+            });
+        }
+
+        // Reset
+        if (resetBtn) {
+            resetBtn.addEventListener('click', () => {
+                saveAdv(DEFAULTS);
+                applyToUI(DEFAULTS);
+            });
+        }
+
+        // Global getter for sendStreamMessage
+        window.getAdvancedModelParams = () => {
+            const v = loadAdv();
+            return {
+                temperature:     v.temperature,
+                temperatureDeep: v.temperatureDeep,
+                maxTokensDeep:   v.maxTokensDeep,
+                topP:            v.topP, // null means "don't send"
+            };
+        };
+    })();
     
     // === GALLERY FUNCTIONS ===
     const escapeHtml = (text) => {

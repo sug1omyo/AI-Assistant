@@ -276,6 +276,12 @@ async def chat_stream(body: StreamRequest, request: Request):
         if images:
             logger.info(f"[STREAM] {len(images)} image(s) attached for vision")
 
+    # ── Per-request model parameter overrides ──
+    temperature = body.temperature
+    temperature_deep = body.temperature_deep
+    max_tokens_deep = body.max_tokens_deep
+    top_p = body.top_p
+
     if not message:
         return StreamingResponse(
             iter([_sse("error", {"error": "Empty message"}, request_id=request_id)]),
@@ -568,6 +574,8 @@ async def chat_stream(body: StreamRequest, request: Request):
                         deep_thinking=True, history=history,
                         memories=memories or None, language=language,
                         custom_prompt=custom_prompt, images=images,
+                        temperature=temperature, temperature_deep=temperature_deep,
+                        max_tokens_deep=max_tokens_deep, top_p=top_p,
                     ):
                         if chunk:
                             if _first_chunk_time is None:
@@ -596,6 +604,10 @@ async def chat_stream(body: StreamRequest, request: Request):
                     language=language,
                     custom_prompt=custom_prompt,
                     images=images,
+                    temperature=temperature,
+                    temperature_deep=temperature_deep,
+                    max_tokens_deep=max_tokens_deep,
+                    top_p=top_p,
                 ):
                     if not chunk:
                         continue
@@ -694,7 +706,7 @@ async def chat_stream(body: StreamRequest, request: Request):
 
             # Determine effective max_tokens for the final output
             if is_multi_thinking:
-                _max_tokens = 4096  # synthesis step limit
+                _max_tokens = 128000  # synthesis step limit
             else:
                 _cfg = getattr(chatbot, 'registry', None)
                 if _cfg:

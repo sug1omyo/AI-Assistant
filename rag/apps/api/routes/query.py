@@ -61,15 +61,6 @@ async def query_rag(
 ) -> QueryResponse:
     """Ask a question — retrieves relevant chunks and generates an answer."""
     tenant_id = uuid.UUID(x_tenant_id)
-    auth: AuthContext = Depends(auth_context),
-    db: AsyncSession = Depends(db_session),
-    embedder: EmbeddingProvider = Depends(embedding_provider),
-    llm: LLMProvider = Depends(llm_provider),
-    pre_authz: PreFilterAuthorization = Depends(pre_filter_authz),
-    post_authz: PostFilterAuthorization = Depends(post_filter_authz),
-) -> QueryResponse:
-    """Ask a question — retrieves relevant chunks and generates an answer."""
-    tenant_id = auth.tenant_id
     t_start = time.perf_counter()
 
     # Build search filters from request
@@ -87,9 +78,6 @@ async def query_rag(
             tags=body.filters.tags,
         )
 
-    # Apply pre-filter authorization (sensitivity ceiling)
-    search_filters = await pre_authz.apply(auth, search_filters)
-
     t_retrieval_start = time.perf_counter()
     results = await vector_search(
         db=db,
@@ -101,9 +89,6 @@ async def query_rag(
         filters=search_filters,
     )
     retrieval_ms = int((time.perf_counter() - t_retrieval_start) * 1000)
-
-    # Apply post-filter authorization (defense-in-depth)
-    results = await post_authz.apply(auth, results)
 
     t_gen_start = time.perf_counter()
     answer = await generate_answer(llm=llm, query=body.query, results=results)

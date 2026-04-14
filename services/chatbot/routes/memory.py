@@ -20,7 +20,7 @@ if str(CHATBOT_DIR) not in sys.path:
 from core.config import MEMORY_DIR, IMAGE_STORAGE_DIR
 from core.extensions import logger
 
-memory_bp = Blueprint('memory', __name__)
+memory_bp = Blueprint('memory_orig', __name__)
 
 
 @memory_bp.route('/save', methods=['POST'])

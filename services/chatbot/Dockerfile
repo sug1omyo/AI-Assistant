@@ -12,7 +12,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    FLASK_PORT=5001
+    FLASK_PORT=5000
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -35,11 +35,11 @@ COPY . .
 RUN mkdir -p Storage/Image_Gen data/memory logs
 
 # Expose port
-EXPOSE 5001
+EXPOSE 5000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:5001/', timeout=5)" || exit 1
+    CMD python -c "import requests; requests.get('http://localhost:5000/health', timeout=5)" || exit 1
 
-# Run application
-CMD ["python", "app.py"]
+# Run application — use run.py for all startup modes
+CMD ["python", "run.py"]

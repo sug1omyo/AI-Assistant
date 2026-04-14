@@ -289,6 +289,28 @@ def chat_stream():
         
         if images:
             logger.info(f"[STREAM] {len(images)} image(s) attached for vision")
+
+        # Extract per-request model parameter overrides
+        try:
+            _t = data.get('temperature')
+            temperature = float(_t) if _t is not None and 0.0 <= float(_t) <= 2.0 else None
+        except (TypeError, ValueError):
+            temperature = None
+        try:
+            _td = data.get('temperature_deep')
+            temperature_deep = float(_td) if _td is not None and 0.0 <= float(_td) <= 2.0 else None
+        except (TypeError, ValueError):
+            temperature_deep = None
+        try:
+            _mt = data.get('max_tokens_deep')
+            max_tokens_deep = int(_mt) if _mt is not None and 1 <= int(_mt) <= 131072 else None
+        except (TypeError, ValueError):
+            max_tokens_deep = None
+        try:
+            _tp = data.get('top_p')
+            top_p = float(_tp) if _tp is not None and 0.0 <= float(_tp) <= 1.0 else None
+        except (TypeError, ValueError):
+            top_p = None
         
         if not message:
             return Response(
@@ -332,6 +354,17 @@ def chat_stream():
                     except Exception as e:
                         logger.error(f"Error loading memory {mem_id}: {e}")
         
+        # ── Command detection: /last30days <topic> ──────────────────────
+        _raw_text = data.get('message', '').strip()
+        if _raw_text.lower().startswith('/last30days'):
+            _cmd_topic = _raw_text[len('/last30days'):].strip()
+            if _cmd_topic:
+                tools = list(set(tools) | {'last30days-research'})
+                # Use extracted topic as the message for the tool
+                data['message'] = _cmd_topic
+                message = _cmd_topic
+                logger.info("[Stream] /last30days command detected, topic=%r", _cmd_topic)
+
         # ── Tool execution (auto web search) ──────────────────────────
 
         _search_performed = False
@@ -437,6 +470,41 @@ def chat_stream():
                     logger.info("[Stream] SerpAPI image search completed")
             except Exception as e:
                 logger.warning(f"[Stream] SerpAPI image search failed: {e}")
+
+        # ── last30days — Social Media Research ──
+        if 'last30days-research' in tools:
+            try:
+                from core.last30days_tool import run_last30days_research, parse_research_params
+                _l30d_raw = data.get('message', message)
+                _l30d_params = parse_research_params(_l30d_raw)
+                _l30d_topic = _l30d_params["topic"]
+                _l30d_depth = _l30d_params["depth"]
+                _l30d_days = _l30d_params["days"]
+                _l30d_sources = _l30d_params["sources"]
+
+                logger.info(
+                    "[Stream] last30days starting: topic=%r depth=%s days=%d",
+                    _l30d_topic[:60], _l30d_depth, _l30d_days,
+                )
+                _l30d_result = run_last30days_research(
+                    _l30d_topic,
+                    depth=_l30d_depth,
+                    days=_l30d_days,
+                    sources=_l30d_sources,
+                )
+                if _l30d_result and not _l30d_result.startswith("❌"):
+                    message = (
+                        f"{message}\n\n---\n"
+                        f"📋 KẾT QUẢ SOCIAL RESEARCH (last30days):\n{_l30d_result}\n---\n"
+                        f"Hãy phân tích kết quả nghiên cứu từ nhiều nền tảng ở trên. "
+                        f"Tổng hợp các quan điểm, xu hướng, và sentiment chính."
+                    )
+                    _search_performed = True
+                    logger.info("[Stream] last30days research completed")
+                elif _l30d_result:
+                    logger.warning(f"[Stream] last30days research returned error: {_l30d_result[:200]}")
+            except Exception as e:
+                logger.warning(f"[Stream] last30days research failed: {e}")
 
         # ── Auto reverse-image search when images attached + search intent ──
         _IMAGE_SEARCH_PATTERNS = [
@@ -642,7 +710,11 @@ def chat_stream():
                         memories=memories if memories else None,
                         language=language,
                         custom_prompt=custom_prompt,
-                        images=images
+                        images=images,
+                        temperature=temperature,
+                        temperature_deep=temperature_deep,
+                        max_tokens_deep=max_tokens_deep,
+                        top_p=top_p,
                     ):
                         if not chunk:
                             continue

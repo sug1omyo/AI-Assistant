@@ -59,7 +59,7 @@ def load_conversation_history(conversation_id):
         return []
     
     try:
-        messages = MessageDB.get_messages(str(conversation_id), limit=50)
+        messages = MessageDB.get_conversation_messages(str(conversation_id), limit=50)
         
         history = []
         temp_user = None
@@ -89,7 +89,7 @@ def save_message_to_db(conversation_id, role, content, metadata=None):
         return None
     
     try:
-        return MessageDB.create_message(
+        return MessageDB.add_message(
             conversation_id=str(conversation_id),
             role=role,
             content=content,

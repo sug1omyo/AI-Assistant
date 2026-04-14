@@ -1,0 +1,4 @@
+# Cloned last30days-skill repo content
+repo/
+*.pyc
+__pycache__/

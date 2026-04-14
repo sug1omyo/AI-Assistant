@@ -56,6 +56,18 @@ SAUCENAO_API_KEY = os.getenv('SAUCENAO_API_KEY')
 # SerpAPI - Multi-engine search
 SERPAPI_API_KEY = os.getenv('SERPAPI_API_KEY')
 
+# last30days — social media research engine
+LAST30DAYS_ENABLED = os.getenv('LAST30DAYS_ENABLED', 'false').lower() == 'true'
+LAST30DAYS_SCRIPT_PATH = os.getenv('LAST30DAYS_SCRIPT_PATH', '')
+LAST30DAYS_PYTHON_PATH = os.getenv('LAST30DAYS_PYTHON_PATH', '')
+LAST30DAYS_TIMEOUT = int(os.getenv('LAST30DAYS_TIMEOUT', '180'))
+
+# Hermes Agent — advanced AI sidecar
+HERMES_ENABLED = os.getenv('HERMES_ENABLED', 'false').lower() == 'true'
+HERMES_API_URL = os.getenv('HERMES_API_URL', 'http://localhost:8080')
+HERMES_API_KEY = os.getenv('HERMES_API_KEY', '')
+HERMES_TIMEOUT = int(os.getenv('HERMES_TIMEOUT', '120'))
+
 # Stable Diffusion
 SD_API_URL = os.getenv('SD_API_URL', 'http://127.0.0.1:7861')
 

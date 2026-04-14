@@ -99,6 +99,12 @@ _CHAT_ONLY = [
     "cách nào", "what does", "who is", "where is", "when did",
     "list of", "help me with", "write a", "write me",
     "định nghĩa", "ý nghĩa",
+    # Programming / scripting — prevent IMAGE_FIRST_MODE false triggers
+    "function", "script", "viết", "python", "javascript", "typescript",
+    "java", "golang", "rust", "c++", "c#", "php", "ruby",
+    "sort", "implement", "mảng", "array", "class", "method",
+    "module", "import", "library", "framework", "api",
+    "database", "sql", "query", "loop", "recursion",
 ]
 
 # Quality mapping

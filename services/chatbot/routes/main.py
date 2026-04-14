@@ -491,6 +491,72 @@ def generate_title():
     return jsonify({'title': fallback})
 
 
+@main_bp.route('/api/chat/suggestions', methods=['POST'])
+def chat_suggestions():
+    """Generate 3 context-aware follow-up suggestions using the AI model.
+
+    Request body:
+        message  (str) — the user's original question (max 500 chars)
+        response (str) — the AI's reply (max 1000 chars)
+        model    (str, optional) — model to use; defaults to chatbot default
+        language (str, optional) — 'vi' or 'en'; defaults to 'vi'
+
+    Returns:
+        {"suggestions": ["...", "...", "..."]}
+    """
+    data = request.get_json(silent=True) or {}
+    user_msg = str(data.get('message', '')).strip()[:500]
+    bot_resp = str(data.get('response', '')).strip()[:1000]
+    language = str(data.get('language', 'vi')).strip()
+    model = str(data.get('model', '')).strip() or None
+
+    if not user_msg or not bot_resp:
+        return jsonify({'suggestions': []}), 400
+
+    vi = language != 'en'
+    if vi:
+        prompt = (
+            "Dựa trên cuộc trò chuyện dưới đây, hãy tạo ra ĐÚNG 3 câu hỏi tiếp theo "
+            "mà người dùng có thể muốn hỏi. Mỗi câu hỏi phải:\n"
+            "- Cụ thể, liên quan trực tiếp đến nội dung vừa trả lời\n"
+            "- Ngắn gọn (tối đa 12 từ)\n"
+            "- Khác nhau về góc nhìn (ví dụ: chi tiết hơn / ứng dụng thực tế / so sánh)\n"
+            "Chỉ trả về 3 câu, mỗi câu 1 dòng, không đánh số, không giải thích.\n\n"
+            f"Người dùng hỏi: {user_msg}\n"
+            f"AI trả lời: {bot_resp}"
+        )
+    else:
+        prompt = (
+            "Based on the conversation below, generate EXACTLY 3 follow-up questions "
+            "the user might want to ask. Each question must be:\n"
+            "- Specific and directly related to the answer\n"
+            "- Concise (max 12 words)\n"
+            "- Different angles (e.g. deeper detail / practical use / comparison)\n"
+            "Return only 3 questions, one per line, no numbering, no explanation.\n\n"
+            f"User asked: {user_msg}\n"
+            f"AI replied: {bot_resp}"
+        )
+
+    try:
+        chatbot = get_chatbot()
+        response = chatbot.chat(
+            message=prompt,
+            model=model,
+            context='casual',
+            deep_thinking=False,
+        )
+        raw = response.get('text', '') if isinstance(response, dict) else str(response)
+        lines = [ln.strip().lstrip('•-–—').strip() for ln in raw.strip().splitlines() if ln.strip()]
+        # Filter out lines that look like meta-commentary rather than questions
+        suggestions = [ln for ln in lines if len(ln) > 5 and len(ln) < 150][:3]
+        if suggestions:
+            return jsonify({'suggestions': suggestions})
+    except Exception as e:
+        logger.warning('[chat/suggestions] AI call failed: %s', e)
+
+    return jsonify({'suggestions': []})
+
+
 @main_bp.route('/api/extract-file-text', methods=['POST'])
 def extract_file_text():
     """Extract readable text from a base64-encoded file (PDF, DOCX, XLSX, image, etc.)."""
