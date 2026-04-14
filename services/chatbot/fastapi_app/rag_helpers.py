@@ -21,13 +21,11 @@ except (ImportError, Exception):
 
     @dataclass
     class RAGResult:  # type: ignore[no-redef]
-        """Stub returned when RAG stack is unavailable."""
-        augmented_message: str = ""
-        augmented_prompt: str = ""
-        chunks_used: List[dict] = field(default_factory=list)
-        collection_ids: List[str] = field(default_factory=list)
-        retrieval_ms: float = 0.0
-        rag_enabled: bool = False
+        """Stub returned when RAG stack is unavailable — mirrors real RAGResult API."""
+        message: str = ""
+        custom_prompt: str = ""
+        citations: List[dict] = field(default_factory=list)
+        chunk_count: int = 0
 
 __all__ = ["RAGResult", "retrieve_rag_context"]
 
@@ -49,9 +47,8 @@ async def retrieve_rag_context(
     """
     if not _RAG_AVAILABLE or not rag_collection_ids:
         return RAGResult(
-            augmented_message=message,
-            augmented_prompt=custom_prompt,
-            rag_enabled=False,
+            message=message,
+            custom_prompt=custom_prompt,
         )
 
     orchestrator = RAGOrchestrator()

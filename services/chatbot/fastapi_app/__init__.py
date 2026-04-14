@@ -171,6 +171,46 @@ def create_app() -> FastAPI:
         """Return stable diffusion negative prompt presets."""
         return {"success": True, "presets": _NEGATIVE_PRESETS_DATA}
 
+    @app.post("/api/generate-title")
+    async def generate_title(request: Request):
+        """Generate a short conversation title (tries Ollama, falls back to truncation)."""
+        import httpx as _httpx
+        body = await request.json()
+        raw_message = str(body.get("message", "")).strip()[:200]
+        language = str(body.get("language", "vi")).strip()
+        if not raw_message:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"error": "message is required"}, status_code=400)
+
+        if language == "en":
+            prompt = (
+                "Generate a concise 3-5 word English title for this conversation. "
+                "Return ONLY the title text, no quotes, no explanation:\n"
+                f'"{raw_message}"'
+            )
+        else:
+            prompt = (
+                "Tạo tiêu đề ngắn gọn 3-7 từ tiếng Việt cho cuộc trò chuyện này. "
+                "Chỉ trả về tiêu đề, không giải thích, không ngoặc kép:\n"
+                f'"{raw_message}"'
+            )
+        try:
+            async with _httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(
+                    "http://localhost:11434/api/generate",
+                    json={"model": "qwen2.5:0.5b", "prompt": prompt, "stream": False,
+                          "options": {"temperature": 0.7, "num_predict": 20}},
+                )
+                resp.raise_for_status()
+                title = resp.json().get("response", "").strip().replace('"', "").replace("'", "").strip()
+                if title:
+                    return {"title": title}
+        except Exception as e:
+            logger.debug(f"[generate-title] Ollama unavailable: {e}")
+
+        fallback = raw_message[:40] + ("..." if len(raw_message) > 40 else "")
+        return {"title": fallback}
+
     # --- Routers ---
     app.include_router(chat.router, tags=["Chat"])
     app.include_router(council_stream.router, tags=["Council Streaming"])
