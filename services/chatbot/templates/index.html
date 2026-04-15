@@ -1199,6 +1199,9 @@ try {
                         <!-- File staging area -->
                         <div id="fileStagingArea" class="file-staging" style="display:none;"></div>
 
+                        <!-- Input length hint (shown when text approaches auto-convert threshold) -->
+                        <div id="messageInputLengthHint" class="message-input-hint" style="display:none;"></div>
+
                         <!-- Textarea -->
                         <textarea
                             id="messageInput"
@@ -2195,6 +2198,21 @@ try {
     // ════════════════════════════════════════════════════════════
     let activeTools = new Set();
 
+    // Map tool name → button element ID (shared by setupToolItemClicks + removeTool)
+    const toolBtnMap = {
+        'image-generation':    'imageGenToolBtn',
+        'img2img':             'img2imgToolBtn',
+        'google-search':       'googleSearchBtn',
+        'github':              'githubBtn',
+        'saucenao':            'saucenaoBtn',
+        'deep-research':       'deepResearchToolBtn',
+        'serpapi-reverse-image': 'googleLensBtn',
+        'serpapi-bing':        'serpapiBingBtn',
+        'serpapi-baidu':       'serpapiBaiduBtn',
+        'serpapi-images':      'serpapiImagesBtn',
+        'last30days-research': 'last30daysBtn',
+    };
+
     function initToolsMenu() {
         const btn = document.getElementById('toolsMenuBtn');
         const dropdown = document.getElementById('toolsMenuDropdown');
@@ -2216,21 +2234,8 @@ try {
         const configBtn = document.getElementById('configAgentBtn');
         if (configBtn) configBtn.addEventListener('click', () => { closeToolsMenu(); openConfigAgentModal(); });
 
-        // All toggle-able tools
-        const toolBindings = [
-            { id: 'imageGenToolBtn', tool: 'image-generation' },
-            { id: 'img2imgToolBtn', tool: 'img2img' },
-            { id: 'googleSearchBtn', tool: 'google-search' },
-            { id: 'githubBtn', tool: 'github' },
-            { id: 'saucenaoBtn', tool: 'saucenao' },
-            { id: 'deepResearchToolBtn', tool: 'deep-research' },
-            { id: 'googleLensBtn', tool: 'serpapi-reverse-image' },
-            { id: 'serpapiBingBtn', tool: 'serpapi-bing' },
-            { id: 'serpapiBaiduBtn', tool: 'serpapi-baidu' },
-            { id: 'serpapiImagesBtn', tool: 'serpapi-images' },
-            { id: 'last30daysBtn', tool: 'last30days-research' },
-        ];
-        toolBindings.forEach(({ id, tool }) => {
+        // All toggle-able tools — derived from toolBtnMap for DRY
+        Object.entries(toolBtnMap).forEach(([tool, id]) => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('click', () => {
                 toggleToolActive(tool, el);
@@ -2285,6 +2290,12 @@ try {
 
     window.removeTool = function(name) {
         activeTools.delete(name);
+        // Sync the dropdown button state so it no longer appears active
+        const btnId = toolBtnMap[name];
+        if (btnId) {
+            const btn = document.getElementById(btnId);
+            if (btn) btn.classList.remove('active');
+        }
         updateActiveToolsDisplay();
     };
     window.getActiveTools = () => Array.from(activeTools);

@@ -449,20 +449,84 @@ export class FileHandler {
      * Preview file (for future implementation)
      */
     previewFile(index) {
-        const file = this.currentSessionFiles[index];
-        if (file.tableData) {
-            // Open interactive table viewer
+        this.previewFileData(this.currentSessionFiles[index]);
+    }
+
+    /**
+     * Preview any file data object (works for both session files and staged files)
+     */
+    previewFileData(file) {
+        if (!file) return;
+        if (file.tableData && file.tableData.headers.length > 0) {
+            // Interactive table viewer (CSV / TSV / XLSX)
             csvPreview.show(file.tableData, file.name);
-        } else if (file.preview) {
-            // Open image preview modal if exists
+        } else if (file.preview || (file.type && file.type.startsWith('image/'))) {
+            // Image preview lightbox
+            const src = file.preview || file.content;
+            if (!src) return;
             if (window.openImagePreview) {
                 const img = new Image();
-                img.src = file.preview;
+                img.src = src;
                 window.openImagePreview(img);
             }
         } else if (file.content && !file.content.startsWith('data:')) {
-            // Show text content in a modal or console
-            console.log('[FileHandler] File content:', file.content.substring(0, 500) + '...');
+            // Text / code viewer modal
+            this._showTextPreviewModal(file.content, file.name);
+        } else {
+            this._showUnsupportedModal(file.name);
+        }
+    }
+
+    /** Build and show a text/code preview overlay */
+    _showTextPreviewModal(content, filename) {
+        let overlay = document.getElementById('fileTextPreviewOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'fileTextPreviewOverlay';
+            overlay.className = 'file-text-preview-overlay';
+            overlay.innerHTML = `
+                <div class="file-text-preview-panel">
+                    <div class="file-text-preview-header">
+                        <span class="file-text-preview-filename"></span>
+                        <button class="file-text-preview-close" title="Đóng (Esc)">
+                            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                    <div class="file-text-preview-body">
+                        <pre class="file-text-preview-content"></pre>
+                    </div>
+                </div>
+            `;
+            overlay.querySelector('.file-text-preview-close').addEventListener('click', () => this._closeTextPreviewModal());
+            overlay.addEventListener('click', e => { if (e.target === overlay) this._closeTextPreviewModal(); });
+            document.addEventListener('keydown', e => {
+                if (e.key === 'Escape' && overlay.classList.contains('open')) this._closeTextPreviewModal();
+            });
+            document.body.appendChild(overlay);
+        }
+        overlay.querySelector('.file-text-preview-filename').textContent = filename || '';
+        overlay.querySelector('.file-text-preview-content').textContent = content;
+        overlay.classList.add('open');
+        document.body.style.overflow = 'hidden';
+    }
+
+    _closeTextPreviewModal() {
+        const overlay = document.getElementById('fileTextPreviewOverlay');
+        if (overlay) overlay.classList.remove('open');
+        document.body.style.overflow = '';
+    }
+
+    /** Notify user that preview is not supported for this file type */
+    _showUnsupportedModal(filename) {
+        const ext = (filename || '').split('.').pop().toUpperCase();
+        const msg = ext
+            ? `Không hỗ trợ xem trước file .${ext}`
+            : 'Không hỗ trợ xem trước file này';
+        // Re-use a small toast/snackbar if available, otherwise fallback to alert
+        if (window.showToast) {
+            window.showToast(msg, 'info');
+        } else {
+            alert(msg);
         }
     }
 

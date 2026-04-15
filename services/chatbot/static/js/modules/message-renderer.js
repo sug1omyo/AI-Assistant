@@ -390,7 +390,7 @@ export class MessageRenderer {
     /**
      * Create and add message to chat
      */
-    addMessage(chatContainer, content, isUser, model, context, timestamp, thinkingProcess = null, customPromptUsed = false, agentConfig = null) {
+    addMessage(chatContainer, content, isUser, model, context, timestamp, thinkingProcess = null, customPromptUsed = false, agentConfig = null, attachedFiles = null) {
         // Hide welcome screen when adding messages
         const welcomeScreen = document.getElementById('welcomeScreen');
         if (welcomeScreen) welcomeScreen.style.display = 'none';
@@ -444,7 +444,7 @@ export class MessageRenderer {
         textDiv.className = 'message-text';
         
         if (isUser) {
-            textDiv.textContent = content;
+            this._renderUserText(textDiv, content);
         } else {
             // Parse markdown for assistant messages
             if (typeof marked !== 'undefined') {
@@ -467,7 +467,44 @@ export class MessageRenderer {
         }
         
         contentDiv.appendChild(textDiv);
-        
+
+        // Render attached files inline inside the user bubble
+        if (isUser && attachedFiles && attachedFiles.length > 0) {
+            const filesGrid = document.createElement('div');
+            filesGrid.className = 'file-message-grid';
+            attachedFiles.forEach(file => {
+                const card = document.createElement('div');
+                card.className = 'file-message-card' + (file.tableData ? ' file-message-card--table' : '');
+                card.title = file.name;
+                if (file.preview) {
+                    card.innerHTML = `<div class="file-message-preview"><img src="${this.escapeHtml(file.preview)}" alt=""></div>`;
+                } else {
+                    const icon = this.getFileIcon(file.type || '', file.name);
+                    card.innerHTML = `<div class="file-message-icon">${icon}</div>`;
+                }
+                const info = document.createElement('div');
+                info.className = 'file-message-info';
+                const meta = file.tableData
+                    ? `${file.tableData.rows.length} hàng · ${file.tableData.headers.length} cột`
+                    : this.formatFileSize(file.size);
+                info.innerHTML = `<div class="file-message-name" title="${this.escapeHtml(file.name)}">${this.escapeHtml(file.name)}</div><div class="file-message-meta">${meta}</div>`;
+                card.appendChild(info);
+                // Click to preview using FileHandler's previewFileData if available
+                card.addEventListener('click', () => {
+                    const fh = window.chatApp && window.chatApp.fileHandler;
+                    if (fh) fh.previewFileData(file);
+                });
+                filesGrid.appendChild(card);
+            });
+            contentDiv.appendChild(filesGrid);
+            // Inline table preview for CSV/TSV files
+            const tableFiles = attachedFiles.filter(f => f.tableData && f.tableData.headers && f.tableData.headers.length > 0);
+            tableFiles.forEach(file => {
+                const previewContainer = this._buildInlineTablePreview(file.tableData, file.name);
+                contentDiv.appendChild(previewContainer);
+            });
+        }
+
         // Add model/context info for assistant
         if (!isUser && model && context) {
             const infoDiv = document.createElement('div');
@@ -791,9 +828,137 @@ export class MessageRenderer {
         div.textContent = text;
         return div.innerHTML;
     }
-    
+
     /**
-     * Create a compact thinking pill that opens the side panel on click.
+     * Render user message text with lightweight markdown-like formatting.
+     * Normalises Word/rich-text paste, then handles:
+     *   - fenced code blocks (```...```)
+     *   - inline code (`...`)
+     *   - ordered lists (1. / a. / I.)
+     *   - unordered lists (- / * / •)
+     *   - arrows (->  →  ==>  ⟹)
+     *   - blank lines → paragraph breaks
+     */
+    _renderUserText(container, rawText) {
+        const text = this._normalisePaste(rawText);
+        const html = this._userTextToHtml(text);
+        // Sanitize if DOMPurify available
+        container.innerHTML = typeof DOMPurify !== 'undefined'
+            ? DOMPurify.sanitize(html)
+            : html;
+    }
+
+    /** Strip non-printable / Word-specific chars; normalise line endings */
+    _normalisePaste(text) {
+        return (text || '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\r/g, '\n')
+            // Remove BOM and zero-width spaces
+            .replace(/[\u200B-\u200D\uFEFF]/g, '')
+            // Word "smart" quotes → standard
+            .replace(/[\u2018\u2019]/g, "'")
+            .replace(/[\u201C\u201D]/g, '"')
+            // Word em/en dash → hyphen (preserve intent)
+            .replace(/[\u2013\u2014]/g, '-')
+            // Non-breaking spaces → regular space
+            .replace(/\u00A0/g, ' ')
+            // Remove lone carriage-returns and form-feeds
+            .replace(/[\f\v]/g, '\n')
+            // Collapse 3+ consecutive blank lines to 2
+            .replace(/\n{3,}/g, '\n\n');
+    }
+
+    /** Convert normalised plain-text to safe HTML */
+    _userTextToHtml(text) {
+        const esc = s => {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        };
+
+        const lines = text.split('\n');
+        const out = [];
+        let i = 0;
+
+        while (i < lines.length) {
+            const raw = lines[i];
+
+            // ── Fenced code block (``` or ~~~) ──────────────
+            const fenceMatch = raw.match(/^(`{3,}|~{3,})([\w\-+#]*)$/);
+            if (fenceMatch) {
+                const fence = fenceMatch[1];
+                const lang = esc(fenceMatch[2] || '');
+                i++;
+                const codeLines = [];
+                while (i < lines.length && !lines[i].startsWith(fence)) {
+                    codeLines.push(esc(lines[i]));
+                    i++;
+                }
+                i++; // skip closing fence
+                const langAttr = lang ? ` class="language-${lang}"` : '';
+                out.push(`<pre class="user-code-block"><code${langAttr}>${codeLines.join('\n')}</code></pre>`);
+                continue;
+            }
+
+            // ── Blank line → paragraph break ────────────────
+            if (raw.trim() === '') {
+                out.push('<br>');
+                i++;
+                continue;
+            }
+
+            // ── Detect list context ──────────────────────────
+            // Unordered: - / * / • and first char after whitespace
+            const ulMatch = raw.match(/^(\s*)([-*•])\s+(.*)$/);
+            if (ulMatch) {
+                const indent = ulMatch[1].length;
+                out.push(`<ul class="user-list" style="margin-left:${indent > 0 ? 16 : 0}px"><li>${this._inlineFormat(esc(ulMatch[3]))}</li>`);
+                // Consume consecutive UL items at same or deeper indent
+                i++;
+                while (i < lines.length) {
+                    const next = lines[i].match(/^(\s*)([-*•])\s+(.*)$/);
+                    if (!next) break;
+                    out.push(`<li>${this._inlineFormat(esc(next[3]))}</li>`);
+                    i++;
+                }
+                out.push('</ul>');
+                continue;
+            }
+
+            // Ordered: 1. / 2. / a. / I. / IV. etc.
+            const olMatch = raw.match(/^(\s*)([0-9]+|[a-zA-Z]|I{1,4}V?|VI{0,3}|X?I{0,3})[.)]\s+(.*)$/);
+            if (olMatch) {
+                const indent = olMatch[1].length;
+                out.push(`<ol class="user-list" style="margin-left:${indent > 0 ? 16 : 0}px"><li>${this._inlineFormat(esc(olMatch[3]))}</li>`);
+                i++;
+                while (i < lines.length) {
+                    const next = lines[i].match(/^(\s*)([0-9]+|[a-zA-Z]|I{1,4}V?|VI{0,3}|X?I{0,3})[.)]\s+(.*)$/);
+                    if (!next) break;
+                    out.push(`<li>${this._inlineFormat(esc(next[3]))}</li>`);
+                    i++;
+                }
+                out.push('</ol>');
+                continue;
+            }
+
+            // ── Regular line ─────────────────────────────────
+            out.push(`<span class="user-line">${this._inlineFormat(esc(raw))}</span><br>`);
+            i++;
+        }
+
+        return out.join('');
+    }
+
+    /** Inline formatting: ``code``, arrows */
+    _inlineFormat(escaped) {
+        return escaped
+            // Inline code: `code`
+            .replace(/`([^`]+)`/g, '<code class="user-inline-code">$1</code>')
+            // Arrow variants: ->, =>, ==>, -->, →, ⟹
+            .replace(/(==&gt;|--&gt;|-&gt;|=&gt;|→|⟹|➜|➡)/g, '<span class="user-arrow">$1</span>');
+    }
+
+
      * API-compatible replacement for the old inline thinking block.
      */
     createThinkingSection(thinkingProcess, isLoading = false) {

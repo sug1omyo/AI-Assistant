@@ -117,7 +117,7 @@ class ChatBotApp {
             }
         });
 
-        // Render staging previews above the textarea (ChatGPT-style thumbnails)
+        // Render staging previews above the textarea (compact card style matching file-attachment-card)
         this._renderStagingArea = () => {
             const area = document.getElementById('fileStagingArea');
             if (!area) return;
@@ -128,22 +128,50 @@ class ChatBotApp {
             }
             area.style.display = 'flex';
             area.innerHTML = this._stagedFiles.map((f, i) => {
-                if (f.type && f.type.startsWith('image/') && f.preview) {
-                    // Image thumbnail
-                    return `<div class="file-staging__thumb" data-idx="${i}">
-                        <img src="${f.preview}" alt="${this.fileHandler.escapeHtml(f.name)}">
-                        <button class="file-staging__remove" data-idx="${i}" title="Remove">×</button>
-                    </div>`;
-                }
+                const isTable = !!(f.tableData && f.tableData.headers && f.tableData.headers.length > 0);
+                const isImage = f.type && f.type.startsWith('image/') && f.preview;
                 const icon = this.fileHandler.getFileIcon ? this.fileHandler.getFileIcon(f.type || '', f.name) : '📄';
-                return `<span class="file-staging__badge">${icon} ${this.fileHandler.escapeHtml(f.name)} <button class="file-staging__remove" data-idx="${i}" title="Remove">×</button></span>`;
+
+                let iconOrPreview;
+                if (isImage) {
+                    iconOrPreview = `<div class="file-staging__card-preview"><img src="${this.fileHandler.escapeHtml(f.preview)}" alt=""></div>`;
+                } else if (isTable) {
+                    iconOrPreview = `<div class="file-staging__card-icon">📊</div>`;
+                } else {
+                    iconOrPreview = `<div class="file-staging__card-icon">${icon}</div>`;
+                }
+
+                const sizeStr = this.fileHandler.formatFileSize ? this.fileHandler.formatFileSize(f.size) : '';
+                const meta = isTable
+                    ? `${f.tableData.rows.length} hàng · ${f.tableData.headers.length} cột`
+                    : sizeStr;
+
+                return `<div class="file-staging__card file-staging__clickable${isTable ? ' file-staging__card--table' : ''}" data-idx="${i}" title="${this.fileHandler.escapeHtml(f.name)}">
+                    ${iconOrPreview}
+                    <div class="file-staging__card-info">
+                        <div class="file-staging__card-name">${this.fileHandler.escapeHtml(f.name)}</div>
+                        <div class="file-staging__card-meta">${meta}</div>
+                    </div>
+                    <button class="file-staging__remove" data-idx="${i}" title="Xóa">×</button>
+                </div>`;
             }).join('');
+
+            // Remove buttons
             area.querySelectorAll('.file-staging__remove').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const idx = parseInt(e.currentTarget.dataset.idx);
                     this._stagedFiles.splice(idx, 1);
                     this._renderStagingArea();
+                });
+            });
+            // Click-to-preview on the card itself
+            area.querySelectorAll('.file-staging__clickable').forEach(el => {
+                el.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('file-staging__remove')) return;
+                    const idx = parseInt(el.dataset.idx);
+                    const fileData = this._stagedFiles[idx];
+                    if (fileData) this.fileHandler.previewFileData(fileData);
                 });
             });
         };
@@ -174,20 +202,20 @@ class ChatBotApp {
             });
         }
 
-        // Flush staged files into session when message is sent
-        const _originalSend = this.sendMessage ? this.sendMessage.bind(this) : null;
+        // Flush staged files into session when message is sent.
+        // Returns the flushed files so the caller can embed them in the message bubble.
         this._flushStagedFiles = () => {
-            if (this._stagedFiles.length === 0) return;
-            for (let fileData of this._stagedFiles) {
+            if (this._stagedFiles.length === 0) return [];
+            const flushed = [...this._stagedFiles];
+            for (let fileData of flushed) {
                 this.fileHandler.currentSessionFiles.push(fileData);
             }
             this.saveFilesToCurrentSession();
-            const timestamp = this.uiUtils.formatTimestamp(new Date());
-            this.messageRenderer.addFileMessage(elements.chatContainer, this._stagedFiles, timestamp);
             this._stagedFiles = [];
             this._renderStagingArea();
             // Re-render session file list so remove buttons are available
             this.fileHandler.renderSessionFiles(elements.fileList);
+            return flushed;
         };
         
         // Update elements reference to use new file input
@@ -344,6 +372,27 @@ class ChatBotApp {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 this.sendMessage();
+            }
+        });
+
+        // Warn when textarea is getting close to the auto-convert threshold
+        const LONG_WARN = 2500;
+        const LONG_LIMIT = 3000;
+        const inputHint = document.getElementById('messageInputLengthHint');
+        elements.messageInput.addEventListener('input', () => {
+            const len = elements.messageInput.value.length;
+            if (inputHint) {
+                if (len >= LONG_LIMIT) {
+                    inputHint.textContent = `Văn bản quá dài (${len} ký tự) — sẽ tự động chuyển thành file .txt khi gửi`;
+                    inputHint.style.display = 'block';
+                    inputHint.className = 'message-input-hint message-input-hint--warn';
+                } else if (len >= LONG_WARN) {
+                    inputHint.textContent = `${len}/${LONG_LIMIT} ký tự — gần đến giới hạn`;
+                    inputHint.style.display = 'block';
+                    inputHint.className = 'message-input-hint message-input-hint--info';
+                } else {
+                    inputHint.style.display = 'none';
+                }
             }
         });
         
@@ -564,10 +613,28 @@ class ChatBotApp {
      * Send message
      */
     async sendMessage() {
-        // Flush any staged files into the session before sending
-        if (this._flushStagedFiles) this._flushStagedFiles();
-
         const elements = this.uiUtils.elements;
+
+        // ── Auto-convert very long input to a staged .txt file ──────────────
+        const LONG_TEXT_THRESHOLD = 3000; // characters
+        const rawInput = elements.messageInput ? elements.messageInput.value : '';
+        if (rawInput.length > LONG_TEXT_THRESHOLD && this._stagedFiles !== undefined) {
+            const blob = new Blob([rawInput], { type: 'text/plain' });
+            const file = new File([blob], 'message.txt', { type: 'text/plain' });
+            try {
+                const fileData = await this.fileHandler.processFile(file);
+                this._stagedFiles.push(fileData);
+                // Clear textarea but leave a short summary prompt so user can add context
+                if (elements.messageInput) elements.messageInput.value = '';
+                this._renderStagingArea && this._renderStagingArea();
+            } catch (err) {
+                console.error('[App] Auto-convert to file error:', err);
+            }
+        }
+
+        // Flush any staged files into the session before sending; capture for inline display
+        const flushedFiles = this._flushStagedFiles ? this._flushStagedFiles() : [];
+
         const formValues = this.uiUtils.getFormValues();
         let message = formValues.message.trim();
         
@@ -1023,7 +1090,7 @@ class ChatBotApp {
         this.uiUtils.showLoading(thinkingMode);
         if (window.showToolStatus) window.showToolStatus();
         
-        // Add user message to chat
+        // Add user message to chat (with attached files if any)
         const timestamp = this.uiUtils.formatTimestamp(new Date());
         const customPromptUsed = window.customPromptEnabled === true;
         this.messageRenderer.addMessage(
@@ -1034,7 +1101,9 @@ class ChatBotApp {
             formValues.context,
             timestamp,
             null,
-            customPromptUsed
+            customPromptUsed,
+            null,
+            flushedFiles.length > 0 ? flushedFiles : null
         );
         
         // If image-generation tool is active, show inline loading placeholder
