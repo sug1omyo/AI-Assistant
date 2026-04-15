@@ -103,6 +103,51 @@ export class MessageRenderer {
         if (icon) icon.textContent = expanded ? '▼' : '▶';
     }
 
+    _createReasoningBlock(stepText, tid = '_default', expanded = false) {
+        const block = document.createElement('div');
+        block.className = 'thinking-step--reasoning';
+        block.dataset.tid = tid;
+
+        const header = document.createElement('div');
+        header.className = 'thinking-reasoning__header';
+
+        const tidMatch = tid.match(/^r(\d+)_t(\d+)$/);
+        const labelText = tidMatch
+            ? `🔍 Direction ${parseInt(tidMatch[2], 10) + 1} (round ${parseInt(tidMatch[1], 10) + 1})`
+            : '🔍 Reasoning';
+
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'thinking-reasoning__label';
+        labelSpan.textContent = labelText;
+
+        const toggleSpan = document.createElement('span');
+        toggleSpan.className = 'thinking-reasoning__toggle';
+        toggleSpan.textContent = '▶';
+
+        header.appendChild(labelSpan);
+        header.appendChild(toggleSpan);
+
+        const body = document.createElement('div');
+        body.className = 'thinking-reasoning__body';
+        if (typeof marked !== 'undefined') {
+            const rendered = marked.parse(stepText);
+            body.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rendered) : rendered;
+        } else {
+            body.textContent = stepText;
+        }
+
+        block.appendChild(header);
+        block.appendChild(body);
+
+        header.addEventListener('click', () => {
+            const isExpanded = block.classList.contains('thinking-step--expanded');
+            this._setReasoningBlockExpanded(block, !isExpanded);
+        });
+
+        this._setReasoningBlockExpanded(block, expanded);
+        return block;
+    }
+
     _setAllReasoningBlocks(container, expanded) {
         container.querySelectorAll('.thinking-step--reasoning').forEach(block => {
             this._setReasoningBlockExpanded(block, expanded);
