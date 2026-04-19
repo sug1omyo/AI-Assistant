@@ -45,6 +45,7 @@ from fastapi_app.routers import (
     image_gen,
     mcp,
     main_extras,
+    anime_pipeline,
 )
 
 logger = logging.getLogger("chatbot.fastapi")
@@ -332,6 +333,7 @@ def create_app() -> FastAPI:
     app.include_router(image_gen.router, tags=["Image Generation"])
     app.include_router(mcp.router)
     app.include_router(main_extras.router)
+    app.include_router(anime_pipeline.router, tags=["Anime Pipeline"])
 
     # --- Root health check ---
     @app.get("/health")

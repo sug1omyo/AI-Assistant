@@ -5410,6 +5410,13 @@ except ImportError as e:
     logger.warning(f"Could not register hermes blueprint: {e}")
 
 try:
+    from routes.anime_pipeline import anime_pipeline_bp
+    app.register_blueprint(anime_pipeline_bp)
+    logger.info("Registered anime_pipeline blueprint (/api/anime-pipeline/*)")
+except ImportError as e:
+    logger.warning(f"Could not register anime_pipeline blueprint: {e}")
+
+try:
     from core.user_auth import init_admin_users
     _seed_db = get_db()
     if _seed_db is not None:
