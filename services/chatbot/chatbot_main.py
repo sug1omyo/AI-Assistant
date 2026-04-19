@@ -5210,6 +5210,18 @@ def serve_storage_image(filename):
     return send_from_directory(storage_dir, filename)
 
 
+@app.route('/api/anime-pipeline/images/<path:filename>')
+def serve_anime_pipeline_image(filename):
+    """Serve anime pipeline output images via non-static URL."""
+    import os
+    safe = os.path.basename(filename)
+    if not safe:
+        from flask import abort
+        abort(404)
+    storage_dir = CHATBOT_DIR / 'Storage' / 'Image_Gen'
+    return send_from_directory(str(storage_dir), safe)
+
+
 
 # -- Extract text from uploaded file (base64) via OCR/parsing --
 @app.route('/api/extract-file-text', methods=['POST'])

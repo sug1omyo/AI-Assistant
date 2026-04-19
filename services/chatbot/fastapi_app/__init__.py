@@ -47,6 +47,7 @@ from fastapi_app.routers import (
     main_extras,
     anime_pipeline,
     stable_diffusion,
+    anime_pipeline,
 )
 
 logger = logging.getLogger("chatbot.fastapi")
@@ -361,6 +362,7 @@ def create_app() -> FastAPI:
     app.include_router(main_extras.router)
     app.include_router(anime_pipeline.router, tags=["Anime Pipeline"])
     app.include_router(stable_diffusion.router, tags=["Stable Diffusion"])
+    app.include_router(anime_pipeline.router, tags=["Anime Pipeline"])
 
     # --- Root health check ---
     @app.get("/health")
