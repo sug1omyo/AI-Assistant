@@ -45,7 +45,6 @@ from fastapi_app.routers import (
     image_gen,
     mcp,
     main_extras,
-    anime_pipeline,
     stable_diffusion,
     anime_pipeline,
 )
@@ -360,7 +359,6 @@ def create_app() -> FastAPI:
     app.include_router(image_gen.router, tags=["Image Generation"])
     app.include_router(mcp.router)
     app.include_router(main_extras.router)
-    app.include_router(anime_pipeline.router, tags=["Anime Pipeline"])
     app.include_router(stable_diffusion.router, tags=["Stable Diffusion"])
     app.include_router(anime_pipeline.router, tags=["Anime Pipeline"])
 
