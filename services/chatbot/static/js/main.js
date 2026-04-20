@@ -84,6 +84,13 @@ class ChatBotApp {
         } catch (e) {
             console.error('[App] loadCurrentChat failed:', e);
         }
+
+        // Recover any anime pipeline bubbles that were interrupted by F5/session change
+        try {
+            this.animePipeline?.recoverInlineBubbles();
+        } catch (e) {
+            console.error('[App] recoverInlineBubbles failed:', e);
+        }
         
         // Setup UI
         this.uiUtils.initDarkMode();
@@ -2041,6 +2048,7 @@ class ChatBotApp {
         this.saveCurrentSession();
         this.chatManager.switchChat(chatId);
         this.loadCurrentChat();
+        this.animePipeline?.recoverInlineBubbles();
         this.saveCurrentSession();
         
         // Close sidebar on mobile

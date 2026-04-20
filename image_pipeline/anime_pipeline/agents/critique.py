@@ -177,9 +177,9 @@ class CritiqueAgent:
         return job
 
     def _get_latest_output(self, job: AnimePipelineJob) -> Optional[str]:
-        """Get the most recent beauty/composition image."""
+        """Get the most recent pipeline image (YOLO-enhanced > beauty > composition)."""
         for img in reversed(job.intermediates):
-            if img.stage in ("beauty_pass", "composition_pass"):
+            if img.stage.startswith("detail_") or img.stage in ("beauty_pass", "composition_pass"):
                 return img.image_b64
         return None
 

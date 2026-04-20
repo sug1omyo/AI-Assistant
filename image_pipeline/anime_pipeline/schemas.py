@@ -589,6 +589,11 @@ class AnimePipelineJob:
     preset: str = "anime_quality"
     user_loras: list[dict[str, Any]] = field(default_factory=list)
 
+    # Thinking mode — when 'multi-thinking', enables 4-agent council reasoning
+    thinking_mode: str = "instant"
+    # Council pre-analysis output (populated when thinking_mode == 'multi-thinking')
+    council_guidance: Optional[dict[str, Any]] = None
+
     # Stage outputs
     vision_analysis: Optional[VisionAnalysis] = None
     layer_plan: Optional[LayerPlan] = None
@@ -600,6 +605,13 @@ class AnimePipelineJob:
     final_image_b64: Optional[str] = None
     final_image_url: Optional[str] = None
     final_image_path: Optional[str] = None
+    # Secondary output: populated when re-plan attempt 1 also produced a usable image.
+    # Both images are returned to the user when neither attempt passes quality.
+    secondary_image_b64: Optional[str] = None
+
+    # Arbitrary metadata bag (internal pipeline use, not persisted by default)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    stage_metadata: dict[str, Any] = field(default_factory=dict)
 
     # Execution metadata
     stages_executed: list[str] = field(default_factory=list)

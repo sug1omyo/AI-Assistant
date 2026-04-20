@@ -518,6 +518,19 @@ class LayerPlannerAgent:
         if va and va.confidence > 0.5 and va.anime_tags:
             # Use ALL anime_tags — they include both identity and scene tags.
             parts.extend(va.anime_tags)
+            # ALWAYS also include user's original prompt tags that VA may have
+            # missed (e.g. specific style requests like "x-ray style overlay",
+            # LoRA trigger words, unusual artistic directions).
+            # Split user prompt by comma and add any unique tokens.
+            existing_lower = {t.strip().lower() for t in parts}
+            for tag in job.user_prompt.split(","):
+                tag_clean = tag.strip()
+                if tag_clean and tag_clean.lower() not in existing_lower:
+                    # Skip tags that are substrings of existing tags (fuzzy dedup)
+                    tag_lc = tag_clean.lower()
+                    if not any(tag_lc in ex for ex in existing_lower):
+                        parts.append(tag_clean)
+                        existing_lower.add(tag_lc)
         else:
             # English prompt or no translation available — append raw text directly
             parts.append(job.user_prompt)
@@ -557,6 +570,22 @@ class LayerPlannerAgent:
 
         if plan.style_tags:
             parts.extend(plan.style_tags)
+
+        # ── Council guidance integration ──────────────────────────
+        # When 4-agent council provided creative direction, extract
+        # key artistic keywords and inject them into the prompt.
+        if job.council_guidance and isinstance(job.council_guidance, dict):
+            council_content = job.council_guidance.get("content", "")
+            if council_content:
+                # Extract short, actionable tags from council guidance
+                existing_lower = {p.lower().strip() for p in parts}
+                # Council key_points are concise directives
+                for kp in job.council_guidance.get("key_points", [])[:5]:
+                    kp_clean = kp.strip()
+                    if kp_clean and len(kp_clean) < 60 and kp_clean.lower() not in existing_lower:
+                        parts.append(kp_clean)
+                        existing_lower.add(kp_clean.lower())
+
         return ", ".join(p.strip() for p in parts if p.strip())
 
     def _build_negative_prompt(

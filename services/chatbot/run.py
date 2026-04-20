@@ -326,7 +326,7 @@ elif USE_NEW_STRUCTURE:
         debug = os.getenv('FLASK_DEBUG', 'true').lower() == 'true'
 
         print(f">> Starting Chatbot (Flask New Structure) on port {port}")
-        app.run(host=os.getenv('HOST', '0.0.0.0'), port=port, debug=debug)  # noqa: S104
+        app.run(host=os.getenv('HOST', '0.0.0.0'), port=port, debug=debug, threaded=True)  # noqa: S104
 
 else:
     # -- Legacy Flask monolith --

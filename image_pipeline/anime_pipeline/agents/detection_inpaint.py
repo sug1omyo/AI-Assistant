@@ -1,7 +1,8 @@
 """
 DetectionInpaintAgent — ADetailer-style multi-region detection + inpaint pass.
 
-Runs AFTER the beauty pass. For each detected region:
+Runs INSIDE the beauty-critique loop, after beauty pass and before critique.
+For each detected region:
   1. Detect regions with YOLO via DetectionDetailAgent (27 models)
   2. Build region-specific prompts (quality + region focus + LoRAs)
   3. Submit masked inpaint workflow to ComfyUI
@@ -68,40 +69,76 @@ REGION_PROCESSING_ORDER: list[str] = [
 _REGION_LORA_MAP: dict[str, list[dict[str, Any]]] = {
     # Tier 1: Core anatomy
     "face": [
-        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.55, "strength_clip": 0.45},
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.65, "strength_clip": 0.55},  # was 0.55
     ],
     "full_eyes": [
-        {"name": "Eyes_for_Illustrious_Lora_Perfect_anime_eyes.safetensors", "strength_model": 0.50, "strength_clip": 0.40},
-        {"name": "eye_check_by_hand.safetensors", "strength_model": 0.35, "strength_clip": 0.25},
+        {"name": "Eyes_for_Illustrious_Lora_Perfect_anime_eyes.safetensors", "strength_model": 0.70, "strength_clip": 0.60},
+        {"name": "eye_check_by_hand.safetensors", "strength_model": 0.50, "strength_clip": 0.40},
     ],
     "eyes": [
-        {"name": "Eyes_for_Illustrious_Lora_Perfect_anime_eyes.safetensors", "strength_model": 0.45, "strength_clip": 0.35},
-        {"name": "eye_check_by_hand.safetensors", "strength_model": 0.35, "strength_clip": 0.25},
+        {"name": "Eyes_for_Illustrious_Lora_Perfect_anime_eyes.safetensors", "strength_model": 0.65, "strength_clip": 0.55},
+        {"name": "eye_check_by_hand.safetensors", "strength_model": 0.50, "strength_clip": 0.40},
     ],
-    "mouth": [],
-    "hand": [],
+    "mouth": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.45, "strength_clip": 0.35},
+    ],
+    "hand": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.50, "strength_clip": 0.40},
+    ],
     # Tier 2: Body detail
-    "animal_ear": [],
-    "hair": [],
-    "torso": [],
-    "armpit": [],
-    "female_body": [],
-    "person_female": [],
-    "feet": [],
+    "animal_ear": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.40, "strength_clip": 0.30},
+    ],
+    "hair": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.45, "strength_clip": 0.35},
+    ],
+    "torso": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.35, "strength_clip": 0.25},
+    ],
+    "armpit": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.30, "strength_clip": 0.20},
+    ],
+    "female_body": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.35, "strength_clip": 0.25},
+    ],
+    "person_female": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.30, "strength_clip": 0.20},
+    ],
+    "feet": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.40, "strength_clip": 0.30},
+    ],
     # Tier 3: Clothing
-    "clothes": [],
-    "underwear": [],
-    "thighhigh": [],
-    "swimsuit": [],
-    "leotard": [],
+    "clothes": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.40, "strength_clip": 0.30},
+    ],
+    "underwear": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.35, "strength_clip": 0.25},
+    ],
+    "thighhigh": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.35, "strength_clip": 0.25},
+    ],
+    "swimsuit": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.35, "strength_clip": 0.25},
+    ],
+    "leotard": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.35, "strength_clip": 0.25},
+    ],
     # Tier 4: Cleanup (no LoRAs — denoise handles removal)
     "text_watermark": [],
     "censor_bar": [],
     # Tier 5: NSFW
-    "breasts": [],
-    "nipples": [],
-    "genital": [],
-    "pubic_area": [],
+    "breasts": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.40, "strength_clip": 0.30},
+    ],
+    "nipples": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.35, "strength_clip": 0.25},
+    ],
+    "genital": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.35, "strength_clip": 0.25},
+    ],
+    "pubic_area": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.30, "strength_clip": 0.20},
+    ],
     # Tier 6: Disabled multi-class
     "nsfw_allinone": [],
     "multiclass": [],
@@ -280,12 +317,12 @@ _REGION_NEGATIVE: dict[str, str] = {
     "full_eyes": (
         "lazy eye, cross-eye, uneven pupils, blurry iris, "
         "malformed eyelids, bad eyes, missing eye, "
-        "heterochromia, different eye colors, mismatched irises"
+        "flat eyes, dull eyes, lifeless eyes"
     ),
     "eyes": (
         "lazy eye, cross-eye, uneven pupils, blurry iris, "
         "malformed eyelids, bad eyes, missing eye, "
-        "heterochromia, different eye colors, mismatched irises"
+        "flat eyes, dull eyes, lifeless eyes"
     ),
     "mouth": (
         "blurry mouth, deformed lips, bad teeth, "
@@ -643,3 +680,164 @@ class DetectionInpaintAgent:
                 _REGION_LORA_MAP[layer.region_type] = yaml_loras
 
         return layers or list(DEFAULT_DETECTION_LAYERS)
+
+    # ── Eye Emergency ─────────────────────────────────────────────────
+
+    # Eye-specific region types processed in eye_focus mode
+    _EYE_REGION_TYPES = ("full_eyes", "eyes", "face")
+
+    def execute_eye_focus(
+        self,
+        job: "AnimePipelineJob",
+        denoise_override: float = 0.55,
+        reference_eye_crops: Optional[list[str]] = None,
+        eye_issues: Optional[list[str]] = None,
+        character_eye_description: str = "",
+    ) -> None:
+        """Emergency eye-focused inpaint — higher denoise, eye regions only.
+
+        Called when critique reports eye_consistency_score < 7.
+        Runs YOLO detection for eye/face regions only and inpaints them
+        with boosted denoise to force stronger correction.
+
+        Args:
+            job: Pipeline job (modified in-place).
+            denoise_override: Inpaint strength (default 0.55, higher than normal 0.35).
+            reference_eye_crops: Optional cropped eye images from reference photos.
+            eye_issues: Specific issues from critique (appended to negative prompt).
+            character_eye_description: Character's canonical eye description from research.
+        """
+        t0 = time.time()
+
+        if not self.is_available():
+            logger.info("[DetectionInpaint] Eye focus skipped — not available")
+            return
+
+        current_image_b64 = self._get_latest_image(job)
+        if not current_image_b64:
+            return
+
+        base_positive = self._get_base_positive(job)
+        checkpoint = self._config.final_model.checkpoint or self._config.beauty_model.checkpoint
+        clip_skip = self._config.final_model.clip_skip or 2
+        base_negative = self._config.negative_base
+
+        # Run detection — eyes + face only
+        detection = self._detector.detect(current_image_b64)
+        if detection.total_regions == 0:
+            logger.info("[DetectionInpaint] Eye focus: no eye/face regions detected")
+            return
+
+        # Build eye-boosted positive prompt
+        eye_extra = ""
+        if character_eye_description:
+            eye_extra = f", {character_eye_description}"
+        issue_tags = ""
+        if eye_issues:
+            issue_tags = ", " + ", ".join(
+                f"fix: {iss}" for iss in eye_issues[:3]
+            )
+
+        eye_negative_extra = ""
+        if eye_issues:
+            eye_negative_extra = ", " + ", ".join(eye_issues[:5])
+
+        passes_run = 0
+        for region_type in self._EYE_REGION_TYPES:
+            regions = detection.get(region_type)
+            if not regions:
+                continue
+
+            layer_cfg = self._detector.get_layer_config(region_type)
+            if not layer_cfg:
+                continue
+
+            # Boosted positive: standard eye tags + character-specific eye desc
+            region_positive = self._merge_prompt(
+                base_positive,
+                _REGION_POSITIVE.get(region_type, ""),
+                layer_cfg.prompt_suffix,
+                "ultra detailed eyes, perfect iris, perfect pupil symmetry,"
+                " sharp catchlight, vivid eye color, matching eye colors" + eye_extra + issue_tags,
+            )
+            region_negative = self._merge_prompt(
+                base_negative,
+                _REGION_NEGATIVE.get(region_type, ""),
+                layer_cfg.negative_suffix,
+                "blurry eyes, lazy eye, mismatched eye colors, wrong eye color,"
+                " cross-eyed, lifeless eyes, flat eyes" + eye_negative_extra,
+            )
+
+            region_loras = list(_REGION_LORA_MAP.get(region_type, []))
+
+            seed = random.randint(1, 2**31 - 1)
+            pc = PassConfig(
+                pass_name=f"eye_emergency_{region_type}",
+                model_slot="final",
+                checkpoint=checkpoint,
+                width=0,
+                height=0,
+                sampler=self._config.final_model.sampler,
+                scheduler=self._config.final_model.scheduler,
+                steps=max(20, min(30, self._config.final_model.steps)),
+                cfg=self._config.final_model.cfg + 0.5,    # slightly higher cfg for eye detail
+                denoise=denoise_override,                    # boosted
+                seed=seed,
+                positive_prompt=region_positive,
+                negative_prompt=region_negative,
+                lora_models=region_loras,
+            )
+
+            try:
+                if len(regions) == 1:
+                    workflow = self._builder.build_detection_inpaint(
+                        pc, current_image_b64, regions[0].mask_b64, seed,
+                        clip_skip=clip_skip, region_label=region_type,
+                    )
+                else:
+                    masks = [r.mask_b64 for r in regions]
+                    workflow = self._builder.build_multi_region_inpaint(
+                        pc, current_image_b64, masks, seed,
+                        clip_skip=clip_skip, region_label=region_type,
+                    )
+
+                result = self._client.submit_workflow(
+                    workflow,
+                    job_id=job.job_id,
+                    pass_name=f"eye_emergency_{region_type}",
+                )
+
+                if result.success and result.images_b64:
+                    current_image_b64 = result.images_b64[0]
+                    job.intermediates.append(IntermediateImage(
+                        stage=f"detail_{region_type}_emergency",
+                        image_b64=current_image_b64,
+                        metadata={
+                            "region_type": region_type,
+                            "denoise": denoise_override,
+                            "eye_emergency": True,
+                            "seed": seed,
+                            "regions_count": len(regions),
+                        },
+                    ))
+                    passes_run += 1
+                    logger.info(
+                        "[DetectionInpaint] Eye emergency %s done (denoise=%.2f, %.0fms)",
+                        region_type, denoise_override, result.duration_ms,
+                    )
+                else:
+                    logger.warning(
+                        "[DetectionInpaint] Eye emergency %s failed: %s",
+                        region_type, result.error or "no output",
+                    )
+            except Exception as exc:
+                logger.warning("[DetectionInpaint] Eye emergency %s error: %s", region_type, exc)
+
+        if passes_run > 0:
+            job.final_image_b64 = current_image_b64
+
+        latency = (time.time() - t0) * 1000
+        logger.info(
+            "[DetectionInpaint] Eye focus completed %d passes in %.0fms",
+            passes_run, latency,
+        )

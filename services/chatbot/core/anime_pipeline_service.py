@@ -16,6 +16,7 @@ import base64
 import json
 import logging
 import os
+import threading as _threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -32,6 +33,14 @@ _DEFAULT_COMFYUI_URL = "http://127.0.0.1:8188"
 
 # Image storage: services/chatbot/Storage/Image_Gen/
 _IMAGE_STORAGE_DIR = Path(__file__).parent.parent / "Storage" / "Image_Gen"
+
+# ── Concurrency control ─────────────────────────────────────────────────────
+# Limit concurrent ComfyUI pipeline jobs on local GPU.
+# Override via ANIME_PIPELINE_MAX_CONCURRENT env var (default 2).
+_PIPELINE_MAX_CONCURRENT = int(os.getenv("ANIME_PIPELINE_MAX_CONCURRENT", "2"))
+_PIPELINE_SEMAPHORE = _threading.Semaphore(_PIPELINE_MAX_CONCURRENT)
+_PIPELINE_QUEUE_LOCK = _threading.Lock()
+_PIPELINE_WAITING_COUNT = 0
 
 
 def pipeline_enabled() -> bool:
@@ -124,6 +133,7 @@ class PipelineRequest:
     height: int = 0
     session_id: str = ""
     conversation_id: str = ""
+    thinking_mode: str = "instant"
 
 
 def validate_request(data: dict) -> tuple[Optional[PipelineRequest], Optional[str]]:
@@ -161,6 +171,7 @@ def validate_request(data: dict) -> tuple[Optional[PipelineRequest], Optional[st
         height=int(data.get("height", 0)),
         session_id=data.get("session_id", ""),
         conversation_id=data.get("conversation_id", ""),
+        thinking_mode=data.get("thinking_mode", "instant"),
     )
     return req, None
 
@@ -177,6 +188,7 @@ def build_job(req: PipelineRequest) -> Any:
         preset=req.preset,
         quality_hint=req.quality_mode,
         session_id=req.session_id,
+        thinking_mode=req.thinking_mode,
     )
     return job
 
@@ -295,6 +307,40 @@ def stream_pipeline(req: PipelineRequest) -> Generator[str, None, None]:
         "stages": list(_STAGE_LABELS.keys()),
     })
 
+    # ── Concurrency gate: at most _PIPELINE_MAX_CONCURRENT jobs on GPU ──
+    global _PIPELINE_WAITING_COUNT
+    if not _PIPELINE_SEMAPHORE.acquire(blocking=False):
+        with _PIPELINE_QUEUE_LOCK:
+            _PIPELINE_WAITING_COUNT += 1
+            _queue_pos = _PIPELINE_WAITING_COUNT
+        yield _sse_line("ap_queued", {
+            "job_id": job.job_id,
+            "position": _queue_pos,
+            "message": f"Pipeline queued — vị trí {_queue_pos}. Đang chờ GPU…",
+        })
+        _wait_start = time.time()
+        while not _PIPELINE_SEMAPHORE.acquire(blocking=False):
+            time.sleep(1.0)
+            _elapsed = time.time() - _wait_start
+            if _elapsed >= 15 and int(_elapsed) % 15 == 0:
+                yield ": keepalive\n"
+        with _PIPELINE_QUEUE_LOCK:
+            _PIPELINE_WAITING_COUNT -= 1
+
+    try:
+        yield from _run_pipeline_inner(orchestrator, job, req)
+    finally:
+        _PIPELINE_SEMAPHORE.release()
+
+
+def _run_pipeline_inner(
+    orchestrator: Any, job: Any, req: "PipelineRequest",
+) -> "Generator[str, None, None]":
+    """Inner generator: run the pipeline event loop and yield SSE frames.
+
+    Called by stream_pipeline() inside a try/finally that always releases
+    the global concurrency semaphore.
+    """
     try:
         for event in orchestrator.run_stream(job):
             etype = event.get("event", "")

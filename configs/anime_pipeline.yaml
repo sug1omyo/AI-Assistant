@@ -159,7 +159,7 @@ vision:
 critique:
   # Quality threshold: 0.0 = always pass, 1.0 = never pass
   quality_threshold: 0.80
-  max_refine_rounds: 4
+  max_refine_rounds: 8
 
   # Dimensions to evaluate (subset of full 8-dim for speed)
   dimensions:
@@ -223,7 +223,7 @@ refine:
   score_threshold: 8.0
 
   # Max rounds of critique→refine (0 = no refine, just critique)
-  max_rounds: 4
+  max_rounds: 8
 
   # Per-round denoise adjustments
   denoise_step_up: 0.05        # increase when anatomy/hands are bad

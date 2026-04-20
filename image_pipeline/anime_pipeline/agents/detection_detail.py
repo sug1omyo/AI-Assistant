@@ -25,6 +25,7 @@ import base64
 import io
 import logging
 import time
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -171,17 +172,19 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
         model_path="segm/adetailerAnimeGirlFace_segment.zip",
         region_type="face",
         confidence_threshold=0.35,
-        denoise=0.35,
-        padding_ratio=0.15,
-        feather_radius=24,
+        denoise=0.42,  # was 0.35 — needs more strength to fix structural face issues
+        padding_ratio=0.20,  # was 0.15 — wider context for better eye/eyebrow coherence
+        feather_radius=26,
         prompt_suffix=(
             "beautiful detailed face, detailed skin texture, "
             "perfect eye symmetry, clear iris, sharp eyelashes, "
-            "detailed eyebrows, smooth facial shading, vivid expression"
+            "detailed eyebrows, smooth facial shading, vivid expression, "
+            "natural skin tone, perfect nose shape, well-defined jaw"
         ),
         negative_suffix=(
             "blurry face, asymmetrical eyes, deformed face, ugly face, "
-            "bad anatomy face, extra eyes, missing eyes"
+            "bad anatomy face, extra eyes, missing eyes, flat face, "
+            "distorted features, bad nose, bad mouth"
         ),
     ),
 
@@ -190,18 +193,19 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
         model_path="bbox/fullEyesDetection_v10.zip",
         region_type="full_eyes",
         confidence_threshold=0.30,
-        denoise=0.30,
-        padding_ratio=0.30,
+        denoise=0.48,  # was 0.30 — needs to be high enough to structurally fix broken eyes
+        padding_ratio=0.35,  # wider crop = more context for iris/catchlight coherence
         feather_radius=16,
         prompt_suffix=(
             "ultra detailed eyes, intricate iris texture, clear limbal ring, "
             "vivid catchlight, sharp eyelash strands, beautiful anime eyes, "
-            "balanced eye symmetry, perfect pupils, gleaming eyes"
+            "balanced eye symmetry, perfect pupils, gleaming eyes, "
+            "bright specular highlight, detailed iris pattern"
         ),
         negative_suffix=(
             "lazy eye, cross-eye, uneven pupils, blurry iris, "
             "malformed eyelids, bad eyes, missing eye, "
-            "heterochromia, different eye colors"
+            "flat eyes, dull eyes, lifeless eyes"
         ),
     ),
 
@@ -210,15 +214,16 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
         model_path="bbox/eyesDetection_v10.zip",
         region_type="eyes",
         confidence_threshold=0.30,
-        denoise=0.28,
-        padding_ratio=0.25,
+        denoise=0.45,  # was 0.28 — too low to fix structurally broken eyes
+        padding_ratio=0.30,
         feather_radius=14,
         prompt_suffix=(
             "detailed eye, perfect iris, clear pupil, "
-            "sharp eyelashes, beautiful anime eye"
+            "sharp eyelashes, beautiful anime eye, "
+            "vivid catchlight, bright specular highlight"
         ),
         negative_suffix=(
-            "blurry eye, deformed pupil, bad iris"
+            "blurry eye, deformed pupil, bad iris, flat eye, dull eye"
         ),
     ),
 
@@ -226,17 +231,19 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
     DetectionModelConfig(
         model_path="segm/adetailer2dMouth_v10.pt",
         region_type="mouth",
-        confidence_threshold=0.55,
-        denoise=0.30,
-        padding_ratio=0.20,
-        feather_radius=14,
+        confidence_threshold=0.50,  # was 0.55 — slightly lower to catch subtle mouths
+        denoise=0.38,  # was 0.30 — more strength for lip/teeth repair
+        padding_ratio=0.25,  # was 0.20 — include chin/upper lip context
+        feather_radius=16,
         prompt_suffix=(
             "detailed mouth, beautiful lips, correct teeth, "
-            "natural smile, detailed oral anatomy"
+            "natural smile, detailed oral anatomy, "
+            "well-shaped lips, natural lip color, lip gloss"
         ),
         negative_suffix=(
             "blurry mouth, deformed lips, bad teeth, "
-            "crooked mouth, missing teeth"
+            "crooked mouth, missing teeth, unnatural smile, "
+            "open wound, gaping mouth"
         ),
     ),
 
@@ -245,18 +252,20 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
         model_path="segm/handDetailer_v2V9c.zip",
         region_type="hand",
         confidence_threshold=0.30,
-        denoise=0.38,
-        padding_ratio=0.20,
-        feather_radius=18,
+        denoise=0.50,  # was 0.38 — hands need aggressive rebuild for finger count
+        padding_ratio=0.25,  # was 0.20 — include wrist context for anatomy coherence
+        feather_radius=20,
         prompt_suffix=(
             "detailed hands, correct finger count, five fingers, "
             "anatomically correct hands, well-drawn hands, "
-            "detailed fingernails, proper finger proportions"
+            "detailed fingernails, proper finger proportions, "
+            "natural hand pose, distinct fingers, clear knuckles"
         ),
         negative_suffix=(
             "bad hands, extra fingers, missing fingers, "
             "fused fingers, deformed hands, mutated hands, "
-            "too many fingers, six fingers"
+            "too many fingers, six fingers, four fingers, "
+            "blob hands, mitten hands"
         ),
     ),
 
@@ -302,15 +311,18 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
         model_path="bbox/animalEarDetection_v10.zip",
         region_type="animal_ear",
         confidence_threshold=0.35,
-        denoise=0.30,
-        padding_ratio=0.25,
+        denoise=0.38,  # was 0.30 — more strength for fur texture and ear shape
+        padding_ratio=0.28,  # was 0.25 — wider context for head integration
         feather_radius=16,
         prompt_suffix=(
             "detailed fluffy animal ears, soft fur texture, "
-            "detailed ear interior, beautiful kemonomimi"
+            "detailed ear interior, beautiful kemonomimi, "
+            "realistic fur shading, proper ear anatomy, "
+            "individual fur strands visible"
         ),
         negative_suffix=(
-            "blurry ears, deformed ears, flat ears, bad fur"
+            "blurry ears, deformed ears, flat ears, bad fur, "
+            "missing ears, melted ears, plastic texture"
         ),
     ),
 
@@ -319,17 +331,19 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
         model_path="segm/AdetailerAnimeGirlHair_v10.pt",
         region_type="hair",
         confidence_threshold=0.40,
-        denoise=0.28,
-        padding_ratio=0.15,
-        feather_radius=20,
+        denoise=0.35,  # was 0.28 — more strength for proper strand detail
+        padding_ratio=0.20,  # was 0.15 — include scalp/shoulder for flow context
+        feather_radius=22,
         prompt_suffix=(
             "detailed hair strands, flowing hair, "
             "silky hair texture, individual hair strands visible, "
-            "beautiful hair highlights, hair shading"
+            "beautiful hair highlights, hair shading, "
+            "lustrous hair, fine hair detail, hair volume"
         ),
         negative_suffix=(
             "blurry hair, flat hair, bad hair texture, "
-            "messy unnatural hair"
+            "messy unnatural hair, bald patches, "
+            "plastic hair, no hair detail"
         ),
     ),
 
@@ -338,16 +352,18 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
         model_path="segm/adetailer2dBellyTorso_v242Lg.zip",
         region_type="torso",
         confidence_threshold=0.40,
-        denoise=0.28,
-        padding_ratio=0.15,
-        feather_radius=20,
+        denoise=0.33,  # was 0.28 — slightly more to fix skin/anatomy artifacts
+        padding_ratio=0.18,  # was 0.15 — slightly wider for waist context
+        feather_radius=22,
         prompt_suffix=(
             "detailed body, smooth skin, "
             "detailed torso, proper body anatomy, "
-            "beautiful midriff, detailed navel"
+            "beautiful midriff, detailed navel, "
+            "natural skin texture, proper body proportions"
         ),
         negative_suffix=(
-            "bad anatomy, deformed body, blurry torso"
+            "bad anatomy, deformed body, blurry torso, "
+            "extra ribs, deformed navel, unnatural waist"
         ),
     ),
 
@@ -355,15 +371,16 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
     DetectionModelConfig(
         model_path="segm/adetailer2dArmpitYolov8_v10Segmentation.zip",
         region_type="armpit",
-        confidence_threshold=0.60,
-        denoise=0.28,
-        padding_ratio=0.20,
+        confidence_threshold=0.55,  # was 0.60 — slightly lower to catch partially hidden armpits
+        denoise=0.35,  # was 0.28 — more strength for skin texture
+        padding_ratio=0.22,  # was 0.20
         feather_radius=14,
         prompt_suffix=(
-            "detailed armpit, smooth skin, proper arm anatomy"
+            "detailed armpit, smooth skin, proper arm anatomy, "
+            "natural skin texture, clean skin detail"
         ),
         negative_suffix=(
-            "blurry skin, deformed arm"
+            "blurry skin, deformed arm, bad skin texture"
         ),
     ),
 
@@ -406,17 +423,19 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
     DetectionModelConfig(
         model_path="bbox/reignyolov8nsolesPt_solesDetectionV10.pt",
         region_type="feet",
-        confidence_threshold=0.50,
-        denoise=0.32,
-        padding_ratio=0.20,
-        feather_radius=16,
+        confidence_threshold=0.45,  # was 0.50 — slightly lower to catch angled feet
+        denoise=0.42,  # was 0.32 — more strength for toe count repair
+        padding_ratio=0.25,  # was 0.20 — include ankle for proportion coherence
+        feather_radius=18,
         prompt_suffix=(
             "detailed feet, correct toes, proper foot anatomy, "
-            "five toes, well-drawn feet"
+            "five toes, well-drawn feet, detailed toenails, "
+            "natural foot arch, clear toe separation"
         ),
         negative_suffix=(
             "extra toes, missing toes, deformed feet, "
-            "bad feet anatomy, six toes"
+            "bad feet anatomy, six toes, fused toes, "
+            "blob feet, mitten feet"
         ),
     ),
 
@@ -427,15 +446,18 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
         model_path="segm/clothesDetection_tops.zip",
         region_type="clothes",
         confidence_threshold=0.45,
-        denoise=0.30,
-        padding_ratio=0.12,
+        denoise=0.35,  # was 0.30 — more strength for fabric detail
+        padding_ratio=0.14,  # was 0.12 — slightly wider for seam context
         feather_radius=18,
         prompt_suffix=(
             "detailed clothing, proper fabric texture, "
-            "realistic cloth folds, detailed outfit"
+            "realistic cloth folds, detailed outfit, "
+            "clean fabric shading, proper clothing wrinkles, "
+            "material detail, button and seam detail"
         ),
         negative_suffix=(
-            "blurry clothing, deformed fabric, flat texture"
+            "blurry clothing, deformed fabric, flat texture, "
+            "missing clothing detail, torn fabric"
         ),
     ),
 
@@ -444,15 +466,17 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
         model_path="segm/womensUnderwear_pantiesSegV3b.pt",
         region_type="underwear",
         confidence_threshold=0.45,
-        denoise=0.30,
+        denoise=0.35,  # was 0.30 — more strength for fabric detail
         padding_ratio=0.15,
         feather_radius=14,
         prompt_suffix=(
             "detailed underwear, proper fabric texture, "
-            "realistic lingerie, lace detail"
+            "realistic lingerie, lace detail, "
+            "clean fabric shading, elastic band detail"
         ),
         negative_suffix=(
-            "blurry fabric, deformed underwear"
+            "blurry fabric, deformed underwear, "
+            "missing detail, flat texture"
         ),
     ),
 
@@ -460,16 +484,17 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
     DetectionModelConfig(
         model_path="bbox/thighhighDetectionFor_thighhighv50.pt",
         region_type="thighhigh",
-        confidence_threshold=0.50,
-        denoise=0.28,
-        padding_ratio=0.15,
+        confidence_threshold=0.48,  # was 0.50
+        denoise=0.34,  # was 0.28 — more strength for stocking texture
+        padding_ratio=0.18,  # was 0.15 — wider for garter/thigh context
         feather_radius=16,
         prompt_suffix=(
             "detailed thigh highs, proper fabric texture, "
-            "realistic stockings, elastic band detail"
+            "realistic stockings, elastic band detail, "
+            "transparent stocking texture, leg contour through fabric"
         ),
         negative_suffix=(
-            "blurry stockings, deformed fabric"
+            "blurry stockings, deformed fabric, flat texture"
         ),
     ),
 
@@ -478,15 +503,16 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
         model_path="segm/adetailer2dOnePieceSwimsuit_v1042.zip",
         region_type="swimsuit",
         confidence_threshold=0.45,
-        denoise=0.30,
-        padding_ratio=0.12,
+        denoise=0.34,  # was 0.30 — more strength for fabric/strap detail
+        padding_ratio=0.14,  # was 0.12
         feather_radius=16,
         prompt_suffix=(
             "detailed swimsuit, proper fabric texture, "
-            "realistic material, tight fit"
+            "realistic material, tight fit, "
+            "clean strap detail, proper body contour"
         ),
         negative_suffix=(
-            "blurry fabric, deformed swimsuit"
+            "blurry fabric, deformed swimsuit, flat texture"
         ),
     ),
 
@@ -495,15 +521,16 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
         model_path="segm/adetailer2dStrapless_v10Yolo8n.zip",
         region_type="leotard",
         confidence_threshold=0.45,
-        denoise=0.28,
-        padding_ratio=0.12,
+        denoise=0.33,  # was 0.28 — more strength for fabric detail
+        padding_ratio=0.14,  # was 0.12
         feather_radius=16,
         prompt_suffix=(
             "detailed leotard, proper fabric texture, "
-            "realistic material, strapless design"
+            "realistic material, strapless design, "
+            "tight fit, body contour, clean edges"
         ),
         negative_suffix=(
-            "blurry fabric, deformed leotard"
+            "blurry fabric, deformed leotard, flat texture"
         ),
     ),
 
@@ -551,15 +578,18 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
         model_path="bbox/boobaDetection_v11.zip",
         region_type="breasts",
         confidence_threshold=0.40,
-        denoise=0.30,
-        padding_ratio=0.15,
+        denoise=0.40,  # was 0.30 — more strength for shape and skin detail
+        padding_ratio=0.18,  # was 0.15 — wider for chest/torso context
         feather_radius=18,
         prompt_suffix=(
             "detailed breasts, proper anatomy, "
-            "smooth skin texture, natural shape"
+            "smooth skin texture, natural shape, "
+            "realistic skin shading, proper cleavage, "
+            "natural contour, beautiful proportions"
         ),
         negative_suffix=(
-            "deformed breasts, bad anatomy, asymmetrical"
+            "deformed breasts, bad anatomy, asymmetrical, "
+            "unnatural shape, saggy, plastic looking"
         ),
     ),
 
@@ -568,15 +598,17 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
         model_path="bbox/adetailerNipples_v20Segm.zip",
         region_type="nipples",
         confidence_threshold=0.40,
-        denoise=0.30,
-        padding_ratio=0.20,
+        denoise=0.38,  # was 0.30 — more strength for areola detail
+        padding_ratio=0.22,  # was 0.20 — include breast context
         feather_radius=12,
         prompt_suffix=(
             "detailed nipples, proper anatomy, "
-            "natural areola, smooth skin"
+            "natural areola, smooth skin, "
+            "realistic skin texture, proper areola color"
         ),
         negative_suffix=(
-            "deformed nipples, bad anatomy"
+            "deformed nipples, bad anatomy, "
+            "missing nipples, extra nipples"
         ),
     ),
 
@@ -584,16 +616,18 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
     DetectionModelConfig(
         model_path="bbox/pussyAdetailer_v5SegBboxYolo11s.zip",
         region_type="genital",
-        confidence_threshold=0.40,
-        denoise=0.32,
-        padding_ratio=0.18,
+        confidence_threshold=0.38,  # was 0.40 — slightly lower to catch angled views
+        denoise=0.42,  # was 0.32 — needs more strength for detail accuracy
+        padding_ratio=0.20,  # was 0.18 — wider for thigh/hip context
         feather_radius=14,
         prompt_suffix=(
             "detailed anatomy, natural skin texture, "
-            "proper anatomy, smooth skin"
+            "proper anatomy, smooth skin, "
+            "realistic anatomical detail, natural proportions"
         ),
         negative_suffix=(
-            "deformed anatomy, bad anatomy, unnatural"
+            "deformed anatomy, bad anatomy, unnatural, "
+            "censored, mosaic, blur"
         ),
     ),
 
@@ -601,15 +635,17 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
     DetectionModelConfig(
         model_path="bbox/adetailer2dFemalePubic_v10.zip",
         region_type="pubic_area",
-        confidence_threshold=0.45,
-        denoise=0.28,
-        padding_ratio=0.15,
+        confidence_threshold=0.42,  # was 0.45
+        denoise=0.38,  # was 0.28 — significantly more for proper detail
+        padding_ratio=0.18,  # was 0.15 — wider for hip context
         feather_radius=14,
         prompt_suffix=(
-            "detailed skin texture, natural body, proper anatomy"
+            "detailed skin texture, natural body, proper anatomy, "
+            "realistic skin shading, natural proportions"
         ),
         negative_suffix=(
-            "deformed, unnatural, bad anatomy"
+            "deformed, unnatural, bad anatomy, "
+            "censored, mosaic, blur"
         ),
     ),
 
@@ -788,10 +824,50 @@ class DetectionDetailAgent:
     # ── Internal helpers ─────────────────────────────────────────────
 
     def _get_model(self, model_path: str) -> Any:
-        """Load or return cached YOLO model."""
+        """Load or return cached YOLO model. Auto-extracts .zip archives first."""
         if model_path not in self._loaded_models:
-            self._loaded_models[model_path] = YOLO(model_path)
+            load_path = self._resolve_model_path(model_path)
+            self._loaded_models[model_path] = YOLO(load_path)
         return self._loaded_models[model_path]
+
+    def _resolve_model_path(self, model_path: str) -> str:
+        """If model_path is a .zip, extract the .pt inside and return the .pt path.
+        The extracted file is cached next to the .zip so extraction only runs once.
+        """
+        p = Path(model_path)
+        if p.suffix.lower() != ".zip":
+            return model_path
+
+        extract_dir = p.parent / "_extracted"
+        cached_pt = extract_dir / (p.stem + ".pt")
+        if cached_pt.exists():
+            return str(cached_pt)
+
+        if not p.exists():
+            return model_path  # let YOLO produce the normal "not found" error
+
+        try:
+            with zipfile.ZipFile(p, "r") as zf:
+                pt_names = [n for n in zf.namelist() if n.lower().endswith(".pt")]
+                if not pt_names:
+                    logger.warning(
+                        "[DetectionDetail] No .pt file found inside %s, trying raw load", p.name
+                    )
+                    return model_path
+                # Pick the first .pt (CivitAI zips usually contain exactly one)
+                pt_name = pt_names[0]
+                extract_dir.mkdir(parents=True, exist_ok=True)
+                with zf.open(pt_name) as src, open(cached_pt, "wb") as dst:
+                    dst.write(src.read())
+            logger.info(
+                "[DetectionDetail] Extracted %s → %s", p.name, cached_pt.name
+            )
+            return str(cached_pt)
+        except Exception as exc:
+            logger.warning(
+                "[DetectionDetail] Failed to extract %s: %s — trying raw load", p.name, exc
+            )
+            return model_path
 
     def _decode_image(self, image_b64: str) -> Optional[Any]:
         """Decode base64 image to PIL Image."""

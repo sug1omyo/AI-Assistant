@@ -137,6 +137,8 @@ class BeautyPassAgent:
         self._builder = WorkflowBuilder()
         self._client = ComfyClient(base_url=config.comfyui_url)
         self._pending_critique: Optional[CritiqueReport] = None
+        # Anti-duplicate: set of seeds already tried (injected by orchestrator)
+        self._used_seeds: set[int] = set()
 
     def set_refine_context(self, critique: Optional[CritiqueReport]) -> None:
         """Provide latest critique so the next beauty pass can target eye fixes."""
@@ -195,8 +197,9 @@ class BeautyPassAgent:
             job.status = AnimePipelineStatus.FAILED
             return job
 
-        # Resolve seed
-        seed = retry_seed if retry_seed is not None else self._resolve_seed(beauty_pc.seed)
+        # Resolve seed (anti-duplicate: avoid reusing previous seeds)
+        seed = retry_seed if retry_seed is not None else self._resolve_seed(beauty_pc.seed, self._used_seeds)
+        self._used_seeds.add(seed)
 
         critique = self._pending_critique
         self._pending_critique = None
@@ -482,7 +485,12 @@ class BeautyPassAgent:
                 return img.image_b64
         return job.source_image_b64 or None
 
-    def _resolve_seed(self, seed: int) -> int:
+    def _resolve_seed(self, seed: int, used_seeds: set[int] | None = None) -> int:
         if seed < 0:
-            return random.randint(0, 2**32 - 1)
+            # Anti-duplicate: avoid reusing previously tried seeds
+            for _ in range(50):
+                candidate = random.randint(0, 2**32 - 1)
+                if used_seeds is None or candidate not in used_seeds:
+                    return candidate
+            return random.randint(0, 2**32 - 1)  # fallback
         return seed

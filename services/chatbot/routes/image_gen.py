@@ -891,6 +891,7 @@ def anime_pipeline():
         job = AnimePipelineJob(
             user_prompt=prompt,
             reference_image_b64=data.get("reference_image_b64"),
+            thinking_mode=data.get("thinking_mode", "instant"),
         )
 
         # Override resolution if provided

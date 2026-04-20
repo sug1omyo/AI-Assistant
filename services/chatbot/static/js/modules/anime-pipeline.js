@@ -21,8 +21,8 @@ const STAGES = [
     { key: 'composition_pass', icon: '🎨',  label: 'Composition' },
     { key: 'structure_lock',   icon: '🔒',  label: 'Structure Lock' },
     { key: 'beauty_pass',      icon: '✨',  label: 'Beauty Pass' },
-    { key: 'critique',         icon: '🔍',  label: 'Critique' },
     { key: 'detection_inpaint',icon: '🎯',  label: 'YOLO Detail Fix' },
+    { key: 'critique',         icon: '🔍',  label: 'Critique' },
     { key: 'upscale',          icon: '📐',  label: 'Upscale' },
 ];
 
@@ -730,7 +730,7 @@ export class AnimePipeline {
         if (el) {
             el.textContent = `Refining (round ${data.round}/${data.max_rounds}, score: ${(data.previous_score || 0).toFixed(1)})…`;
         }
-        // Reset beauty_pass, detection_inpaint, and critique stages in the modal stage list
+        // Reset loop stages: beauty → YOLO → critique
         this._setStageState('beauty_pass', 'pending');
         this._setStageState('detection_inpaint', 'pending');
         this._setStageState('critique', 'pending');
@@ -1038,15 +1038,36 @@ export class AnimePipeline {
     _rewireInlineButtons(bubble) {
         const chatContainer = document.getElementById('chatContainer');
 
+        // Check if image is broken/placeholder (base64 stripped by storage cleanup)
+        const img = bubble.querySelector('.igv2-chat-image img');
+        const imgSrc = img?.getAttribute('src') || '';
+        const isPlaceholder = !imgSrc || imgSrc.includes('R0lGODlhAQABAI') || imgSrc === '#' || imgSrc === '[image removed to save space]';
+
+        // If image is a placeholder, try to recover from data-igv2-open or data-download-url
+        if (img && isPlaceholder) {
+            const serverUrl = img.getAttribute('data-igv2-open') || '';
+            const dlUrl = bubble.querySelector('[data-download-url]')?.getAttribute('data-download-url') || '';
+            const recoveryUrl = (serverUrl && !serverUrl.startsWith('data:')) ? serverUrl
+                : (dlUrl && !dlUrl.startsWith('data:')) ? dlUrl : '';
+            if (recoveryUrl) {
+                img.src = recoveryUrl;
+                img.setAttribute('data-igv2-open', recoveryUrl);
+            }
+        }
+
         // Download button
         bubble.querySelectorAll('[data-action="download"]').forEach(btn => {
             const jobId = btn.getAttribute('data-job') || 'result';
             const downloadUrl = btn.getAttribute('data-download-url') || '';
-            const img = bubble.querySelector('.igv2-chat-image img');
-            const src = downloadUrl || img?.getAttribute('src') || '';
+            const imgEl = bubble.querySelector('.igv2-chat-image img');
+            const src = downloadUrl || imgEl?.getAttribute('src') || '';
             btn.replaceWith(btn.cloneNode(true));  // remove old listeners
             const newBtn = bubble.querySelector('[data-action="download"]');
             newBtn?.addEventListener('click', () => {
+                if (!src || src.includes('R0lGODlhAQABAI')) {
+                    alert('Ảnh không còn khả dụng. Hãy tạo lại.');
+                    return;
+                }
                 const a = document.createElement('a');
                 a.href = src;
                 a.download = `anime_pipeline_${jobId}.png`;
