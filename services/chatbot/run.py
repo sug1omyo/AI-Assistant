@@ -12,8 +12,29 @@ import runpy
 import socket
 import subprocess
 import sys
+import logging
 from pathlib import Path
 from urllib.parse import urlparse
+
+# Configure logging early — before any module imports so all loggers inherit this config.
+# NOTE: force=False (default) so that when uvicorn worker re-imports this module it does NOT
+# wipe uvicorn's access-log handlers that were already set up by the worker bootstrap.
+# The basicConfig call is effectively a no-op inside the worker (root logger already has handlers).
+_log_level = logging.DEBUG if os.getenv('DEBUG', '0') == '1' else logging.INFO
+if not logging.root.handlers:
+    logging.basicConfig(
+        level=_log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+else:
+    logging.root.setLevel(_log_level)
+# Reduce noise from verbose third-party loggers
+logging.getLogger('pymongo').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('httpcore').setLevel(logging.WARNING)
+logging.getLogger('multipart').setLevel(logging.WARNING)
 
 # Ensure the chatbot service directory is in path
 service_dir = Path(__file__).parent
@@ -280,7 +301,7 @@ if USE_FASTAPI:
             host=os.getenv('HOST', '0.0.0.0'),  # noqa: S104
             port=port,
             reload=reload,
-            log_level='info',
+            log_level='debug' if os.getenv('DEBUG', '0') == '1' else 'info',
         )
 
 elif USE_NEW_STRUCTURE:

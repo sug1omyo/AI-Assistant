@@ -58,7 +58,7 @@ class CacheManager:
             self.enabled = True
             logger.info(f"âœ… Redis connected: {self.redis_url}")
         except Exception as e:
-            logger.warning(f"âš ï¸ Redis unavailable: {e}. Caching disabled.")
+            logger.info(f"Redis unavailable: {e}. Caching disabled.")
             self.redis_client = None
             self.enabled = False
     

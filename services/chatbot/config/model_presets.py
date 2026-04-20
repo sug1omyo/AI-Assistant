@@ -40,8 +40,8 @@ LORA_CATALOG = {
     # -- Custom trained ---------------------------------------------------
     "maki_custom":    {"file": "maki_lora.safetensors",                 "trigger": ["maki"],              "category": "character", "base": "sd15"},
 
-    # -- NSFW LoRAs — Illustrious XL base (compatible with ChenkinNoob-XL) --
-    # These LoRAs are confirmed ILXL/Illustrious — use ChenkinNoob-XL-V0.2.safetensors
+    # -- NSFW LoRAs ï¿½ Illustrious XL base (compatible with ChenkinNoob-XL) --
+    # These LoRAs are confirmed ILXL/Illustrious ï¿½ use ChenkinNoob-XL-V0.2.safetensors
     "xray_ilxl":              {"file": "x-ray_ilxl_v1.safetensors",                                              "trigger": ["xray view", "x-ray view", "internal view", "see through body"],  "category": "nsfw", "base": "ilxl"},
     "speculum_ilxl":          {"file": "speculum_illustrious_V1.0.safetensors",                                   "trigger": ["speculum"],                                                       "category": "nsfw", "base": "ilxl"},
     "speculum_insertion_ilxl":{"file": "LoraILXL10_speculum_insertion_v1.safetensors",                            "trigger": ["speculum insertion"],                                             "category": "nsfw", "base": "ilxl"},
@@ -52,7 +52,7 @@ LORA_CATALOG = {
     "cameltoe_ilxl":          {"file": "Cameltoe_THICK_-_Anime-000009.safetensors",                               "trigger": ["cameltoe", "camel toe"],                                          "category": "nsfw", "base": "ilxl"},
     "eyes_ilxl":              {"file": "Eyes_for_Illustrious_Lora_Perfect_anime_eyes.safetensors",                "trigger": [],                                                                 "category": "quality", "base": "ilxl"},
 
-    # -- NSFW LoRAs — likely SDXL/anime base (ambiguous, attempt with ChenkinNoob) --
+    # -- NSFW LoRAs ï¿½ likely SDXL/anime base (ambiguous, attempt with ChenkinNoob) --
     "xray_v2":                {"file": "xray2.5.safetensors",                                                     "trigger": [],                                                                 "category": "nsfw", "base": "sdxl"},
     "xray_window":            {"file": "Johns_X-Ray_Window_LORA.safetensors",                                     "trigger": ["x-ray window", "xray window"],                                    "category": "nsfw", "base": "sdxl"},
     "xray_creampie":          {"file": "X-ray_creampie_high.safetensors",                                         "trigger": ["xray creampie", "x-ray creampie"],                                "category": "nsfw", "base": "sdxl"},
@@ -118,7 +118,7 @@ WORKFLOW_PRESETS = {
     # -- Anime character generation (SDXL) --------------------------------
     "anime_character_xl": {
         "name": "Anime Character (XL)",
-        "description": "Anime characters with SDXL — high quality, supports character LoRAs",
+        "description": "Anime characters with SDXL - high quality, supports character LoRAs",
         "checkpoint": "animagine-xl-4.0-opt.safetensors",
         "default_loras": [],
         "negative_prompt": "bad quality, worst quality, low quality, blurry, distorted, deformed, ugly, bad anatomy, bad hands, missing fingers, extra fingers, watermark, text, signature",
@@ -132,7 +132,7 @@ WORKFLOW_PRESETS = {
     },
     "anime_character_15": {
         "name": "Anime Character (Classic)",
-        "description": "Anime characters with SD 1.5 — compatible with most character LoRAs",
+        "description": "Anime characters with SD 1.5 ï¿½ compatible with most character LoRAs",
         "checkpoint": "counterfeit_v30.safetensors",
         "default_loras": [],
         "negative_prompt": "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, blurry",
@@ -149,7 +149,7 @@ WORKFLOW_PRESETS = {
     },
     "anime_hsr_jingliu": {
         "name": "Jingliu (HSR)",
-        "description": "Jingliu from Honkai Star Rail — optimized preset",
+        "description": "Jingliu from Honkai Star Rail ï¿½ optimized preset",
         "checkpoint": "animagine-xl-4.0-opt.safetensors",
         "default_loras": [
             {"key": "jingliu", "weight": 0.85},
@@ -165,7 +165,7 @@ WORKFLOW_PRESETS = {
     },
     "anime_hsr_firefly": {
         "name": "Firefly (HSR)",
-        "description": "Firefly from Honkai Star Rail — character preset",
+        "description": "Firefly from Honkai Star Rail ï¿½ character preset",
         "checkpoint": "animagine-xl-4.0-opt.safetensors",
         "default_loras": [
             {"key": "firefly", "weight": 0.85},
@@ -181,7 +181,7 @@ WORKFLOW_PRESETS = {
     },
     "anime_genshin_furina": {
         "name": "Furina (Genshin)",
-        "description": "Furina from Genshin Impact — character preset",
+        "description": "Furina from Genshin Impact ï¿½ character preset",
         "checkpoint": "animagine-xl-4.0-opt.safetensors",
         "default_loras": [
             {"key": "furina", "weight": 0.8},
@@ -199,7 +199,7 @@ WORKFLOW_PRESETS = {
     # -- Realistic presets ------------------------------------------------
     "realistic_portrait": {
         "name": "Realistic Portrait",
-        "description": "Photorealistic portraits — SDXL Lightning fast",
+        "description": "Photorealistic portraits ï¿½ SDXL Lightning fast",
         "checkpoint": "realvisxlV50_v50LightningBakedvae.safetensors",
         "default_loras": [],
         "negative_prompt": "cartoon, anime, illustration, drawing, painting, sketch, bad quality, worst quality, blurry, distorted, deformed, ugly, bad anatomy, watermark, signature",
@@ -213,7 +213,7 @@ WORKFLOW_PRESETS = {
     },
     "realistic_pro": {
         "name": "Realistic Pro",
-        "description": "Professional photorealistic — slower but higher quality",
+        "description": "Professional photorealistic ï¿½ slower but higher quality",
         "checkpoint": "juggernautXL_v9.safetensors",
         "default_loras": [],
         "negative_prompt": "cartoon, anime, illustration, drawing, painting, bad quality, worst quality, blurry, distorted, deformed, ugly, bad anatomy, extra limbs, watermark, signature, text",
@@ -229,7 +229,7 @@ WORKFLOW_PRESETS = {
     # -- Fantasy / artistic -----------------------------------------------
     "fantasy_anime": {
         "name": "Fantasy Anime",
-        "description": "Fantasy anime art — great for environments and characters",
+        "description": "Fantasy anime art ï¿½ great for environments and characters",
         "checkpoint": "dreamshaper_xl.safetensors",
         "default_loras": [],
         "negative_prompt": "bad quality, worst quality, low quality, blurry, distorted, deformed, ugly, bad anatomy, watermark, signature",

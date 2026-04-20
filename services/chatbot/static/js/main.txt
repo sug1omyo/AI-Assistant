@@ -15,9 +15,6 @@ import { VideoGen } from './modules/video-gen.js';
 import { ExportHandler } from './modules/export-handler.js';
 import { SplitViewManager } from './modules/split-view.js';
 import { initLanguage } from './language-switcher.js';
-import { AnimePipeline } from './modules/anime-pipeline.js';
-import { initOverlayActions } from './modules/overlay-actions.js';
-import { initOverlayManager, registerOverlay } from './modules/overlay-manager.js';
 
 class ChatBotApp {
     constructor() {
@@ -32,7 +29,6 @@ class ChatBotApp {
         this.imageGenV2 = new ImageGenV2(this.apiService);
         this.videoGen = new VideoGen();
         this.exportHandler = new ExportHandler();
-        this.animePipeline = new AnimePipeline();
         
         // Expose chatManager and chatApp globally
         window.chatManager = this.chatManager;
@@ -754,13 +750,9 @@ class ChatBotApp {
                 return;
             }
 
-            // LOCAL → open Anime Pipeline modal with pre-filled prompt
-            if (providerChoice === 'local') {
-                this.animePipeline?.openModalWithPrompt(message);
-                return;
-            }
-
-            const imageGenOptions = { quality: 'auto' };
+            const imageGenOptions = providerChoice === 'local'
+                ? { quality: 'free', provider: 'comfyui' }
+                : { quality: 'auto' };
             console.log('[App] Provider choice:', providerChoice, imageGenOptions);
 
             // Create streaming status container (like thinking but for image gen)
@@ -1815,38 +1807,6 @@ class ChatBotApp {
     }
 
     /**
-     * Strip large base64 data URIs from an HTML string before persisting to
-     * localStorage.  Images that already have a server-side URL (`/storage/…`)
-     * keep only that URL.  Pure-base64 images are replaced with a 1×1
-     * transparent placeholder so the DOM structure stays intact on restore.
-     */
-    _stripBase64ForStorage(html) {
-        // 1. <img src="data:image/…;base64,…" data-igv2-open="/storage/…">
-        //    → keep only the server URL as src
-        html = html.replace(
-            /(<img\s[^>]*?)src="data:image\/[^"]{50,}"([^>]*?data-igv2-open="([^"]+)")/gi,
-            (_, before, after, url) => `${before}src="${url}"${after}`
-        );
-
-        // 2. Any remaining <img src="data:image/…;base64,…"> without a server URL
-        //    → replace with tiny transparent gif to preserve layout
-        const PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-        html = html.replace(
-            /(<img\s[^>]*?)src="data:image\/[^"]{50,}"/gi,
-            (_, before) => `${before}src="${PLACEHOLDER}"`
-        );
-
-        // 3. <a href="data:image/…;base64,…"> (download links)
-        //    → strip the href (button will rewire on restore)
-        html = html.replace(
-            /(<a\s[^>]*?)href="data:image\/[^"]{50,}"/gi,
-            (_, before) => `${before}href="#"`
-        );
-
-        return html;
-    }
-
-    /**
      * Save current session
      */
     async saveCurrentSession(updateTimestamp = false) {
@@ -1855,11 +1815,10 @@ class ChatBotApp {
         // Sync per-version downstream branches before persisting HTML.
         this.syncConversationBranches();
 
-        // Exclude the welcome screen element from saved messages.
-        // Strip inline base64 images before persisting to avoid localStorage bloat.
+        // Exclude the welcome screen element from saved messages
         const messages = Array.from(elements.chatContainer.children)
             .filter(el => el.id !== 'welcomeScreen')
-            .map(el => this._stripBase64ForStorage(el.outerHTML));
+            .map(el => el.outerHTML);
         console.log('[DEBUG] saveCurrentSession: chatId=', this.chatManager.currentChatId, 'messages=', messages.length, 'updateTimestamp=', updateTimestamp);
         
         this.chatManager.updateCurrentSession(messages, updateTimestamp);
@@ -1898,7 +1857,7 @@ class ChatBotApp {
                 session.conversationBranches[messageId] = {};
             }
 
-            const downstream = allMessages.slice(idx + 1).map(el => this._stripBase64ForStorage(el.outerHTML));
+            const downstream = allMessages.slice(idx + 1).map(el => el.outerHTML);
             session.conversationBranches[messageId][currentVersion] = downstream;
         });
     }
@@ -2668,18 +2627,6 @@ class ChatBotApp {
             console.error('[AutoTitle] Error:', e);
         }
     }
-
-    /**
-     * Toggle .ready on sendBtn based on whether user has typed something or staged files.
-     * Called from the textarea input listener and from _renderStagingArea.
-     */
-    _updateSendReady() {
-        const sendBtn = this.uiUtils.elements && this.uiUtils.elements.sendBtn;
-        if (!sendBtn) return;
-        const hasText = !!(this.uiUtils.elements.messageInput && this.uiUtils.elements.messageInput.value.trim());
-        const hasFiles = this._stagedFiles && this._stagedFiles.length > 0;
-        sendBtn.classList.toggle('ready', hasText || hasFiles);
-    }
 }
 
 // ── Image overlay button handlers (global) ──────────────────────────────────
@@ -2787,9 +2734,6 @@ if (!window.__igv2OverlayDelegationBound) {
     });
 }
 
-// ── Image overlay actions (zoom, preview — runs at module load) ──────────────
-initOverlayActions();
-
 // Initialize app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     const app = new ChatBotApp();
@@ -2797,23 +2741,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Expose to window for global access
     window.chatBotApp = app;
-
-    // ── Overlay manager — unified Escape / outside-click handling ──
-    initOverlayManager();
-    registerOverlay('galleryModal',            { type: 'modal' });
-    registerOverlay('galleryInfoModal',        { type: 'modal' });
-    registerOverlay('imagePreviewModal',       { type: 'modal', onClose: () => { document.body.style.overflow = ''; } });
-    registerOverlay('historyModal',            { type: 'modal' });
-    registerOverlay('configAgentModal',        { type: 'modal' });
-    registerOverlay('imageGenV2Modal',         { type: 'modal' });
-    registerOverlay('animePipelineModal',      { type: 'modal' });
-    registerOverlay('videoGenModal',           { type: 'modal' });
-    registerOverlay('generatedImageContainer', { type: 'modal' });
-    registerOverlay('qrPayModal',              { type: 'modal' });
-    registerOverlay('changePwModal',           { type: 'modal' });
-    registerOverlay('editProfileModal',        { type: 'modal' });
-    registerOverlay('userDropdown',            { type: 'dropdown' });
-
+    
     // === GALLERY MODAL: Click overlay to close ===
     const galleryModal = document.getElementById('galleryModal');
     if (galleryModal) {
@@ -2941,8 +2869,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     
-    window.extractFeatures = async function() {
-        const btn = this instanceof HTMLElement ? this : document.activeElement;
+    window.extractFeatures = async () => {
+        const btn = event.target;
         if (!btn) return;
         
         const originalText = btn.textContent;
@@ -2966,8 +2894,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     
-    window.autoGeneratePromptFromTags = async function() {
-        const btn = this instanceof HTMLElement ? this : document.activeElement;
+    window.autoGeneratePromptFromTags = async () => {
+        const btn = event.target;
         if (!btn) return;
         
         const originalText = btn.textContent;

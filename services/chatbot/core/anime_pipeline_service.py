@@ -374,6 +374,22 @@ def stream_pipeline(req: PipelineRequest) -> Generator[str, None, None]:
                     "previous_score": edata.get("previous_score", 0),
                 })
 
+            elif etype == "anime_pipeline_refine_reasoning":
+                yield _sse_line("ap_refine_reasoning", {
+                    "round": edata.get("round", 0),
+                    "reason": edata.get("reason", ""),
+                    "worst_dimensions": edata.get("worst_dimensions", []),
+                    "actions": edata.get("actions", []),
+                    "score_history": edata.get("score_history", []),
+                })
+
+            elif etype == "anime_pipeline_full_restart":
+                yield _sse_line("ap_full_restart", {
+                    "restart_num": edata.get("restart_num", 0),
+                    "best_score": edata.get("best_score", 0),
+                    "reason": edata.get("reason", ""),
+                })
+
             elif etype == "anime_pipeline_stage_error":
                 yield _sse_line("ap_error", {
                     "stage": edata.get("stage", ""),

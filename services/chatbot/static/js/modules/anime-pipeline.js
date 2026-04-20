@@ -22,6 +22,7 @@ const STAGES = [
     { key: 'structure_lock',   icon: '🔒',  label: 'Structure Lock' },
     { key: 'beauty_pass',      icon: '✨',  label: 'Beauty Pass' },
     { key: 'critique',         icon: '🔍',  label: 'Critique' },
+    { key: 'detection_inpaint',icon: '🎯',  label: 'YOLO Detail Fix' },
     { key: 'upscale',          icon: '📐',  label: 'Upscale' },
 ];
 
@@ -148,6 +149,7 @@ export class AnimePipeline {
         const div = document.createElement('div');
         div.className = 'message assistant ap-inline-msg';
         div.id = `ap-inline-${uid}`;
+        div.setAttribute('data-ap-prompt', prompt);
         div.innerHTML = `
             <div class="message__avatar message__avatar--agent">
                 <img src="/static/icons/favicon.svg" class="avatar-img" alt="" draggable="false">
@@ -262,6 +264,34 @@ export class AnimePipeline {
                 this._inlineSetCurrent(uid, `\uD83D\uDD04 Refinement round ${round + 1}/${(data.max_rounds || 1) + 1}\u2026`);
                 break;
             }
+            case 'ap_refine_reasoning': {
+                // Show reasoning for why refine/restart happened
+                const reason = data.reason || '';
+                const worst = (data.worst_dimensions || []).map(d => `${d.name}:${d.score}`).join(', ');
+                const detail = worst ? `${reason} [${worst}]` : reason;
+                this._inlineSetCurrent(uid, `🧠 ${detail}`);
+                break;
+            }
+            case 'ap_full_restart': {
+                // Full restart — reset all beauty/critique rows
+                const bpR = document.getElementById(`ap-stage-${uid}-beauty_pass`);
+                if (bpR) {
+                    bpR.classList.remove('done', 'error', 'active');
+                    bpR.classList.add('pending');
+                    const lbl = bpR.querySelector('.ap-stage-label');
+                    if (lbl) lbl.textContent = `Beauty Pass (Restart #${data.restart_num || 1})`;
+                    const tEl = bpR.querySelector('.ap-stage-time');
+                    if (tEl) tEl.textContent = '';
+                }
+                const crR = document.getElementById(`ap-stage-${uid}-critique`);
+                if (crR) {
+                    crR.classList.remove('done', 'error', 'active');
+                    crR.classList.add('pending');
+                    crR.querySelector('.ap-score-badge')?.remove();
+                }
+                this._inlineSetCurrent(uid, `🔁 Full restart #${data.restart_num || 1}: ${data.reason || 'score stagnant'}`);
+                break;
+            }
             case 'ap_result':
                 this._inlineShowResult(bubble, uid, data, prompt, startTime, chatContainer);
                 break;
@@ -363,7 +393,7 @@ export class AnimePipeline {
                     <img src="${imgSrc}" alt="Anime Pipeline result" data-igv2-open="${imgSrc}">
                     <div class="igv2-chat-meta">🎨 Anime Pipeline · ${elapsed}s${data.local_url ? ' · 💾 saved' : ''}</div>
                     <div class="ap-inline-result-btns">
-                        <button class="ap-inline-btn" data-action="download" data-job="${jobId}" data-prompt="${promptAttr}">📥 Tải ảnh</button>
+                        <button class="ap-inline-btn" data-action="download" data-job="${jobId}" data-prompt="${promptAttr}" data-download-url="${data.local_url || ''}">📥 Tải ảnh</button>
                         <button class="ap-inline-btn" data-action="regenerate" data-prompt="${promptAttr}">🔄 Tạo lại</button>
                         <button class="ap-inline-btn" data-action="edit" data-prompt="${promptAttr}">✏️ Chỉnh sửa</button>
                     </div>
@@ -516,6 +546,10 @@ export class AnimePipeline {
 
         this._abort = new AbortController();
 
+        // Abort on F5 / page unload to avoid stuck connections
+        const onUnload = () => this._abort?.abort();
+        window.addEventListener('beforeunload', onUnload);
+
         try {
             const resp = await fetch('/api/anime-pipeline/stream', {
                 method: 'POST',
@@ -536,6 +570,7 @@ export class AnimePipeline {
             if (e.name === 'AbortError') return;
             this._showError(e.message || 'Connection lost');
         } finally {
+            window.removeEventListener('beforeunload', onUnload);
             this._running = false;
             this._setGenerateEnabled(true);
         }
@@ -548,25 +583,58 @@ export class AnimePipeline {
         const decoder = new TextDecoder();
         let buffer = '';
         let currentEvent = '';
+        let gotResult = false;
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+        // Timeout: if no event received for 120s, treat as connection lost
+        const SSE_TIMEOUT_MS = 120_000;
+        let timeoutId = setTimeout(() => {
+            if (!gotResult) {
+                reader.cancel();
+                this._onError({ error: 'Mất kết nối (timeout 120s)', recoverable: false });
+            }
+        }, SSE_TIMEOUT_MS);
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
+        const resetTimeout = () => {
+            clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => {
+                if (!gotResult) {
+                    reader.cancel();
+                    this._onError({ error: 'Mất kết nối (timeout 120s)', recoverable: false });
+                }
+            }, SSE_TIMEOUT_MS);
+        };
 
-            for (const line of lines) {
-                if (line.startsWith('event: ')) {
-                    currentEvent = line.slice(7).trim();
-                } else if (line.startsWith('data: ')) {
-                    try {
-                        const data = JSON.parse(line.slice(6));
-                        this._handleEvent(currentEvent, data);
-                    } catch { /* ignore malformed */ }
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                resetTimeout();
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (line.startsWith('event: ')) {
+                        currentEvent = line.slice(7).trim();
+                    } else if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            if (currentEvent === 'ap_result' || currentEvent === 'ap_done') {
+                                gotResult = true;
+                            }
+                            this._handleEvent(currentEvent, data);
+                        } catch { /* ignore malformed */ }
+                    }
                 }
             }
+        } finally {
+            clearTimeout(timeoutId);
+        }
+
+        // If stream ended without ap_result, show error
+        if (!gotResult) {
+            this._onError({ error: 'Stream kết thúc bất ngờ — không nhận được kết quả', recoverable: false });
         }
     }
 
@@ -589,6 +657,12 @@ export class AnimePipeline {
                 break;
             case 'ap_refine':
                 this._onRefine(data);
+                break;
+            case 'ap_refine_reasoning':
+                this._onRefineReasoning(data);
+                break;
+            case 'ap_full_restart':
+                this._onFullRestart(data);
                 break;
             case 'ap_result':
                 this._onResult(data);
@@ -656,9 +730,29 @@ export class AnimePipeline {
         if (el) {
             el.textContent = `Refining (round ${data.round}/${data.max_rounds}, score: ${(data.previous_score || 0).toFixed(1)})…`;
         }
-        // Reset beauty_pass and critique stages in the modal stage list
+        // Reset beauty_pass, detection_inpaint, and critique stages in the modal stage list
         this._setStageState('beauty_pass', 'pending');
+        this._setStageState('detection_inpaint', 'pending');
         this._setStageState('critique', 'pending');
+    }
+
+    _onRefineReasoning(data) {
+        // Show reasoning details in progress view
+        const el = document.getElementById('apCurrentAction');
+        if (el) {
+            const dims = (data.worst_dimensions || []).slice(0, 3).join(', ');
+            const actionCount = (data.actions || []).length;
+            el.textContent = `🧠 Reasoning: ${dims || 'general'} — applying ${actionCount} fix(es)`;
+        }
+    }
+
+    _onFullRestart(data) {
+        const el = document.getElementById('apCurrentAction');
+        if (el) {
+            el.textContent = `🔄 Full restart #${data.restart_num} (best score: ${(data.best_score || 0).toFixed(1)}) — regenerating from scratch`;
+        }
+        // Reset all stages
+        STAGES.forEach(s => this._setStageState(s.key, 'pending'));
     }
 
     _onCritiqueResult(data) {
@@ -689,11 +783,16 @@ export class AnimePipeline {
         if (statusEl) statusEl.textContent = '✅ Hoàn thành!';
 
         const imgEl = document.getElementById('apResultImage');
-        if (imgEl && data.image_b64) {
-            imgEl.src = 'data:image/png;base64,' + data.image_b64;
-            imgEl.style.display = '';
-        } else if (imgEl) {
-            imgEl.style.display = 'none';
+        if (imgEl) {
+            // Prefer local_url (survives localStorage quota stripping)
+            // then cloud_url, then base64 as last resort
+            const src = data.local_url || data.cloud_url || (data.image_b64 ? 'data:image/png;base64,' + data.image_b64 : '');
+            if (src) {
+                imgEl.src = src;
+                imgEl.style.display = '';
+            } else {
+                imgEl.style.display = 'none';
+            }
         }
 
         // Populate manifest summary
@@ -735,7 +834,8 @@ export class AnimePipeline {
      * Uses window.chatApp (set by main.js) to access messageRenderer.
      */
     sendToChat() {
-        if (!this._lastResult?.image_b64) return;
+        const result = this._lastResult;
+        if (!result) return;
         const app = window.chatApp;
         if (!app) return;
 
@@ -743,10 +843,12 @@ export class AnimePipeline {
         if (!chatContainer) return;
 
         const prompt = (document.getElementById('apPrompt')?.value || '').trim();
-        const latency = this._lastResult.total_latency_ms
-            ? `${(this._lastResult.total_latency_ms / 1000).toFixed(1)}s` : '';
+        const latency = result.total_latency_ms
+            ? `${(result.total_latency_ms / 1000).toFixed(1)}s` : '';
         const meta = `🎨 Anime Pipeline${latency ? ' · ' + latency : ''}`;
-        const imgSrc = 'data:image/png;base64,' + this._lastResult.image_b64;
+        // Prefer local_url / cloud_url to avoid localStorage quota issues
+        const imgSrc = result.local_url || result.cloud_url || (result.image_b64 ? 'data:image/png;base64,' + result.image_b64 : '');
+        if (!imgSrc) return;
         const promptAttr = prompt.replace(/"/g, '&quot;');
 
         app.messageRenderer.addMessage(
@@ -825,11 +927,14 @@ export class AnimePipeline {
     // ── Download result ─────────────────────────────────────────────
 
     downloadResult() {
-        if (!this._lastResult?.image_b64) return;
+        const result = this._lastResult;
+        if (!result) return;
+        const src = result.local_url || result.cloud_url || (result.image_b64 ? 'data:image/png;base64,' + result.image_b64 : '');
+        if (!src) return;
 
         const a = document.createElement('a');
-        a.href = 'data:image/png;base64,' + this._lastResult.image_b64;
-        a.download = `anime_pipeline_${this._lastResult.job_id || 'result'}.png`;
+        a.href = src;
+        a.download = `anime_pipeline_${result.job_id || 'result'}.png`;
         a.click();
     }
 
@@ -850,5 +955,155 @@ export class AnimePipeline {
             results.push(b64);
         }
         return results;
+    }
+
+    // ── F5 / Page-load recovery ─────────────────────────────────────
+
+    /**
+     * Called on page load to recover stuck pipeline bubbles and re-wire
+     * inline button handlers that were lost when the DOM was restored
+     * from localStorage.
+     */
+    recoverInlineBubbles() {
+        const bubbles = document.querySelectorAll('.ap-inline-msg');
+        if (!bubbles.length) return;
+
+        bubbles.forEach(bubble => {
+            const details = bubble.querySelector('.ap-inline-progress');
+            const hasResult = bubble.querySelector('.igv2-chat-image img');
+
+            if (hasResult) {
+                // Image exists — collapse progress, re-wire buttons
+                if (details) {
+                    details.open = false;
+                    const summary = details.querySelector('.ap-inline-summary');
+                    if (summary) {
+                        const dots = summary.querySelector('.thinking-pill__dots');
+                        if (dots) dots.remove();
+                        const label = summary.querySelector('.ap-inline-label');
+                        if (label && !label.textContent.includes('✅')) {
+                            const timer = summary.querySelector('.ap-inline-timer');
+                            const elapsed = timer?.textContent || '';
+                            label.textContent = `✅ Anime Pipeline · ${elapsed}`;
+                            if (timer) timer.remove();
+                        }
+                    }
+                }
+                this._rewireInlineButtons(bubble);
+            } else if (details) {
+                // No image — pipeline was interrupted mid-stream
+                details.open = true;
+                const label = details.querySelector('.ap-inline-label');
+                if (label) label.textContent = '⚠️ Pipeline bị gián đoạn (F5/mất kết nối)';
+                const dots = details.querySelector('.thinking-pill__dots');
+                if (dots) dots.remove();
+                const timer = details.querySelector('.ap-inline-timer');
+                if (timer) timer.remove();
+                const current = bubble.querySelector('[id^="ap-current-"]');
+                if (current) current.textContent = 'Bấm "Tạo lại" để chạy lại pipeline';
+
+                // Add a retry button
+                const msgContent = bubble.querySelector('.message-content');
+                if (msgContent && !bubble.querySelector('.ap-recovery-btn')) {
+                    const retryDiv = document.createElement('div');
+                    retryDiv.style.cssText = 'margin-top:8px;';
+                    retryDiv.innerHTML = `<button class="ap-inline-btn ap-recovery-btn" style="padding:6px 14px;">🔄 Tạo lại</button>`;
+                    retryDiv.querySelector('button').addEventListener('click', () => {
+                        // Extract prompt from the bubble (data-ap-prompt) or result image (data-prompt)
+                        const prompt = bubble.getAttribute('data-ap-prompt')
+                            || bubble.querySelector('[data-prompt]')?.getAttribute('data-prompt')
+                            || '';
+                        if (prompt) {
+                            bubble.remove();
+                            const chatContainer = document.getElementById('chatContainer');
+                            if (chatContainer) this._runInlineChat(prompt, chatContainer);
+                        }
+                    });
+                    msgContent.appendChild(retryDiv);
+                }
+
+                // Mark all active/pending stages as interrupted
+                bubble.querySelectorAll('.ap-stage-item.active, .ap-stage-item.pending').forEach(row => {
+                    row.classList.remove('active', 'pending');
+                    row.classList.add('error');
+                });
+            }
+        });
+    }
+
+    /**
+     * Re-wire event listeners on inline result buttons after DOM restore.
+     * @param {HTMLElement} bubble
+     */
+    _rewireInlineButtons(bubble) {
+        const chatContainer = document.getElementById('chatContainer');
+
+        // Download button
+        bubble.querySelectorAll('[data-action="download"]').forEach(btn => {
+            const jobId = btn.getAttribute('data-job') || 'result';
+            const downloadUrl = btn.getAttribute('data-download-url') || '';
+            const img = bubble.querySelector('.igv2-chat-image img');
+            const src = downloadUrl || img?.getAttribute('src') || '';
+            btn.replaceWith(btn.cloneNode(true));  // remove old listeners
+            const newBtn = bubble.querySelector('[data-action="download"]');
+            newBtn?.addEventListener('click', () => {
+                const a = document.createElement('a');
+                a.href = src;
+                a.download = `anime_pipeline_${jobId}.png`;
+                a.click();
+            });
+        });
+
+        // Regenerate button
+        bubble.querySelectorAll('[data-action="regenerate"]').forEach(btn => {
+            const prompt = btn.getAttribute('data-prompt') || '';
+            btn.replaceWith(btn.cloneNode(true));
+            const newBtn = bubble.querySelector('[data-action="regenerate"]');
+            newBtn?.addEventListener('click', () => {
+                if (prompt && chatContainer) this._runInlineChat(prompt, chatContainer);
+            });
+        });
+
+        // Edit button + edit box
+        const editBox = bubble.querySelector('.ap-inline-edit-box');
+        bubble.querySelectorAll('[data-action="edit"]').forEach(btn => {
+            btn.replaceWith(btn.cloneNode(true));
+            const newBtn = bubble.querySelector('[data-action="edit"]');
+            newBtn?.addEventListener('click', () => {
+                if (editBox) {
+                    editBox.style.display = editBox.style.display === 'none' ? 'block' : 'none';
+                    if (editBox.style.display === 'block') editBox.querySelector('textarea')?.focus();
+                }
+            });
+        });
+
+        bubble.querySelectorAll('[data-action="edit-run"]').forEach(btn => {
+            btn.replaceWith(btn.cloneNode(true));
+            const newBtn = bubble.querySelector('[data-action="edit-run"]');
+            newBtn?.addEventListener('click', () => {
+                const newPrompt = editBox?.querySelector('textarea')?.value?.trim();
+                if (newPrompt && chatContainer) {
+                    if (editBox) editBox.style.display = 'none';
+                    this._runInlineChat(newPrompt, chatContainer);
+                }
+            });
+        });
+
+        bubble.querySelectorAll('[data-action="edit-cancel"]').forEach(btn => {
+            btn.replaceWith(btn.cloneNode(true));
+            const newBtn = bubble.querySelector('[data-action="edit-cancel"]');
+            newBtn?.addEventListener('click', () => {
+                if (editBox) editBox.style.display = 'none';
+            });
+        });
+
+        // Image click-to-open
+        bubble.querySelectorAll('.igv2-chat-image img').forEach(img => {
+            const src = img.getAttribute('data-igv2-open') || img.src;
+            img.style.cursor = 'pointer';
+            img.addEventListener('click', () => {
+                window.chatApp?.imageGenV2?.openImageModal?.(src);
+            });
+        });
     }
 }

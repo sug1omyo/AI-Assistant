@@ -433,19 +433,20 @@ class CritiqueReport:
 
     @property
     def passed(self) -> bool:
-        """True if overall score meets threshold and face/eye are acceptable.
+        """True if overall score >= 8.0 AND every scored dimension >= 8.
 
-        For character-detected prompts the orchestrator enforces stricter
-        face/eye gates (>=8) before accepting, but the base pass threshold
-        is raised to 8.0 for all images.
+        Strict mode: no dimension is allowed to be below 8/10.
+        Dimensions scored 0 are considered 'not evaluated' and skipped.
         """
         if self.retry_recommendation:
             return False
         if self.overall_score < 8.0:
             return False
-        # Hard-fail if face or eyes are clearly bad
-        if self.face_score < 7 or self.eye_consistency_score < 7:
-            return False
+        # Strict: every scored dimension must be >= 8
+        _STRICT_MIN = 8
+        for _name, score in self.dimension_scores.items():
+            if score > 0 and score < _STRICT_MIN:
+                return False
         # Hard-fail if eye reference comparison was measured and below 95%
         if self.eye_reference_match_pct > 0.0 and self.eye_reference_match_pct < 95.0:
             return False
@@ -584,6 +585,7 @@ class AnimePipelineJob:
     quality_hint: str = "quality"
     orientation_hint: str = ""  # auto-detected if empty
     preset: str = "anime_quality"
+    user_loras: list[dict[str, Any]] = field(default_factory=list)
 
     # Stage outputs
     vision_analysis: Optional[VisionAnalysis] = None

@@ -212,6 +212,8 @@ class AnimePipelineConfig:
     # Critique
     quality_threshold: float = 0.80
     max_refine_rounds: int = 4
+    max_stagnant_rounds: int = 5
+    max_full_restarts: int = 2
     critique_dimensions: list[str] = field(
         default_factory=lambda: [
             "instruction_adherence", "detail_handling", "identity_consistency"

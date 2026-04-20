@@ -18,8 +18,10 @@ Usage:
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Generator, Optional
@@ -53,6 +55,37 @@ def _pipeline_enabled() -> bool:
     """Check IMAGE_PIPELINE_V2 feature flag."""
     flag = os.getenv("IMAGE_PIPELINE_V2", "").lower()
     return flag in ("1", "true", "yes", "on")
+
+
+_LORA_TAG_RE = re.compile(r"<lora:([^:>]+):([0-9]*\.?[0-9]+)>")
+
+
+def _parse_lora_tags(prompt: str) -> tuple[str, list[dict[str, Any]]]:
+    """Extract ``<lora:name:weight>`` tags from a user prompt.
+
+    Returns:
+        (cleaned_prompt, list_of_lora_dicts)
+
+    Each lora dict has keys: name, strength_model, strength_clip, enabled.
+    The cleaned prompt has the ``<lora:…>`` tags removed.
+    """
+    loras: list[dict[str, Any]] = []
+    for m in _LORA_TAG_RE.finditer(prompt):
+        name = m.group(1).strip()
+        weight = float(m.group(2))
+        # Ensure the name ends with a known extension
+        if not any(name.endswith(ext) for ext in (".safetensors", ".pt", ".ckpt")):
+            name += ".safetensors"
+        loras.append({
+            "name": name,
+            "strength_model": round(min(max(weight, 0.0), 1.5), 2),
+            "strength_clip": round(min(max(weight, 0.0), 1.5), 2),
+            "enabled": True,
+        })
+    cleaned = _LORA_TAG_RE.sub("", prompt).strip()
+    # Collapse multiple spaces left by removal
+    cleaned = re.sub(r"  +", " ", cleaned)
+    return cleaned, loras
 
 
 class AnimePipelineOrchestrator:
@@ -114,6 +147,23 @@ class AnimePipelineOrchestrator:
         })
 
         try:
+            # Parse <lora:name:weight> tags from user prompt
+            cleaned_prompt, user_loras = _parse_lora_tags(job.user_prompt)
+            if user_loras:
+                job.user_loras = user_loras
+                job.user_prompt = cleaned_prompt
+                logger.info(
+                    "[AnimePipeline] Parsed %d user LoRA tags: %s",
+                    len(user_loras),
+                    [l["name"] for l in user_loras],
+                )
+            # Also merge any pre-set user_loras (from API request)
+            if job.user_loras and not user_loras:
+                logger.info(
+                    "[AnimePipeline] Using %d pre-set user LoRAs",
+                    len(job.user_loras),
+                )
+
             # Stage 1: Vision Analysis
             yield from self._run_stage(
                 "vision_analysis", self._vision, job, stage_num=1, total=8,
@@ -144,6 +194,10 @@ class AnimePipelineOrchestrator:
             # Inject verified character LoRA into all passes
             if self._verified_lora and self._verified_lora.accepted:
                 self._inject_character_lora(job)
+
+            # Inject user-specified LoRAs (<lora:name:weight> from prompt)
+            if job.user_loras:
+                self._inject_user_loras(job)
 
             # Stage 3: Composition Pass
             yield from self._run_stage(
@@ -214,15 +268,25 @@ class AnimePipelineOrchestrator:
     ) -> Generator[dict[str, Any], None, None]:
         """Run beauty pass + critique, repeating until quality target is met.
 
+        Stagnation detection: if score does not improve for
+        ``max_stagnant_rounds`` consecutive rounds, trigger a full restart
+        (new random seed, reset refine context) up to ``max_full_restarts``
+        times.
+
         For character-detected prompts, the loop is more aggressive:
         eye/face must reach 8+ to pass. Max rounds increased to 4.
         """
         max_rounds = self._config.max_refine_rounds
+        max_stagnant = getattr(self._config, "max_stagnant_rounds", 5)
+        max_restarts = getattr(self._config, "max_full_restarts", 2)
         best_score = 0.0
         best_image_b64 = None
         critique_for_next_round = None
         eye_refine_round_used = False
         has_character = self._detected_character is not None
+        score_history: list[float] = []
+        stagnant_count = 0
+        restart_count = 0
 
         for round_num in range(max_rounds + 1):
             is_refine = round_num > 0
@@ -265,13 +329,54 @@ class AnimePipelineOrchestrator:
             if latest_critique:
                 critique_for_next_round = latest_critique
                 score = latest_critique.overall_score
+                score_history.append(score)
+
                 if score > best_score:
                     best_score = score
+                    stagnant_count = 0
                     # Get the beauty pass image
                     for img in reversed(job.intermediates):
                         if img.stage == "beauty_pass":
                             best_image_b64 = img.image_b64
                             break
+                else:
+                    stagnant_count += 1
+
+                # ── Stagnation detection: full restart ──────────────
+                if (
+                    stagnant_count >= max_stagnant
+                    and restart_count < max_restarts
+                    and round_num < max_rounds
+                ):
+                    restart_count += 1
+                    stagnant_count = 0
+                    critique_for_next_round = None
+                    eye_refine_round_used = False
+                    # Emit restart event for UI
+                    yield self._event("full_restart", {
+                        "restart_num": restart_count,
+                        "best_score": best_score,
+                        "reason": f"Score stagnant for {max_stagnant} rounds (best={best_score:.1f})",
+                        "score_history": [round(s, 2) for s in score_history],
+                    })
+                    # Emit reasoning for the refine decision
+                    worst_dims = sorted(
+                        ((k, v) for k, v in latest_critique.dimension_scores.items() if v > 0),
+                        key=lambda x: x[1],
+                    )[:3]
+                    yield self._event("refine_reasoning", {
+                        "round": round_num,
+                        "reason": f"Full restart #{restart_count}: score stuck at {score:.1f}",
+                        "worst_dimensions": [{"name": k, "score": v} for k, v in worst_dims],
+                        "actions": ["new_seed", "reset_refine_context"],
+                        "score_history": [round(s, 2) for s in score_history],
+                    })
+                    logger.info(
+                        "[AnimePipeline] Full restart #%d: score stagnant for %d rounds (best=%.1f)",
+                        restart_count, max_stagnant, best_score,
+                    )
+                    job.refine_rounds += 1
+                    continue
 
                 # Character-specific face/eye quality gate:
                 # Even if overall passes, force refine if face or eyes are weak.
@@ -319,6 +424,18 @@ class AnimePipelineOrchestrator:
                     break
 
                 if round_num < max_rounds:
+                    # Emit reasoning for why we're refining
+                    worst_dims = sorted(
+                        ((k, v) for k, v in latest_critique.dimension_scores.items() if v > 0),
+                        key=lambda x: x[1],
+                    )[:3]
+                    yield self._event("refine_reasoning", {
+                        "round": round_num,
+                        "reason": f"Score {score:.1f}/10 below threshold",
+                        "worst_dimensions": [{"name": k, "score": v} for k, v in worst_dims],
+                        "actions": ["refine_with_critique_context"],
+                        "score_history": [round(s, 2) for s in score_history],
+                    })
                     logger.info(
                         "[AnimePipeline] Critique failed (score=%.2f), refining round %d",
                         score, round_num + 1,
@@ -630,6 +747,29 @@ class AnimePipelineOrchestrator:
             "[AnimePipeline] Injected character LoRA '%s' into %d passes",
             lora_dict["name"], len(job.layer_plan.passes),
         )
+
+    def _inject_user_loras(self, job: AnimePipelineJob) -> None:
+        """Inject user-specified LoRAs (from ``<lora:name:weight>`` tags) into all passes."""
+        if not job.user_loras or not job.layer_plan or not job.layer_plan.passes:
+            return
+
+        injected = 0
+        for pass_cfg in job.layer_plan.passes:
+            existing = pass_cfg.lora_models or []
+            existing_names = {lora.get("name", "") for lora in existing}
+            for ulora in job.user_loras:
+                if ulora["name"] not in existing_names:
+                    existing.append(ulora)
+                    existing_names.add(ulora["name"])
+                    injected += 1
+            pass_cfg.lora_models = existing
+
+        if injected:
+            logger.info(
+                "[AnimePipeline] Injected %d user LoRAs into %d passes: %s",
+                len(job.user_loras), len(job.layer_plan.passes),
+                [l["name"] for l in job.user_loras],
+            )
 
     def _run_stage(
         self,

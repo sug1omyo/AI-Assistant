@@ -127,7 +127,12 @@ class DatabaseManager:
             self.analytics.create_index([('date', DESCENDING)])
             self.analytics.create_index([('event_type', ASCENDING)])
             
-            logger.info("âœ… Database indexes created")
+            logger.info("✅ Database indexes created")
+        except OperationFailure as e:
+            if e.code == 86:  # IndexKeySpecsConflict — indexes already exist with different options, safe to ignore
+                logger.debug("Database indexes already exist, skipping creation")
+            else:
+                logger.error(f"Error creating indexes: {e}")
         except Exception as e:
             logger.error(f"Error creating indexes: {e}")
     

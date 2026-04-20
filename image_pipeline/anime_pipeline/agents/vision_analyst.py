@@ -184,6 +184,102 @@ _KNOWN_CHARACTERS: dict[str, tuple[str, str, list[str]]] = {
         "1girl", "long_hair", "white_hair", "blue_eyes",
         "fox_ears", "fox_tail", "virtual_youtuber",
     ]),
+    # Zenless Zone Zero
+    "ellen": ("ellen_joe", "zenless_zone_zero", [
+        "1girl", "long_hair", "silver_hair", "blue_eyes",
+        "shark_tail", "school_uniform",
+    ]),
+    "ellen joe": ("ellen_joe", "zenless_zone_zero", [
+        "1girl", "long_hair", "silver_hair", "blue_eyes",
+        "shark_tail", "school_uniform",
+    ]),
+    "miyabi": ("miyabi_(zenless_zone_zero)", "zenless_zone_zero", [
+        "1girl", "long_hair", "pink_hair", "red_eyes",
+        "japanese_clothes", "kimono",
+    ]),
+    "anby": ("anby_demara", "zenless_zone_zero", [
+        "1girl", "short_hair", "purple_hair", "yellow_eyes",
+        "jacket", "combat_outfit",
+    ]),
+    "nicole demara": ("nicole_demara", "zenless_zone_zero", [
+        "1girl", "long_hair", "blonde_hair", "green_eyes",
+        "business_suit", "hat",
+    ]),
+    "jane doe": ("jane_doe_(zenless_zone_zero)", "zenless_zone_zero", [
+        "1girl", "medium_hair", "red_hair", "red_eyes",
+        "combat_outfit", "mask",
+    ]),
+    "zhu yuan": ("zhu_yuan", "zenless_zone_zero", [
+        "1girl", "long_hair", "white_hair", "yellow_eyes",
+        "police_uniform", "gloves",
+    ]),
+    # NIKKE
+    "rapi": ("rapi_(nikke)", "goddess_of_victory:_nikke", [
+        "1girl", "long_hair", "blonde_hair", "red_eyes",
+        "military_uniform", "beret",
+    ]),
+    # To Love-Ru
+    "lala": ("lala_satalin_deviluke", "to_love-ru", [
+        "1girl", "long_hair", "pink_hair", "green_eyes",
+        "tail", "hair_ornament",
+    ]),
+    "yami": ("konjiki_no_yami", "to_love-ru", [
+        "1girl", "long_hair", "blonde_hair", "red_eyes",
+        "black_dress", "emotionless",
+    ]),
+    # Oshi no Ko
+    "ai hoshino": ("hoshino_ai", "oshi_no_ko", [
+        "1girl", "long_hair", "purple_hair", "star_eyes",
+        "idol", "star_hair_ornament",
+    ]),
+    "ruby hoshino": ("hoshino_ruby", "oshi_no_ko", [
+        "1girl", "long_hair", "blonde_hair", "star_eyes",
+        "idol",
+    ]),
+    # Fire Emblem
+    "edelgard": ("edelgard_von_hresvelg", "fire_emblem", [
+        "1girl", "long_hair", "white_hair", "purple_eyes",
+        "armor", "cape", "crown",
+    ]),
+    "camilla": ("camilla_(fire_emblem)", "fire_emblem", [
+        "1girl", "very_long_hair", "purple_hair", "purple_eyes",
+        "armor", "tiara",
+    ]),
+    # KanColle
+    "shimakaze": ("shimakaze_(kancolle)", "kantai_collection", [
+        "1girl", "long_hair", "blonde_hair", "blue_eyes",
+        "thighhighs", "sailor_collar", "miniskirt",
+    ]),
+    # Touhou
+    "reimu": ("hakurei_reimu", "touhou", [
+        "1girl", "long_hair", "black_hair", "brown_eyes",
+        "red_hakama", "detached_sleeves", "hair_ribbon", "bow",
+    ]),
+    "marisa": ("kirisame_marisa", "touhou", [
+        "1girl", "long_hair", "blonde_hair", "yellow_eyes",
+        "witch_hat", "apron", "braid",
+    ]),
+    "remilia": ("remilia_scarlet", "touhou", [
+        "1girl", "short_hair", "blue_hair", "red_eyes",
+        "wings", "bat_wings", "mob_cap", "pink_dress",
+    ]),
+    "flandre": ("flandre_scarlet", "touhou", [
+        "1girl", "blonde_hair", "red_eyes", "side_ponytail",
+        "wings", "crystal_wings", "mob_cap", "red_dress",
+    ]),
+    "sakuya": ("izayoi_sakuya", "touhou", [
+        "1girl", "short_hair", "silver_hair", "blue_eyes",
+        "maid", "maid_headdress", "knives",
+    ]),
+    # Fate/Grand Order
+    "ishtar": ("ishtar_(fate)", "fate/grand_order", [
+        "1girl", "long_hair", "black_hair", "red_eyes",
+        "two-side_up", "tiara", "red_outfit",
+    ]),
+    "ereshkigal": ("ereshkigal_(fate)", "fate/grand_order", [
+        "1girl", "long_hair", "blonde_hair", "red_eyes",
+        "tiara", "cage", "red_outfit",
+    ]),
 }
 
 

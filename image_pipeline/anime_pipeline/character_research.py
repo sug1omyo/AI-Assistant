@@ -247,20 +247,167 @@ _CHARACTER_ALIASES: dict[str, tuple[str, str, str, str]] = {
     # Chainsaw Man
     "makima": ("makima_(chainsaw_man)", "chainsaw_man", "Makima", "Chainsaw Man"),
     "power": ("power_(chainsaw_man)", "chainsaw_man", "Power", "Chainsaw Man"),
+    # Zenless Zone Zero
+    "ellen": ("ellen_joe", "zenless_zone_zero", "Ellen Joe", "Zenless Zone Zero"),
+    "ellen joe": ("ellen_joe", "zenless_zone_zero", "Ellen Joe", "Zenless Zone Zero"),
+    "miyabi": ("miyabi_(zenless_zone_zero)", "zenless_zone_zero", "Miyabi", "Zenless Zone Zero"),
+    "lycaon": ("von_lycaon", "zenless_zone_zero", "Von Lycaon", "Zenless Zone Zero"),
+    "anby": ("anby_demara", "zenless_zone_zero", "Anby Demara", "Zenless Zone Zero"),
+    "nicole": ("nicole_demara", "zenless_zone_zero", "Nicole Demara", "Zenless Zone Zero"),
+    "nicole demara": ("nicole_demara", "zenless_zone_zero", "Nicole Demara", "Zenless Zone Zero"),
+    "koleda": ("koleda_belobog", "zenless_zone_zero", "Koleda", "Zenless Zone Zero"),
+    "jane doe": ("jane_doe_(zenless_zone_zero)", "zenless_zone_zero", "Jane Doe", "Zenless Zone Zero"),
+    "zhu yuan": ("zhu_yuan", "zenless_zone_zero", "Zhu Yuan", "Zenless Zone Zero"),
+    "lucy": ("lucy_(zenless_zone_zero)", "zenless_zone_zero", "Lucy", "Zenless Zone Zero"),
+    # NIKKE
+    "rapi": ("rapi_(nikke)", "goddess_of_victory:_nikke", "Rapi", "NIKKE"),
+    "marian": ("marian_(nikke)", "goddess_of_victory:_nikke", "Marian", "NIKKE"),
+    "helm": ("helm_(nikke)", "goddess_of_victory:_nikke", "Helm", "NIKKE"),
+    "anis": ("anis_(nikke)", "goddess_of_victory:_nikke", "Anis", "NIKKE"),
+    # To Love-Ru
+    "lala": ("lala_satalin_deviluke", "to_love-ru", "Lala", "To Love-Ru"),
+    "momo": ("momo_velia_deviluke", "to_love-ru", "Momo", "To Love-Ru"),
+    "yami": ("konjiki_no_yami", "to_love-ru", "Yami", "To Love-Ru"),
+    "haruna": ("sairenji_haruna", "to_love-ru", "Haruna", "To Love-Ru"),
+    # Oshi no Ko
+    "ai hoshino": ("hoshino_ai", "oshi_no_ko", "Hoshino Ai", "Oshi no Ko"),
+    "ruby hoshino": ("hoshino_ruby", "oshi_no_ko", "Hoshino Ruby", "Oshi no Ko"),
+    "ruby": ("hoshino_ruby", "oshi_no_ko", "Hoshino Ruby", "Oshi no Ko"),
+    "kana arima": ("arima_kana", "oshi_no_ko", "Arima Kana", "Oshi no Ko"),
+    "akane kurokawa": ("kurokawa_akane", "oshi_no_ko", "Kurokawa Akane", "Oshi no Ko"),
+    # Fire Emblem
+    "lyn": ("lyndis_(fire_emblem)", "fire_emblem", "Lyndis", "Fire Emblem"),
+    "camilla": ("camilla_(fire_emblem)", "fire_emblem", "Camilla", "Fire Emblem"),
+    "byleth": ("byleth_(fire_emblem)", "fire_emblem", "Byleth", "Fire Emblem"),
+    "edelgard": ("edelgard_von_hresvelg", "fire_emblem", "Edelgard", "Fire Emblem"),
+    # KanColle
+    "shimakaze": ("shimakaze_(kancolle)", "kantai_collection", "Shimakaze", "KanColle"),
+    "kongou": ("kongou_(kancolle)", "kantai_collection", "Kongou", "KanColle"),
+    "yamato": ("yamato_(kancolle)", "kantai_collection", "Yamato", "KanColle"),
+    # Fate/Hollow Ataraxia
+    "caren": ("caren_hortensia", "fate/hollow_ataraxia", "Caren Hortensia", "Fate/Hollow Ataraxia"),
+    "bazett": ("bazett_fraga_mcremitz", "fate/hollow_ataraxia", "Bazett", "Fate/Hollow Ataraxia"),
+    "ishtar": ("ishtar_(fate)", "fate/grand_order", "Ishtar", "Fate/Grand Order"),
+    "ereshkigal": ("ereshkigal_(fate)", "fate/grand_order", "Ereshkigal", "Fate/Grand Order"),
+    # Touhou
+    "reimu": ("hakurei_reimu", "touhou", "Hakurei Reimu", "Touhou"),
+    "marisa": ("kirisame_marisa", "touhou", "Kirisame Marisa", "Touhou"),
+    "remilia": ("remilia_scarlet", "touhou", "Remilia Scarlet", "Touhou"),
+    "flandre": ("flandre_scarlet", "touhou", "Flandre Scarlet", "Touhou"),
+    "sakuya": ("izayoi_sakuya", "touhou", "Izayoi Sakuya", "Touhou"),
 }
+
+# ── Series hint keywords for disambiguation ─────────────────────────────
+# Maps lowercase keywords that might appear in a prompt → canonical series_tag
+_SERIES_HINTS: dict[str, str] = {
+    # Genshin Impact
+    "genshin": "genshin_impact", "genshin impact": "genshin_impact",
+    "teyvat": "genshin_impact", "mondstadt": "genshin_impact",
+    "liyue": "genshin_impact", "inazuma": "genshin_impact",
+    "sumeru": "genshin_impact", "fontaine": "genshin_impact",
+    "snezhnaya": "genshin_impact", "natlan": "genshin_impact",
+    # Honkai: Star Rail
+    "hsr": "honkai:_star_rail", "star rail": "honkai:_star_rail",
+    "honkai star rail": "honkai:_star_rail", "astral express": "honkai:_star_rail",
+    "stellaron": "honkai:_star_rail", "xianzhou": "honkai:_star_rail",
+    "penacony": "honkai:_star_rail", "belobog": "honkai:_star_rail",
+    # Honkai Impact 3rd
+    "hi3": "honkai_impact_3rd", "honkai impact": "honkai_impact_3rd",
+    "honkai 3rd": "honkai_impact_3rd",
+    # Zenless Zone Zero
+    "zzz": "zenless_zone_zero", "zenless": "zenless_zone_zero",
+    "zone zero": "zenless_zone_zero", "zenless zone zero": "zenless_zone_zero",
+    "new eridu": "zenless_zone_zero",
+    # Date a Live
+    "date a live": "date_a_live", "dal": "date_a_live",
+    # Sword Art Online
+    "sao": "sword_art_online", "sword art": "sword_art_online",
+    # Re:Zero
+    "re:zero": "re:zero", "re zero": "re:zero", "rezero": "re:zero",
+    # Demon Slayer
+    "demon slayer": "kimetsu_no_yaiba", "kimetsu": "kimetsu_no_yaiba",
+    # Fate
+    "fate": "fate/stay_night", "fgo": "fate/grand_order",
+    "fate grand order": "fate/grand_order", "fate stay night": "fate/stay_night",
+    "fate hollow": "fate/hollow_ataraxia",
+    # Naruto
+    "naruto": "naruto", "konoha": "naruto",
+    # Attack on Titan
+    "aot": "shingeki_no_kyojin", "attack on titan": "shingeki_no_kyojin",
+    "shingeki": "shingeki_no_kyojin",
+    # Spy x Family
+    "spy x family": "spy_x_family", "spy family": "spy_x_family",
+    # Bocchi the Rock
+    "bocchi the rock": "bocchi_the_rock!",
+    # Oshi no Ko
+    "oshi no ko": "oshi_no_ko",
+    # Blue Archive
+    "blue archive": "blue_archive",
+    # Frieren
+    "frieren": "sousou_no_frieren",
+    # Hololive
+    "hololive": "hololive",
+    # Jujutsu Kaisen
+    "jjk": "jujutsu_kaisen", "jujutsu kaisen": "jujutsu_kaisen",
+    # Chainsaw Man
+    "chainsaw man": "chainsaw_man", "csm": "chainsaw_man",
+    # NIKKE
+    "nikke": "goddess_of_victory:_nikke",
+    # To Love-Ru
+    "to love": "to_love-ru", "to love-ru": "to_love-ru",
+    # Fire Emblem
+    "fire emblem": "fire_emblem", "fe3h": "fire_emblem",
+    # KanColle
+    "kancolle": "kantai_collection", "kantai": "kantai_collection",
+    # Touhou
+    "touhou": "touhou", "gensokyo": "touhou",
+    # Arknights
+    "arknights": "arknights",
+    # Azur Lane
+    "azur lane": "azur_lane",
+    # League of Legends
+    "lol": "league_of_legends", "league": "league_of_legends",
+    # Wuthering Waves
+    "wuthering": "wuthering_waves", "wuwa": "wuthering_waves",
+}
+
+
+def _detect_series_hint(text: str) -> Optional[str]:
+    """Extract a series hint from the prompt, longest match first."""
+    for hint in sorted(_SERIES_HINTS.keys(), key=len, reverse=True):
+        if hint in text:
+            return _SERIES_HINTS[hint]
+    return None
 
 
 def detect_character(user_prompt: str) -> Optional[tuple[str, str, str, str]]:
     """Detect a known character in the user prompt.
 
+    Uses series hints in the prompt to disambiguate when multiple characters
+    share the same base name (e.g. "seele" in HSR vs HI3).
+
     Returns (danbooru_tag, series_tag, display_name, series_name) or None.
     """
     lower = user_prompt.lower()
-    # Try longest alias first to avoid partial matches (e.g. "sakura haruno" before "sakura")
+    series_hint = _detect_series_hint(lower)
+
+    # Collect all matching aliases (longest first)
+    matches: list[tuple[str, str, str, str]] = []
     for alias in sorted(_CHARACTER_ALIASES.keys(), key=len, reverse=True):
         if alias in lower:
-            return _CHARACTER_ALIASES[alias]
-    return None
+            matches.append(_CHARACTER_ALIASES[alias])
+
+    if not matches:
+        return None
+
+    # If we have a series hint, prefer the match from that series
+    if series_hint:
+        for m in matches:
+            if m[1] == series_hint:
+                return m
+
+    # Fallback: return the longest-alias match (first in sorted order)
+    return matches[0]
 
 
 # ════════════════════════════════════════════════════════════════════════
