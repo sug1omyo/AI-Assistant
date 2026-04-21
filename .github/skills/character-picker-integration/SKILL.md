@@ -78,8 +78,7 @@ description: "Maintain the character picker, character registry, and local job q
   "thumbnail": "storage/character_refs/raiden_shogun/thumb.webp", // optional
   "lora_hint": null,                            // optional default LoRA key
   "solo_recommended": true,                    // hint for prompt builder
-  "category": "character",                     // free-form tag
-  "safe": true                                 // gate for safe-content UI
+  "category": "character"                      // free-form tag
 }
 ```
 
@@ -117,7 +116,6 @@ description: "Maintain the character picker, character registry, and local job q
 5. **Character JSON keys are lowercase snake_case** combining character + series, e.g. `kafka_honkai_star_rail`. Never use spaces.
 6. **Series aliases are case-insensitive** but stored case-preserving; canonical values must match a `series_key` used by some character.
 7. **Thumbnail paths are repo-relative.** The `/thumbnail` route resolves against repo root and refuses paths that escape it.
-8. **No NSFW gating built in.** The `safe: true` flag exists but is not enforced. If you need a safe-only mode, filter in `find()` or the route — do not delete the field.
 
 ## File monitor
 

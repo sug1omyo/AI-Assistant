@@ -39,7 +39,6 @@ class CharacterRecord:
     lora_hint: Optional[str] = None
     solo_recommended: bool = True
     category: str = "character"
-    safe: bool = True
 
     def to_dict(self) -> dict:
         return asdict(self)

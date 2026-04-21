@@ -10,8 +10,7 @@
     "thumbnail": "storage/character_refs/raiden_shogun/thumb.webp",
     "lora_hint": null,
     "solo_recommended": true,
-    "category": "character",
-    "safe": true
+    "category": "character"
   },
   "hu_tao_genshin_impact": {
     "key": "hu_tao_genshin_impact",
@@ -24,8 +23,7 @@
     "thumbnail": "storage/character_refs/hu_tao/thumb.webp",
     "lora_hint": null,
     "solo_recommended": true,
-    "category": "character",
-    "safe": true
+    "category": "character"
   },
   "kafka_honkai_star_rail": {
     "key": "kafka_honkai_star_rail",
@@ -38,8 +36,7 @@
     "thumbnail": "storage/character_refs/kafka_honkai_star_rail/thumb.webp",
     "lora_hint": null,
     "solo_recommended": true,
-    "category": "character",
-    "safe": true
+    "category": "character"
   },
   "rem_re_zero": {
     "key": "rem_re_zero",
@@ -52,7 +49,6 @@
     "thumbnail": "storage/character_refs/rem_re_zero/thumb.webp",
     "lora_hint": null,
     "solo_recommended": true,
-    "category": "character",
-    "safe": true
+    "category": "character"
   }
 }
