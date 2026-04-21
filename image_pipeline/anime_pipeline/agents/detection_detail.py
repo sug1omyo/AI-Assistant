@@ -595,7 +595,7 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
 
     # 23. Nipple detection (segmentation)
     DetectionModelConfig(
-        model_path="bbox/adetailerNipples_v20Segm.zip",
+        model_path="segm/adetailerNipples_v20Segm.zip",
         region_type="nipples",
         confidence_threshold=0.40,
         denoise=0.38,  # was 0.30 — more strength for areola detail
@@ -651,7 +651,7 @@ DEFAULT_DETECTION_LAYERS: list[DetectionModelConfig] = [
 
     # 26. Anime NSFW all-in-one detection (multi-class)
     DetectionModelConfig(
-        model_path="bbox/animeNSFWDetection_v50Variant1.zip",
+        model_path="segm/animeNSFWDetection_v50Variant1.zip",
         region_type="nsfw_allinone",
         confidence_threshold=0.40,
         denoise=0.30,

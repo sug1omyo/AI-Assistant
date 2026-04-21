@@ -1242,6 +1242,56 @@ nsfw_effect:
   tags: ["nsfw", "bondage", "pose"]
   trigger_words: ["suspension", "bondage", "rope"]
 
+- name: "anal_beads_v02a_sd15.safetensors"
+  location: comfyui
+  download_required: true
+  civitai_id: 125639
+  description: "Anal Beads v0.2a — anal bead insertion concept (SD1.5). Author: psoft."
+  strength_model_range: [0.60, 1.00]
+  strength_clip_range: [0.55, 0.90]
+  recommended_model: 0.80
+  recommended_clip: 0.70
+  compatible_models: ["sd15"]
+  tags: ["nsfw", "anal", "insertion", "sex_toy"]
+  detection_regions: ["genital"]
+  trigger_words: ["anal beads"]
+  keywords: ["anal", "anal object insertion", "object insertion", "gaping"]
+  notes: "Works best with some poses; others require prompt tweaking. Try 'anal, gaping' for stronger effect."
+
+- name: "anarubizu_anal_beads_sd15.safetensors"
+  location: comfyui
+  download_required: true
+  civitai_id: 12704
+  description: "Anal Beads (anarubizu) v1.0 — anal bead insertion, Japanese model. AOM-compatible (SD1.5)."
+  strength_model_range: [0.60, 1.00]
+  strength_clip_range: [0.55, 0.90]
+  recommended_model: 0.80
+  recommended_clip: 0.70
+  compatible_models: ["sd15"]
+  tags: ["nsfw", "anal", "insertion", "sex_toy"]
+  detection_regions: ["genital"]
+  trigger_words: ["anarubizu", "sex toy"]
+  notes: >
+    AOM-series compatible. Point butt toward camera for best results.
+    LoRA Block Weight 0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0 reduces image quality impact.
+    Adjust LoRA strength, 'anarubizu', 'sex toy', and 'NSFW' weights for situation intensity.
+
+- name: "legs_together_anal_pose_sd15.safetensors"
+  location: comfyui
+  download_required: true
+  civitai_id: 152366
+  description: "Legs Together Anal Pose — legs together + anal penetration pose (SD1.5). Author: WaifuCrafter."
+  strength_model_range: [0.60, 1.00]
+  strength_clip_range: [0.55, 0.90]
+  recommended_model: 0.85
+  recommended_clip: 0.75
+  compatible_models: ["sd15"]
+  tags: ["nsfw", "anal", "pose", "legs"]
+  detection_regions: ["genital"]
+  trigger_words: ["anal_hold"]
+  keywords: ["legs_together", "legs_up", "anal", "hetero", "penis", "sex", "pussy", "open mouth", "testicles", "ass", "solo focus", "1girl", "1boy"]
+  notes: "Use with hires fix. Needs tweaks for best results."
+
 # ── X-Ray / See-Through LoRAs ───────────────────────────────────
 
 xray:
