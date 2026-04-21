@@ -1,8 +1,17 @@
 # Anime Pipeline — Developer Documentation
 
+## Canonical entry point
+
+- HTTP (Flask blueprint): **`routes/anime_pipeline.py`** → `/api/anime-pipeline/{health,stream,generate,upload-refs}`
+- Service bridge: **`services/chatbot/core/anime_pipeline_service.py`** (feature-flag gate, ComfyUI reachability, validation, SSE translation)
+- Orchestrator: **`image_pipeline/anime_pipeline/orchestrator.py`** (single source of truth for stage order)
+- Legacy compat route: `routes/image_gen.py` → `/api/image-gen/anime-pipeline` (deprecated, emits a warning; use the canonical endpoints for new work)
+
+Feature flag: `IMAGE_PIPELINE_V2=true`.
+
 ## Architecture Overview
 
-The anime pipeline is a **7-stage multi-pass image generation system** that produces high-quality anime artwork through ComfyUI. It follows an agent-based architecture where each stage is a standalone agent that reads from and writes to a shared `AnimePipelineJob` dataclass.
+The anime pipeline is a **multi-pass image generation system** that produces high-quality anime artwork through ComfyUI. It follows an agent-based architecture where each stage is a standalone agent that reads from and writes to a shared `AnimePipelineJob` dataclass.
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
@@ -58,15 +67,22 @@ image_pipeline/anime_pipeline/
 │   ├── layer_planner.py     # Stage 2: LayerPlannerAgent (no external calls)
 │   ├── composition_pass.py  # Stage 3: CompositionPassAgent
 │   ├── structure_lock.py    # Stage 4: StructureLockAgent
-│   ├── cleanup_pass.py      # Stage 3.5 (optional): CleanupPassAgent
 │   ├── beauty_pass.py       # Stage 5: BeautyPassAgent
 │   ├── critique.py          # Stage 6: CritiqueAgent
-│   ├── refine_loop.py       # Critique→refine decision logic
-│   ├── final_ranker.py      # Score and rank candidate images
-│   ├── upscale.py           # Stage 7: UpscaleAgent (basic)
-│   ├── upscale_service.py   # Enhanced upscale (Ultimate SD Upscale)
-│   └── output_manifest.py   # Build output manifest JSON
+│   ├── detection_inpaint.py # Per-region ADetailer-style inpaint
+│   ├── detection_detail.py  # YOLO detection (used by detection_inpaint)
+│   ├── upscale.py           # Stage 7: UpscaleAgent (live)
+│   ├── final_ranker.py      # Rank candidate images (live)
+│   ├── output_manifest.py   # Build output manifest JSON (live)
+│   │
+│   ├── cleanup_pass.py      # NOT WIRED — optional stage 3.5 utility
+│   ├── refine_loop.py       # NOT WIRED — helpers reused by orchestrator
+│   └── upscale_service.py   # NOT WIRED — Ultimate SD Upscale alternative
 ```
+
+### Wired vs utility agents
+
+The live orchestrator imports only the agents listed as stages above. The three agents marked **NOT WIRED** are kept importable and tested, but are not called on the production path. See `image_pipeline/DEPRECATED.md` for the rule.
 
 ---
 

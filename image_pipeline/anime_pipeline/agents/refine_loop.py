@@ -1,6 +1,15 @@
 """
 RefineLoopAgent — Iterative critique-and-refine loop.
 
+.. admonition:: NOT WIRED (utility module)
+
+   The live orchestrator inlines the critique→refine loop directly. The
+   ``RefineLoopAgent`` class in this module is a standalone wrapper kept
+   for tests and opt-in use. The **stateless helper functions below**
+   (``critique_image``, ``decide_refine_action``,
+   ``patch_plan_from_critique``, ``run_refine_round``) are the canonical,
+   reusable building blocks. See ``image_pipeline/DEPRECATED.md``.
+
 After each major pass the loop:
   1) Scores the generated image against the LayerPlan (critique_image).
   2) Decides whether another round is needed (decide_refine_action).

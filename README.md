@@ -235,6 +235,8 @@ Prompt → Vision Analysis → Layer Planning → Composition Pass
 
 Tất cả stage phát SSE events với prefix `anime_pipeline_*`. Sau `upscale`, orchestrator chạy `FinalRanker` để chấm điểm mọi candidate (composite score = face × 1.5 + clarity × 1.2 + style × 1.0 − artifact_penalty) và phát event `anime_pipeline_final_ranking` kèm winner / runner-ups. Manifest ghi qua `build_output_manifest()` khi có rank result, fallback về format cũ nếu không.
 
+**Canonical entry point:** `routes/anime_pipeline.py` → `/api/anime-pipeline/{health,stream,generate,upload-refs}` (bridged by `services/chatbot/core/anime_pipeline_service.py`). Endpoint `/api/image-gen/anime-pipeline` trong `routes/image_gen.py` vẫn hoạt động cho backward compatibility nhưng đã **deprecated** — log warning được phát ra mỗi lần gọi. Chi tiết về subtree status (`image_pipeline/{workflow,planner,evaluator,semantic_editor,multi_reference}/` không wired): xem [image_pipeline/DEPRECATED.md](image_pipeline/DEPRECATED.md).
+
 Chi tiết kiến trúc: [image_pipeline/anime_pipeline/README.md](image_pipeline/anime_pipeline/README.md). Tổng quan local image stack: [skills.md](skills.md).
 
 ### Env vars

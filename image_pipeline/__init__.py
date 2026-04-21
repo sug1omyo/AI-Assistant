@@ -1,19 +1,28 @@
 """
-image_pipeline — Nano Banana-like multi-stage image generation & editing system.
+image_pipeline — Local image generation subtree.
 
-Architecture (§11.2 / §12):
-    job_schema.py       → Canonical data contracts for the entire pipeline
-    planner/            → Stage 0-1: intent parsing, constraint extraction, prompt layers
-    semantic_editor/    → Stage 3: Qwen-Image-Edit / fallback editors
-    multi_reference/    → Stage 4: FLUX.2 multi-reference composition
-    refinement/         → Stage 5: Fill inpainting, ADetailer, IP-Adapter
-    evaluator/          → Stage 6-7: 8-dim scoring, correction loop, experiment log
-    workflow/           → Capability-based routing (task type → model chain)
-    orchestrator.py     → Master 9-stage pipeline controller
+CANONICAL LIVE PATH
+-------------------
+Only ``image_pipeline.anime_pipeline`` is wired into the running chatbot.
+Reach it through ``services/chatbot/routes/anime_pipeline.py`` →
+``/api/anime-pipeline/*`` (bridged by ``core/anime_pipeline_service.py``).
+The single orchestrator is ``image_pipeline.anime_pipeline.orchestrator``.
 
-Usage:
-    from image_pipeline import ImageJob, PipelineOrchestrator
-    from image_pipeline.job_schema import PromptSpec, RefinementPlan, EvalResult, RunMetadata
+DEFERRED / NOT INTEGRATED
+-------------------------
+The following subpackages are early design scaffolding ("Nano Banana"
+blueprint) and are NOT imported by any live route or orchestrator. They
+are kept for potential future restart; do not treat them as authoritative:
+
+    job_schema.py, workflow/, planner/, evaluator/,
+    semantic_editor/, multi_reference/, BLUEPRINT.md
+
+See ``image_pipeline/DEPRECATED.md`` for details and the rule for new work.
+
+BACKWARD-COMPAT EXPORTS (unchanged, do not add new ones here)
+-------------------------------------------------------------
+Existing imports from ``image_pipeline.job_schema`` continue to work, but
+new code should import from ``image_pipeline.anime_pipeline`` instead.
 """
 
 from .job_schema import (

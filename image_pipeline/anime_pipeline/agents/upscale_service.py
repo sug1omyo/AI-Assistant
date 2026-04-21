@@ -1,6 +1,13 @@
 """
 UpscaleService — Enhanced upscale stage using WorkflowBuilder + ComfyClient.
 
+.. admonition:: NOT WIRED (utility module)
+
+   The live orchestrator uses ``UpscaleAgent`` (``upscale.py``) for the
+   final upscale stage. ``UpscaleService`` is an enhanced alternative
+   (Ultimate SD Upscale + fallback) kept importable for tests and opt-in
+   use. See ``image_pipeline/DEPRECATED.md``.
+
 Primary path: Ultimate SD Upscale (tiled img2img during upscale).
 Fallback path: ImageUpscaleWithModel + ImageScale (simple model upscale).
 

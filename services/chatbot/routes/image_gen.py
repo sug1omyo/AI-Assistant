@@ -858,13 +858,37 @@ def list_characters():
 
 
 # ── Anime multi-pass pipeline (IMAGE_PIPELINE_V2) ────────────────────────
+#
+# DEPRECATED: This endpoint is the legacy anime-pipeline entry. The canonical
+# surface is the dedicated blueprint ``routes/anime_pipeline.py`` →
+# ``/api/anime-pipeline/{health,stream,generate,upload-refs}``, which provides
+# availability probes, rate limiting, richer request validation and upload
+# support. This route is kept only for backward compatibility; responses
+# include an ``X-Deprecated-Endpoint`` header.
+
+_LEGACY_ANIME_WARNING_EMITTED = False
+
+
+def _emit_legacy_anime_warning() -> None:
+    global _LEGACY_ANIME_WARNING_EMITTED
+    if not _LEGACY_ANIME_WARNING_EMITTED:
+        logger.warning(
+            "[anime_pipeline] /api/image-gen/anime-pipeline is deprecated; "
+            "use /api/anime-pipeline/stream or /api/anime-pipeline/generate"
+        )
+        _LEGACY_ANIME_WARNING_EMITTED = True
+
 
 @image_gen_bp.route("/api/image-gen/anime-pipeline", methods=["POST"])
 @_guarded
 def anime_pipeline():
     """
-    Run the multi-pass anime image pipeline.
+    Run the multi-pass anime image pipeline (DEPRECATED legacy entry).
     Requires IMAGE_PIPELINE_V2=true feature flag.
+
+    Prefer the canonical endpoints in ``routes/anime_pipeline.py``:
+        POST /api/anime-pipeline/stream     (SSE)
+        POST /api/anime-pipeline/generate   (blocking)
 
     Body (JSON):
         prompt: str               — Image description
@@ -874,6 +898,7 @@ def anime_pipeline():
         upscale: bool             — Run upscale pass (default: true)
         stream: bool              — Return SSE stream (default: false)
     """
+    _emit_legacy_anime_warning()
     from core.feature_flags import features
 
     if not features.image_pipeline_v2:

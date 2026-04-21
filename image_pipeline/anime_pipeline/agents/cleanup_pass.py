@@ -1,6 +1,13 @@
 """
 CleanupPassAgent — Stage between structure lock and beauty pass.
 
+.. admonition:: NOT WIRED (utility module)
+
+   This agent is **not** imported by the live orchestrator
+   (``image_pipeline.anime_pipeline.orchestrator``). It remains available
+   as a tested utility for opt-in experimentation and may be re-enabled
+   in a future iteration. See ``image_pipeline/DEPRECATED.md``.
+
 Fixes composition drift, simplifies noisy regions, stabilizes face
 and costume shapes, and produces a cleaner intermediate before the
 strongest anime model redraws it.
