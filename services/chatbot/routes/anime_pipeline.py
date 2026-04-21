@@ -15,9 +15,134 @@ import time as _time
 from functools import wraps
 from flask import Blueprint, request, jsonify, session, Response
 
+from core.character_registry import get_registry
+from core.job_queue import get_queue
+
 logger = logging.getLogger(__name__)
 
 anime_pipeline_bp = Blueprint("anime_pipeline", __name__)
+
+
+def _enrich_with_character(data: dict) -> dict:
+    """If payload contains ``character_key``, prepend a fully-qualified
+    ``Display Name in Series`` phrase to the prompt so the existing
+    character_parser resolves identity reliably. Returns enriched dict.
+
+    Backward-compatible: if no character_key (or unresolved), returns input.
+    """
+    char_key = (data.get("character_key") or "").strip()
+    if not char_key:
+        return data
+    rec = get_registry().get(char_key)
+    if rec is None:
+        logger.warning("[anime_pipeline] character_key %s not in registry", char_key)
+        return data
+    prompt = (data.get("prompt") or "").strip()
+    qualified = f"{rec.display_name} in {rec.series}"
+    # Only prepend if the qualified phrase isn't already present
+    if qualified.lower() not in prompt.lower():
+        new_prompt = f"{qualified}, {prompt}" if prompt else qualified
+    else:
+        new_prompt = prompt
+    enriched = dict(data)
+    enriched["prompt"] = new_prompt
+    enriched["_resolved_character"] = rec
+    return enriched
+
+
+def _wrap_stream_with_queue(inner_gen, character_record=None, preset: str = "",
+                             prompt_preview: str = ""):
+    """Wrap an SSE generator to mirror lifecycle into the JobQueue.
+
+    Parses ``ap_status``, ``ap_stage_start``, ``ap_stage_done``, ``ap_result``,
+    ``ap_error``, ``ap_done`` frames to extract job_id and update queue state.
+    Pass-through everything verbatim — never modifies the SSE stream.
+    """
+    queue = get_queue()
+    job_id_seen: dict[str, str] = {}
+
+    def _ensure_registered(jid: str) -> None:
+        if not jid or queue.get(jid) is not None:
+            return
+        queue.create(
+            job_id=jid,
+            prompt=prompt_preview[:500],
+            character_key=getattr(character_record, "key", None),
+            character_display=getattr(character_record, "display_name", None),
+            series_key=getattr(character_record, "series_key", None),
+            preset=preset or None,
+        )
+
+    def _gen():
+        try:
+            for frame in inner_gen:
+                # Frame is an SSE-formatted string: "event: X\ndata: {...}\n\n"
+                # Best-effort parse: extract event + first data JSON.
+                yield frame
+                if not isinstance(frame, str) or "event:" not in frame:
+                    continue
+                try:
+                    lines = frame.split("\n")
+                    event_name = ""
+                    data_payload = None
+                    for ln in lines:
+                        if ln.startswith("event:"):
+                            event_name = ln.split(":", 1)[1].strip()
+                        elif ln.startswith("data:"):
+                            raw = ln.split(":", 1)[1].strip()
+                            try:
+                                data_payload = json.loads(raw)
+                            except Exception:
+                                data_payload = None
+                    if not event_name:
+                        continue
+                    jid = (data_payload or {}).get("job_id", "") if data_payload else ""
+                    if jid and "id" not in job_id_seen:
+                        job_id_seen["id"] = jid
+                        _ensure_registered(jid)
+                    current_jid = job_id_seen.get("id", jid)
+                    if not current_jid:
+                        continue
+                    if event_name == "ap_status":
+                        queue.transition(current_jid, "queued")
+                    elif event_name in ("ap_stage_start",):
+                        stage = (data_payload or {}).get("stage", "")
+                        stage_num = (data_payload or {}).get("stage_num", 0)
+                        total = (data_payload or {}).get("total_stages", 8) or 8
+                        pct = (stage_num / total) * 100 if total else None
+                        queue.transition(current_jid, "running",
+                                         progress_stage=stage)
+                        if pct is not None:
+                            queue.update_progress(current_jid, pct=pct)
+                    elif event_name == "ap_stage_done":
+                        stage = (data_payload or {}).get("stage", "")
+                        queue.update_progress(current_jid, stage=stage)
+                    elif event_name == "ap_result":
+                        manifest = (data_payload or {}).get("manifest") or {}
+                        final_path = manifest.get("final_image_path") or manifest.get("filename")
+                        queue.transition(current_jid, "completed",
+                                         progress_pct=100.0,
+                                         final_image_path=final_path,
+                                         manifest_path=manifest.get("manifest_path"))
+                    elif event_name == "ap_error":
+                        err = (data_payload or {}).get("error", "unknown")
+                        queue.transition(current_jid, "failed", error=str(err))
+                    elif event_name == "ap_done":
+                        rec = queue.get(current_jid)
+                        if rec and rec.state == "running":
+                            queue.transition(current_jid, "completed",
+                                             progress_pct=100.0)
+                except Exception as parse_exc:
+                    logger.debug("[anime_pipeline] queue-wrap parse error: %s", parse_exc)
+        except GeneratorExit:
+            jid = job_id_seen.get("id")
+            if jid:
+                rec = queue.get(jid)
+                if rec and rec.state in ("queued", "running"):
+                    queue.transition(jid, "cancelled", error="client disconnected")
+            raise
+
+    return _gen()
 
 # ── Rate limiting (shared with image-gen pattern) ───────────────────────
 _RATE_WINDOW = 120  # wider window — pipeline jobs take longer
@@ -112,6 +237,8 @@ def stream_pipeline():
 
     # ── Validate payload ────────────────────────────────────────────
     data = request.get_json(force=True, silent=True) or {}
+    data = _enrich_with_character(data)
+    resolved_char = data.pop("_resolved_character", None)
     req, val_err = validate_request(data)
     if val_err:
         def _err_val():
@@ -122,8 +249,13 @@ def stream_pipeline():
     req.session_id = session.get("session_id", request.remote_addr or "")
     req.conversation_id = data.get("conversation_id", session.get("conversation_id", ""))
 
+    inner = _stream(req)
+    wrapped = _wrap_stream_with_queue(
+        inner, character_record=resolved_char,
+        preset=req.preset, prompt_preview=req.prompt,
+    )
     return Response(
-        _stream(req),
+        wrapped,
         mimetype="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -154,6 +286,8 @@ def generate_pipeline():
         return jsonify({"error": rate_err}), 429
 
     data = request.get_json(force=True, silent=True) or {}
+    data = _enrich_with_character(data)
+    resolved_char = data.pop("_resolved_character", None)
     req, val_err = validate_request(data)
     if val_err:
         return jsonify({"error": val_err}), 400
@@ -165,6 +299,16 @@ def generate_pipeline():
         from image_pipeline.anime_pipeline import AnimePipelineOrchestrator
 
         job = build_job(req)
+        # Register in JobQueue for visibility (sync call — no SSE wrapper)
+        get_queue().create(
+            job_id=job.job_id,
+            prompt=req.prompt[:500],
+            character_key=getattr(resolved_char, "key", None),
+            character_display=getattr(resolved_char, "display_name", None),
+            series_key=getattr(resolved_char, "series_key", None),
+            preset=req.preset,
+        )
+        get_queue().transition(job.job_id, "running")
         orchestrator = AnimePipelineOrchestrator()
         orchestrator.run(job)
 
@@ -173,6 +317,11 @@ def generate_pipeline():
             result["image_b64"] = job.final_image_b64
             result.update(persist_pipeline_result(job, req))
 
+        get_queue().transition(
+            job.job_id, "completed", progress_pct=100.0,
+            final_image_path=getattr(job, "final_image_spec_path", None)
+            or getattr(job, "final_image_path", None),
+        )
         return jsonify(result)
 
     except ImportError as e:
@@ -180,6 +329,10 @@ def generate_pipeline():
         return jsonify({"error": "Anime pipeline modules not available"}), 500
     except Exception as e:
         logger.error("[anime_pipeline] Failed: %s", e, exc_info=True)
+        try:
+            get_queue().transition(job.job_id, "failed", error=str(e))  # type: ignore[name-defined]
+        except Exception:
+            pass
         return jsonify({"error": str(e)}), 500
 
 

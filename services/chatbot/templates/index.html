@@ -45,6 +45,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/image-gen-v2.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/anime-pipeline.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/character-picker.css') }}">
 
     <!-- Tailwind Play CDN — preflight disabled to avoid overriding existing styles -->
     <script>
@@ -1025,6 +1026,8 @@ try {
                 <!-- <button class="topbar__btn" id="splitViewBtn" title="Split view"><i data-lucide="columns-2" class="lucide"></i></button> -->
                 <button class="topbar__btn" id="imageGenV2Btn" title="AI Image (Multi-provider)" style="color: var(--accent);"><i data-lucide="sparkles" class="lucide"></i></button>
                 <button class="topbar__btn" id="animePipelineBtn" title="Layered Anime Pipeline" style="color: var(--info, #8b5cf6);"><i data-lucide="layers" class="lucide"></i></button>
+                <button class="topbar__btn" id="characterPickerBtn" title="Chọn nhân vật" style="color: var(--success, #22c55e);"><i data-lucide="user-search" class="lucide"></i></button>
+                <button class="topbar__btn" id="jobQueueBtn" title="Hàng đợi tác vụ ảnh" style="color: var(--text-secondary);"><i data-lucide="list-ordered" class="lucide"></i></button>
                 <button class="topbar__btn" id="videoGenBtn" title="Video Sora2" style="color: var(--warning, #f59e0b);"><i data-lucide="video" class="lucide"></i></button>
                 <button class="topbar__btn" id="mcpToggleBtn" title="MCP Context"><i data-lucide="message-square-code" class="lucide"></i></button>
                 <button class="topbar__btn" id="darkModeBtn" title="Toggle theme"><i data-lucide="moon" class="lucide" id="darkModeIcon"></i></button>
@@ -2167,6 +2170,51 @@ try {
 <!-- ═══ Scripts ═══ -->
 <script type="module" src="{{ url_for('static', filename='js/main.js') }}?v=20260417"></script>
 <script src="{{ url_for('static', filename='js/mcp.js') }}?v=20260417"></script>
+<script src="{{ url_for('static', filename='js/modules/character-picker.js') }}?v=20260422"></script>
+<script src="{{ url_for('static', filename='js/modules/job-queue-panel.js') }}?v=20260422"></script>
+<script>
+    // Character picker + job queue topbar bindings
+    (function () {
+        const pickBtn = document.getElementById('characterPickerBtn');
+        if (pickBtn) {
+            pickBtn.addEventListener('click', () => {
+                if (typeof window.openCharacterPicker !== 'function') {
+                    console.warn('[character-picker] module not loaded');
+                    return;
+                }
+                window.openCharacterPicker((rec) => {
+                    // Stash selection for downstream consumers (anime pipeline modal,
+                    // image-gen-v2 prompt builder, etc.).
+                    window.selectedCharacter = rec;
+                    document.body.setAttribute('data-character-key', rec.key);
+                    document.body.setAttribute('data-series-key', rec.series_key || '');
+                    // Surface a small toast/notice via existing UI helpers if present.
+                    if (window.showToast) {
+                        window.showToast(`Đã chọn: ${rec.display_name} (${rec.series})`, 'success');
+                    } else {
+                        console.info('[character-picker] selected', rec);
+                    }
+                });
+            });
+        }
+        const queueBtn = document.getElementById('jobQueueBtn');
+        if (queueBtn) {
+            queueBtn.addEventListener('click', () => {
+                if (typeof window.openJobQueuePanel !== 'function') {
+                    console.warn('[job-queue] module not loaded');
+                    return;
+                }
+                window.openJobQueuePanel();
+            });
+        }
+        // Listen for character:selected to refresh icons
+        document.addEventListener('character:selected', () => {
+            if (window.lucide && typeof window.lucide.createIcons === 'function') {
+                window.lucide.createIcons();
+            }
+        });
+    })();
+</script>
 
 <script>
     // ════════════════════════════════════════════════════════════

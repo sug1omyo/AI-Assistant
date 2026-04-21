@@ -478,9 +478,29 @@ Transport: **stdio** (FastMCP). Không dùng HTTP. Entry point: `services/mcp-se
 | Method | Path | Mô tả |
 |---|---|---|
 | `GET` | `/api/anime-pipeline/health` | ComfyUI health + feature flag status |
-| `POST` | `/api/anime-pipeline/stream` | **Primary** — 9-stage SSE streaming generation |
+| `POST` | `/api/anime-pipeline/stream` | **Primary** — 9-stage SSE streaming generation. Optional `character_key` enriches prompt + tracks job in queue |
 | `POST` | `/api/anime-pipeline/generate` | Blocking generation (chờ hoàn thành) |
 | `POST` | `/api/anime-pipeline/upload-refs` | Upload reference images cho character fidelity |
+
+### Character Picker & Job Queue
+
+Local registry of canonical characters (display name + series + danbooru tag + aliases + thumbnail) and a lightweight in-memory job tracker. Data lives under [`storage/character_db/`](storage/character_db/).
+
+| Method | Path | Mô tả |
+|---|---|---|
+| `GET` | `/api/characters` | Search/filter (`q`, `series`, `limit≤200`) |
+| `GET` | `/api/characters/series` | List unique series + canonical keys |
+| `GET` | `/api/characters/<key>` | Single record + collisions across series |
+| `GET` | `/api/characters/<key>/thumbnail` | Thumbnail bytes (resolves repo-relative path) |
+| `POST` | `/api/characters/reload` | Reload registry from disk |
+| `POST` | `/api/characters/resolve` | `{query}` → best match |
+| `GET` | `/api/jobs` | List jobs (`state`, `limit` filters) |
+| `GET` | `/api/jobs/stats` | Counts by state |
+| `GET` | `/api/jobs/<job_id>` | Single job record |
+| `GET` | `/api/jobs/<job_id>/manifest` | Persisted manifest from `storage/metadata/` |
+| `POST` | `/api/jobs/<job_id>/cancel` | Cooperative cancel flag |
+
+UI: topbar buttons `characterPickerBtn` (👤) + `jobQueueBtn` (📋). Selected character is exposed at `window.selectedCharacter` and via the `character:selected` DOM event. Job panel polls every 3.5 s. Adding/removing characters: edit `storage/character_db/characters.json` then `POST /api/characters/reload`. Skill: [`.github/skills/character-picker-integration/SKILL.md`](.github/skills/character-picker-integration/SKILL.md).
 
 ### Stable Diffusion Proxy
 

@@ -1,0 +1,58 @@
+{
+  "raiden_shogun_genshin_impact": {
+    "key": "raiden_shogun_genshin_impact",
+    "display_name": "Raiden Shogun",
+    "series": "Genshin Impact",
+    "series_key": "genshin_impact",
+    "character_tag": "raiden_shogun",
+    "series_tag": "genshin_impact",
+    "aliases": ["Ei", "Baal", "Raiden Ei"],
+    "thumbnail": "storage/character_refs/raiden_shogun/thumb.webp",
+    "lora_hint": null,
+    "solo_recommended": true,
+    "category": "character",
+    "safe": true
+  },
+  "hu_tao_genshin_impact": {
+    "key": "hu_tao_genshin_impact",
+    "display_name": "Hu Tao",
+    "series": "Genshin Impact",
+    "series_key": "genshin_impact",
+    "character_tag": "hu_tao",
+    "series_tag": "genshin_impact",
+    "aliases": ["HuTao", "胡桃"],
+    "thumbnail": "storage/character_refs/hu_tao/thumb.webp",
+    "lora_hint": null,
+    "solo_recommended": true,
+    "category": "character",
+    "safe": true
+  },
+  "kafka_honkai_star_rail": {
+    "key": "kafka_honkai_star_rail",
+    "display_name": "Kafka",
+    "series": "Honkai Star Rail",
+    "series_key": "honkai_star_rail",
+    "character_tag": "kafka_(honkai:_star_rail)",
+    "series_tag": "honkai:_star_rail",
+    "aliases": ["Kafka HSR"],
+    "thumbnail": "storage/character_refs/kafka_honkai_star_rail/thumb.webp",
+    "lora_hint": null,
+    "solo_recommended": true,
+    "category": "character",
+    "safe": true
+  },
+  "rem_re_zero": {
+    "key": "rem_re_zero",
+    "display_name": "Rem",
+    "series": "Re:Zero",
+    "series_key": "re_zero",
+    "character_tag": "rem_(re:zero)",
+    "series_tag": "re:zero_kara_hajimeru_isekai_seikatsu",
+    "aliases": ["Rem (Re:Zero)"],
+    "thumbnail": "storage/character_refs/rem_re_zero/thumb.webp",
+    "lora_hint": null,
+    "solo_recommended": true,
+    "category": "character",
+    "safe": true
+  }
+}
