@@ -23,7 +23,7 @@ Nền tảng microservices Python tích hợp nhiều dịch vụ AI: chatbot đ
 | **Thinking Modes** | Instant / Think / Deep-Think / Multi-Thinking (4 Agents) |
 | **Skill System** | 11 built-in personas tự động route theo nội dung tin nhắn |
 | **Image Generation** | 7 provider: fal.ai, BFL/FLUX, Replicate, StepFun, OpenAI DALL-E, Together AI, ComfyUI |
-| **Anime Pipeline** | 7-stage layered anime generation — Vision → Plan → Compose → Structure → Beauty → Critique → Upscale |
+| **Anime Pipeline** | Local 9-stage layered anime generation — Vision → Character Research → LoRA → (Council) → Plan → Compose → Structure → Beauty+YOLO+Critique loop → Upscale → Ranker → Manifest |
 | **Video AI** | OpenAI Sora 2 — text-to-video 4/8/12s, 720p/1080p |
 | **Web Search** | SerpAPI (Google, Bing, Baidu) + Google CSE fallback — tự động kích hoạt |
 | **Reverse Image** | Google Lens → Google Reverse Image → Yandex (cascade) |
@@ -222,26 +222,55 @@ Pricing: `sora-2` $0.10/s · `sora-2-pro` $0.30/s · Thời lượng: 4, 8, 12 g
 
 ---
 
-## Anime Pipeline
+## Anime Pipeline (local image stack)
 
-7-stage layered anime image generation chạy qua ComfyUI backend. Yêu cầu ComfyUI đang chạy tại `ANIME_PIPELINE_COMFYUI_URL` (mặc định `http://localhost:8188`). Gated bởi feature flag `IMAGE_PIPELINE_V2`.
+Local anime image generation chạy qua ComfyUI backend. Gated bởi feature flag **`IMAGE_PIPELINE_V2=true`**. Yêu cầu ComfyUI đang chạy tại `ANIME_PIPELINE_COMFYUI_URL` (mặc định `http://localhost:8188`). Khi flag tắt, các route chatbot truyền thống vẫn chạy bình thường.
+
+### Pipeline thực tế (live trong orchestrator)
+
+Orchestrator hiện tại chạy 9 stage chính (không phải 7 như tài liệu cũ). Stage number đã hiển thị trong SSE events khớp với danh sách dưới đây:
 
 ```
-Prompt → Vision Analysis → Layer Planning → Composition Pass
-       → Structure Lock (lineart/depth/canny) → Beauty Pass
-       → Critique Loop (Gemini / GPT-4o-mini vision)
-       → Upscale → Final Ranking → Output Manifest
+ 1. Vision Analysis          — agents/vision_analyst.py
+ 1.5. Character Research     — character_research.py + character_parser.py
+ 1.75. LoRA stage            — lora_manager.py (CivitAI search + local file check + vision verify)
+ 1.9. Council reasoning      — chỉ khi thinking_mode = multi-thinking
+ 2. Layer Planning           — agents/layer_planner.py
+ 3. Composition Pass         — agents/composition_pass.py
+ 4. Structure Lock           — agents/structure_lock.py (lineart / depth / canny)
+ 5-8. Beauty + YOLO Detection-Inpaint + Critique loop
+      — agents/beauty_pass.py + agents/detection_inpaint.py + agents/critique.py
+      — tự re-plan attempt 2 nếu 4 beauty passes liên tiếp fail quality threshold
+ 9. Upscale                  — agents/upscale.py + upscale_service.py
+ Final. Ranking + Manifest   — agents/final_ranker.py + agents/output_manifest.py
 ```
 
-Tất cả stage phát SSE events với prefix `anime_pipeline_*`. Sau `upscale`, orchestrator chạy `FinalRanker` để chấm điểm mọi candidate (composite score = face × 1.5 + clarity × 1.2 + style × 1.0 − artifact_penalty) và phát event `anime_pipeline_final_ranking` kèm winner / runner-ups. Manifest ghi qua `build_output_manifest()` khi có rank result, fallback về format cũ nếu không.
+Tất cả stage phát SSE events. Route blueprint (`routes/anime_pipeline.py`) dùng prefix `ap_*` (`ap_stage_start`, `ap_stage_done`, `ap_preview`, `ap_refine`, `ap_result`, `ap_done`); orchestrator nội bộ dùng prefix `anime_pipeline_*` và `final_ranking` / `dual_output`. Final ranker chấm mọi candidate (composite = face × 1.5 + clarity × 1.2 + style × 1.0 − artifact_penalty) và feed vào output manifest; final image chỉ bị override khi ranker xác định ứng viên tốt hơn.
 
-**Canonical entry point:** `routes/anime_pipeline.py` → `/api/anime-pipeline/{health,stream,generate,upload-refs}` (bridged by `services/chatbot/core/anime_pipeline_service.py`). Endpoint `/api/image-gen/anime-pipeline` trong `routes/image_gen.py` vẫn hoạt động cho backward compatibility nhưng đã **deprecated** — log warning được phát ra mỗi lần gọi. Chi tiết về subtree status (`image_pipeline/{workflow,planner,evaluator,semantic_editor,multi_reference}/` không wired): xem [image_pipeline/DEPRECATED.md](image_pipeline/DEPRECATED.md).
+### Nơi từng phần logic nằm
 
-Chi tiết kiến trúc: [image_pipeline/anime_pipeline/README.md](image_pipeline/anime_pipeline/README.md). Tổng quan local image stack: [skills.md](skills.md).
+| Responsibility | File |
+|---|---|
+| Character handling (parser, disambiguation, references) | [`character_parser.py`](image_pipeline/anime_pipeline/character_parser.py), [`character_research.py`](image_pipeline/anime_pipeline/character_research.py), [`character_references.py`](image_pipeline/anime_pipeline/character_references.py) |
+| LoRA routing (registry + CivitAI + file-exists check) | [`lora_manager.py`](image_pipeline/anime_pipeline/lora_manager.py), [`configs/lora_registry.yaml`](configs/lora_registry.yaml) |
+| Detection + correction (YOLO ADetailer-style, feature-flagged) | [`agents/detection_detail.py`](image_pipeline/anime_pipeline/agents/detection_detail.py), [`agents/detection_inpaint.py`](image_pipeline/anime_pipeline/agents/detection_inpaint.py) |
+| Ranking + output manifest | [`agents/final_ranker.py`](image_pipeline/anime_pipeline/agents/final_ranker.py), [`agents/output_manifest.py`](image_pipeline/anime_pipeline/agents/output_manifest.py) |
+| Result storage (files + manifest JSON) | [`result_store.py`](image_pipeline/anime_pipeline/result_store.py), output dir từ `ANIME_PIPELINE_OUTPUT_DIR` hoặc `storage/anime_pipeline/<job_id>/` |
+| Workflow JSON gửi ComfyUI | [`workflow_builder.py`](image_pipeline/anime_pipeline/workflow_builder.py), [`workflow_serializer.py`](image_pipeline/anime_pipeline/workflow_serializer.py) |
+| VRAM profile / LoRA swap policy | [`vram_manager.py`](image_pipeline/anime_pipeline/vram_manager.py), [`config.py`](image_pipeline/anime_pipeline/config.py) |
+
+### Entry points
+
+Canonical: [`services/chatbot/routes/anime_pipeline.py`](services/chatbot/routes/anime_pipeline.py) → `/api/anime-pipeline/{health,stream,generate}` (bridged qua [`services/chatbot/core/anime_pipeline_service.py`](services/chatbot/core/anime_pipeline_service.py)).
+
+Legacy endpoint `/api/image-gen/anime-pipeline` trong [`routes/image_gen.py`](services/chatbot/routes/image_gen.py) vẫn hoạt động cho backward compatibility nhưng đã **deprecated** và log warning mỗi lần gọi.
+
+Subtree `image_pipeline/{workflow,planner,evaluator,semantic_editor,multi_reference}/` **không** wired vào route — xem [image_pipeline/DEPRECATED.md](image_pipeline/DEPRECATED.md) để biết trạng thái.
 
 ### Env vars
 
 ```env
+IMAGE_PIPELINE_V2=true                             # bật toàn bộ anime pipeline
 ANIME_PIPELINE_COMFYUI_URL=http://localhost:8188   # ComfyUI URL
 ANIME_PIPELINE_VRAM_PROFILE=normalvram             # lowvram / normalvram / highvram / auto
 ANIME_PIPELINE_COMPOSITION_MODEL=animagine-xl-4.0-opt.safetensors
@@ -251,9 +280,25 @@ ANIME_PIPELINE_MAX_REFINE_ROUNDS=3
 ANIME_PIPELINE_DEBUG=false                         # Lưu workflow JSON + intermediate images
 ```
 
-Vision critique dùng `GEMINI_API_KEY` (primary) → `OPENAI_API_KEY` (fallback). Không cần package riêng — gọi API qua httpx.
+Vision critique dùng `GEMINI_API_KEY` (primary) → `OPENAI_API_KEY` (fallback). Character research reuse cùng keys. Không cần SDK riêng — gọi API qua httpx.
 
-Config đầy đủ: [configs/anime_pipeline_example.yaml](configs/anime_pipeline_example.yaml).
+### Dependencies
+
+Core profile đã có `httpx`, `pyyaml`, `numpy`, `requests`, `Pillow`. Detection/inpaint pass cần `ultralytics` (optional, feature-flagged) — khi thiếu, pipeline tự skip YOLO stage và tiếp tục chạy. Chi tiết: [app/requirements/README.md](app/requirements/README.md) (section *Local anime image pipeline — dependency matrix*).
+
+### Debug & tests
+
+- `ANIME_PIPELINE_DEBUG=true` → lưu workflow JSON + preview từng stage vào `storage/anime_pipeline/<job_id>/`.
+- Test suite: `cd services/chatbot && pytest tests/test_anime_pipeline.py tests/test_anime_pipeline_integration.py tests/test_character_parser.py tests/test_local_integration.py tests/test_critique_refine_ranker.py -v` (619 tests).
+
+### Tài liệu sâu hơn
+
+- [image_pipeline/anime_pipeline/README.md](image_pipeline/anime_pipeline/README.md) — kiến trúc chi tiết
+- [image_pipeline/anime_pipeline/MIGRATION.md](image_pipeline/anime_pipeline/MIGRATION.md) — migration notes
+- [configs/anime_pipeline_example.yaml](configs/anime_pipeline_example.yaml) — template config đầy đủ comment
+- [configs/lora_registry.yaml](configs/lora_registry.yaml) — character / LoRA registry
+- [skills.md](skills.md) — operator guide (checklist-oriented, pipeline-specific)
+- [private/agent-skills/skills.md](private/agent-skills/skills.md) — operator guide (longer narrative)
 
 ---
 
@@ -433,8 +478,9 @@ Transport: **stdio** (FastMCP). Không dùng HTTP. Entry point: `services/mcp-se
 | Method | Path | Mô tả |
 |---|---|---|
 | `GET` | `/api/anime-pipeline/health` | ComfyUI health + feature flag status |
-| `POST` | `/api/anime-pipeline/stream` | **Primary** — 7-stage SSE streaming generation |
+| `POST` | `/api/anime-pipeline/stream` | **Primary** — 9-stage SSE streaming generation |
 | `POST` | `/api/anime-pipeline/generate` | Blocking generation (chờ hoàn thành) |
+| `POST` | `/api/anime-pipeline/upload-refs` | Upload reference images cho character fidelity |
 
 ### Stable Diffusion Proxy
 
@@ -643,14 +689,32 @@ app/
 
 ComfyUI/                     ComfyUI installation (image editing backend)
 image_pipeline/
-  anime_pipeline/            7-stage anime pipeline (agents, config, schemas, orchestrator)
-    agents/                  VisionAnalyst, LayerPlanner, CompositionPass, StructureLock, BeautyPass, Critique, Upscale
+  anime_pipeline/            Local 9-stage anime pipeline
+    orchestrator.py          Stage dispatcher + SSE event emitter
+    schemas.py               AnimePipelineJob dataclass + statuses
+    config.py                Pipeline config loader (YAML)
+    character_parser.py      Character name/series disambiguation
+    character_research.py    CivitAI + reference search
+    character_references.py  Reference cache (storage/character_refs/)
+    lora_manager.py          LoRA search, download, file-existence check, vision verify
+    vram_manager.py          VRAM profile + LoRA swap policy
+    workflow_builder.py      Build ComfyUI workflow JSON per stage
+    workflow_serializer.py   Version + hash workflow payloads
+    comfy_client.py          ComfyUI HTTP client
+    vision_service.py        Vision LLM calls (Gemini / OpenAI)
+    critique_service.py      Quality critique scoring
+    result_store.py          Persist output manifest + artifacts
+    agents/                  VisionAnalyst, LayerPlanner, CompositionPass, StructureLock,
+                             BeautyPass, CleanupPass, RefineLoop, Critique,
+                             DetectionDetail, DetectionInpaint, Upscale,
+                             FinalRanker, OutputManifest
     examples/                request_payload.json, output_manifest.json
     README.md                Developer docs
     MIGRATION.md             Migration notes
 configs/
   anime_pipeline.yaml        Runtime config (VRAM, model slots, thresholds)
   anime_pipeline_example.yaml  Template config với comments đầy đủ
+  lora_registry.yaml         Character + LoRA registry (series-aware)
 rag/                         Standalone RAG service (separate stack)
 private/                     Dữ liệu nội bộ / submodule
 ```
@@ -765,8 +829,13 @@ docker compose --profile all up -d
 - [docs/deployment_last30days_hermes.md](docs/deployment_last30days_hermes.md) — Deployment guide cho last30days + Hermes
 - [services/chatbot/docs/last30days_integration.md](services/chatbot/docs/last30days_integration.md) — last30days tool integration
 - [services/chatbot/README.md](services/chatbot/README.md) — Chi tiết chatbot service + skill system
+- [image_pipeline/anime_pipeline/README.md](image_pipeline/anime_pipeline/README.md) — Anime pipeline architecture
+- [image_pipeline/anime_pipeline/MIGRATION.md](image_pipeline/anime_pipeline/MIGRATION.md) — Anime pipeline migration notes
+- [image_pipeline/DEPRECATED.md](image_pipeline/DEPRECATED.md) — Trạng thái các subtree không wired
 - [app/scripts/README.md](app/scripts/README.md) — Script vận hành
-- [app/requirements/README.md](app/requirements/README.md) — Dependency profiles
+- [app/requirements/README.md](app/requirements/README.md) — Dependency profiles + anime pipeline matrix
+- [skills.md](skills.md) — Local image stack operator guide (checklist-oriented)
+- [private/agent-skills/skills.md](private/agent-skills/skills.md) — Longer narrative version of the operator guide
 - [SECURITY.md](SECURITY.md) — Security policy
 - [AGENTS.md](AGENTS.md) — Agent conventions cho AI coding assistants
 

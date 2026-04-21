@@ -428,3 +428,105 @@ Prefer:
 - add a parallel route that bypasses the real orchestrator
 - hardcode environment or model paths
 - couple new logic to speculative future features
+
+---
+
+## 17. Testing checklist before commit
+
+Run from `venv-core`, cwd = `services/chatbot/`:
+
+```powershell
+..\..\venv-core\Scripts\Activate.ps1
+
+# Minimum scope — anime pipeline + character + local integration + ranker
+pytest tests/test_anime_pipeline.py `
+       tests/test_anime_pipeline_integration.py `
+       tests/test_character_parser.py `
+       tests/test_local_integration.py `
+       tests/test_critique_refine_ranker.py -v
+
+# Full chatbot suite when the change touches anything beyond the pipeline
+pytest tests/ -v --tb=short
+```
+
+Baseline: **619 tests pass** on `master`. Anything below that means a
+regression slipped in.
+
+Before `git push`:
+
+- [ ] Import smoke test in `venv-core`:
+      ```powershell
+      python -c "from image_pipeline.anime_pipeline import orchestrator, character_parser, lora_manager; from image_pipeline.anime_pipeline.agents import detection_inpaint, detection_detail; from PIL import Image; import httpx, yaml, numpy; print('OK')"
+      ```
+- [ ] Flag-off regression: start the chatbot with `IMAGE_PIPELINE_V2=false`
+      and confirm non-anime image-gen routes still work end to end.
+- [ ] Flag-on health: `GET /api/anime-pipeline/health` returns 200 with
+      `feature_flag=true` when ComfyUI is running, 503 otherwise.
+- [ ] Grep for accidentally-committed secrets or absolute paths:
+      ```powershell
+      rg -n "ghp_|sk-[A-Za-z0-9]{20,}|C:\\\\Users" services image_pipeline configs
+      ```
+- [ ] No new `load_dotenv` added — shared env contract is
+      `services/shared_env.py::load_shared_env` only.
+- [ ] If behavior changed: `README.md` + `app/requirements/README.md`
+      updated in the same commit.
+- [ ] If a new agent / stage / event was added: `image_pipeline/anime_pipeline/README.md`
+      + `MIGRATION.md` updated if contract changed.
+
+---
+
+## 18. Git hygiene for local image work
+
+### Branch and scope
+
+- Branch from `master`. One logical concern per commit.
+- Typical scopes: `feat(anime-pipeline): ...`, `fix(anime-pipeline): ...`,
+  `docs(anime-pipeline): ...`, `chore(requirements): ...`,
+  `test(anime-pipeline): ...`.
+- A commit that changes runtime behavior **must** update the relevant
+  docs (`README.md`, `app/requirements/README.md`, pipeline README) in
+  the same commit. CI does not catch silent drift.
+
+### Never commit
+
+- `.env`, `app/config/.env*` (except `.env.example`).
+- `venv-core/`, `venv-image/`, `__pycache__/`, `*.pyc`.
+- `ComfyUI/models/`, `LORA/` binary assets.
+- `storage/`, `logs/`, `tmp/`, `local_data/`.
+- Debug artifacts: `storage/anime_pipeline/<job_id>/`, preview PNGs,
+  workflow JSON dumps.
+- Submodule drift: if `private` shows as modified in `git status` and the
+  task is not about `private`, **leave it alone** — do not stage it.
+
+### Before pushing
+
+```powershell
+git status                  # only intended files
+git diff --cached --stat    # sanity-check size and scope
+git log origin/master..HEAD # commits about to go upstream
+```
+
+### Forbidden
+
+- `git push --force` on `master`. For history rewrites, branch and open a PR.
+- `git commit --no-verify` to skip hooks.
+- Committing on behalf of another author without co-authorship notes.
+
+### Pull request expectations
+
+- Title matches conventional-commit prefix of the main change.
+- Description mentions: files touched, risks, verification steps,
+  doc updates. This matches the response shape used throughout the repo.
+
+---
+
+## Related reading
+
+- [README.md](README.md) — top-level overview (anime pipeline section)
+- [AGENTS.md](AGENTS.md) — agent conventions for AI coding assistants
+- [.github/copilot-instructions.md](.github/copilot-instructions.md)
+- [image_pipeline/anime_pipeline/README.md](image_pipeline/anime_pipeline/README.md) — deep architecture
+- [image_pipeline/anime_pipeline/MIGRATION.md](image_pipeline/anime_pipeline/MIGRATION.md)
+- [image_pipeline/DEPRECATED.md](image_pipeline/DEPRECATED.md) — dormant subtree status
+- [app/requirements/README.md](app/requirements/README.md) — dependency matrix
+- [private/agent-skills/skills.md](private/agent-skills/skills.md) — longer narrative version
