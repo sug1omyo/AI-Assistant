@@ -230,10 +230,12 @@ Pricing: `sora-2` $0.10/s · `sora-2-pro` $0.30/s · Thời lượng: 4, 8, 12 g
 Prompt → Vision Analysis → Layer Planning → Composition Pass
        → Structure Lock (lineart/depth/canny) → Beauty Pass
        → Critique Loop (Gemini / GPT-4o-mini vision)
-       → Upscale → Output Manifest
+       → Upscale → Final Ranking → Output Manifest
 ```
 
-Tất cả stage phát SSE events với prefix `anime_pipeline_*`. Chi tiết kiến trúc: [image_pipeline/anime_pipeline/README.md](image_pipeline/anime_pipeline/README.md).
+Tất cả stage phát SSE events với prefix `anime_pipeline_*`. Sau `upscale`, orchestrator chạy `FinalRanker` để chấm điểm mọi candidate (composite score = face × 1.5 + clarity × 1.2 + style × 1.0 − artifact_penalty) và phát event `anime_pipeline_final_ranking` kèm winner / runner-ups. Manifest ghi qua `build_output_manifest()` khi có rank result, fallback về format cũ nếu không.
+
+Chi tiết kiến trúc: [image_pipeline/anime_pipeline/README.md](image_pipeline/anime_pipeline/README.md). Tổng quan local image stack: [skills.md](skills.md).
 
 ### Env vars
 

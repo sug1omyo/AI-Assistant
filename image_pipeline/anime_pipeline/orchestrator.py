@@ -38,6 +38,8 @@ from .agents.beauty_pass import BeautyPassAgent
 from .agents.critique import CritiqueAgent
 from .agents.upscale import UpscaleAgent
 from .agents.detection_inpaint import DetectionInpaintAgent
+from .agents.final_ranker import FinalRanker
+from .agents.output_manifest import build_output_manifest
 from .result_store import ResultStore
 from .character_research import (
     research_character,
@@ -116,6 +118,7 @@ class AnimePipelineOrchestrator:
         self._detection_inpaint = DetectionInpaintAgent(self._config)
         self._critique = CritiqueAgent(self._config)
         self._upscale = UpscaleAgent(self._config)
+        self._ranker = FinalRanker()
         self._result_store = ResultStore(
             base_dir=self._config.intermediate_dir
         )
@@ -307,9 +310,32 @@ class AnimePipelineOrchestrator:
             job.completed_at = self._now_iso()
             job.total_latency_ms = (time.time() - t0) * 1000
 
+            # Final ranking — score all eligible candidate images and pick winner.
+            # The orchestrator's own loop already selects job.final_image_b64; the
+            # ranker adds explainable metadata (composite score, runner-ups) and
+            # feeds the output_manifest.  Purely additive: final image is not
+            # overridden unless the ranker identifies a better candidate.
+            rank_result = None
+            try:
+                rank_result = self._ranker.execute(job)
+                if rank_result and rank_result.winner:
+                    job.metadata["rank_result"] = rank_result.to_dict()
+                    yield self._event("final_ranking", {
+                        "job_id": job.job_id,
+                        "winner_stage": rank_result.winner.stage,
+                        "winner_score": round(rank_result.winner.composite_score, 2),
+                        "total_candidates": rank_result.total_candidates,
+                        "runner_ups": [
+                            {"stage": r.stage, "score": round(r.composite_score, 2)}
+                            for r in rank_result.runner_ups[:3]
+                        ],
+                    })
+            except Exception as rank_err:
+                logger.warning("[AnimePipeline] FinalRanker failed: %s", rank_err)
+
             # Save intermediates if configured
             if self._config.save_intermediates:
-                self._result_store.save_all(job)
+                self._result_store.save_all(job, rank_result=rank_result)
 
             yield self._event("pipeline_complete", {
                 "job_id": job.job_id,
@@ -322,6 +348,14 @@ class AnimePipelineOrchestrator:
                 "models_used": job.models_used,
                 "vram_profile": self._config.vram.profile.value,
                 "replan_count": self._replan_count,
+                "rank_winner_stage": (
+                    rank_result.winner.stage
+                    if rank_result and rank_result.winner else None
+                ),
+                "rank_winner_score": (
+                    round(rank_result.winner.composite_score, 2)
+                    if rank_result and rank_result.winner else None
+                ),
             })
 
         except Exception as e:

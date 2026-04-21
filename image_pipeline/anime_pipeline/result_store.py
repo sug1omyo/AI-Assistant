@@ -85,10 +85,62 @@ class ResultStore:
         job.final_image_path = str(filepath)
         return str(filepath)
 
-    def save_manifest(self, job: AnimePipelineJob) -> str:
-        """Write output_manifest.json summarizing the entire job."""
+    def save_manifest(self, job: AnimePipelineJob, rank_result: Any = None) -> str:
+        """Write output_manifest.json summarizing the entire job.
+
+        When ``rank_result`` is provided, the manifest is built via the
+        shared ``build_output_manifest`` helper so winner / runner-up
+        metadata is included.  The legacy structure is preserved when
+        ``rank_result`` is ``None`` (backward compatible).
+        """
         job_dir = self._job_dir(job.job_id)
         filepath = job_dir / "output_manifest.json"
+
+        if rank_result is not None:
+            try:
+                from .agents.output_manifest import build_output_manifest
+
+                vram_profile = "normalvram"
+                # Best-effort: pull the live VRAM profile from config if accessible
+                try:
+                    from .config import load_config
+
+                    vram_profile = load_config().vram.profile.value
+                except Exception:
+                    pass
+
+                manifest = build_output_manifest(
+                    job,
+                    rank_result,
+                    debug_mode=False,
+                    vram_profile=vram_profile,
+                )
+                # Preserve fields historically written by this store that
+                # build_output_manifest does not emit.
+                manifest.setdefault("created_at", job.created_at)
+                manifest.setdefault("completed_at", job.completed_at)
+                manifest.setdefault("user_prompt", job.user_prompt)
+                if job.critique_results:
+                    manifest.setdefault(
+                        "critique_reports",
+                        [c.to_dict() for c in job.critique_results],
+                    )
+                if job.layer_plan:
+                    manifest.setdefault("layer_plan", job.layer_plan.to_dict())
+                try:
+                    filepath.write_text(
+                        json.dumps(manifest, indent=2, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+                    logger.info("[ResultStore] Manifest (ranked) written: %s", filepath)
+                except Exception as e:
+                    logger.error("[ResultStore] Failed to write ranked manifest: %s", e)
+                return str(filepath)
+            except Exception as e:
+                logger.warning(
+                    "[ResultStore] Ranked manifest build failed (%s); falling back to legacy manifest",
+                    e,
+                )
 
         manifest: dict[str, Any] = {
             "job_id": job.job_id,
@@ -136,7 +188,7 @@ class ResultStore:
 
         return str(filepath)
 
-    def save_all(self, job: AnimePipelineJob) -> dict[str, str]:
+    def save_all(self, job: AnimePipelineJob, rank_result: Any = None) -> dict[str, str]:
         """Save all intermediates, final image, and manifest. Returns paths."""
         paths: dict[str, str] = {}
 
@@ -155,7 +207,7 @@ class ResultStore:
         if job.final_image_b64:
             paths["final"] = self.save_final(job)
 
-        paths["manifest"] = self.save_manifest(job)
+        paths["manifest"] = self.save_manifest(job, rank_result=rank_result)
         return paths
 
     # ── Helpers ────────────────────────────────────────────────────────
