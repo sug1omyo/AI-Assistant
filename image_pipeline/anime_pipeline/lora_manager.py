@@ -29,10 +29,27 @@ logger = logging.getLogger(__name__)
 # ── Paths ────────────────────────────────────────────────────────────
 
 _WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
-_COMFYUI_LORA_DIR = _WORKSPACE_ROOT / "ComfyUI" / "models" / "loras" / "characters"
+_COMFYUI_LORA_ROOT = _WORKSPACE_ROOT / "ComfyUI" / "models" / "loras"
+_COMFYUI_LORA_DIR = _COMFYUI_LORA_ROOT / "characters"
 _STORAGE_ROOT = _WORKSPACE_ROOT / "storage"
 _LORA_META_DIR = _STORAGE_ROOT / "character_loras"
 _LORA_META_TTL = 7 * 24 * 3600  # 7 days
+
+
+def lora_file_exists(lora_rel_path: str) -> bool:
+    """Return True if the LoRA file is present under ComfyUI/models/loras/.
+
+    Accepts paths with forward or back slashes. An empty / None input returns
+    False so callers can safely skip injection without raising.
+    """
+    if not lora_rel_path:
+        return False
+    rel = str(lora_rel_path).replace("\\", "/").lstrip("/")
+    candidate = _COMFYUI_LORA_ROOT / rel
+    try:
+        return candidate.is_file()
+    except OSError:
+        return False
 
 _CIVITAI_API = "https://civitai.com/api/v1"
 _CIVITAI_DOWNLOAD = "https://civitai.com/api/download/models"

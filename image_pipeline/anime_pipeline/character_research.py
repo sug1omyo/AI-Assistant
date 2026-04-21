@@ -302,6 +302,7 @@ _CHARACTER_ALIASES: dict[str, tuple[str, str, str, str]] = {
 _SERIES_HINTS: dict[str, str] = {
     # Genshin Impact
     "genshin": "genshin_impact", "genshin impact": "genshin_impact",
+    "gi": "genshin_impact",
     "teyvat": "genshin_impact", "mondstadt": "genshin_impact",
     "liyue": "genshin_impact", "inazuma": "genshin_impact",
     "sumeru": "genshin_impact", "fontaine": "genshin_impact",
@@ -383,31 +384,26 @@ def _detect_series_hint(text: str) -> Optional[str]:
 def detect_character(user_prompt: str) -> Optional[tuple[str, str, str, str]]:
     """Detect a known character in the user prompt.
 
-    Uses series hints in the prompt to disambiguate when multiple characters
-    share the same base name (e.g. "seele" in HSR vs HI3).
+    Delegates to :func:`character_parser.parse_character_identity` so that
+    preposition-aware parsing, word-boundary matching, and homonym
+    detection are shared across every caller. Kept as a thin wrapper for
+    backward compatibility with older imports.
 
     Returns (danbooru_tag, series_tag, display_name, series_name) or None.
     """
-    lower = user_prompt.lower()
-    series_hint = _detect_series_hint(lower)
+    # Lazy import to avoid a circular import at module load time:
+    # character_parser imports the alias/series tables from this module.
+    from .character_parser import parse_character_identity
 
-    # Collect all matching aliases (longest first)
-    matches: list[tuple[str, str, str, str]] = []
-    for alias in sorted(_CHARACTER_ALIASES.keys(), key=len, reverse=True):
-        if alias in lower:
-            matches.append(_CHARACTER_ALIASES[alias])
-
-    if not matches:
+    identity = parse_character_identity(user_prompt)
+    if not identity.resolved:
         return None
-
-    # If we have a series hint, prefer the match from that series
-    if series_hint:
-        for m in matches:
-            if m[1] == series_hint:
-                return m
-
-    # Fallback: return the longest-alias match (first in sorted order)
-    return matches[0]
+    return (
+        identity.character_tag,
+        identity.series_tag,
+        identity.character_name,
+        identity.series_name,
+    )
 
 
 # ════════════════════════════════════════════════════════════════════════

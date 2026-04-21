@@ -45,10 +45,12 @@ from .character_research import (
     research_character,
     CharacterResearchResult,
 )
+from .character_parser import parse_character_identity
 from .lora_manager import (
     find_and_verify_character_lora,
     LoRAVerificationResult,
     get_cached_character_lora,
+    lora_file_exists,
 )
 
 logger = logging.getLogger(__name__)
@@ -187,6 +189,13 @@ class AnimePipelineOrchestrator:
 
             # Stage 1.5: Character Research (web search + reference download)
             yield from self._run_character_research(job)
+
+            # Apply identity-derived overrides (solo enforcement +
+            # homonym/collision negatives) to vision_analysis. Runs
+            # whether or not character research produced results because
+            # solo_intent and off-domain collision blocks can apply even
+            # without a web-researched character.
+            self._apply_identity_overrides(job)
 
             # Detect character for identity-aware critique
             self._detected_character = self._detect_character_from_vision(job)
@@ -726,6 +735,53 @@ class AnimePipelineOrchestrator:
             "regions_processed": "detection_inpaint" in job.stages_executed,
         })
 
+    def _apply_identity_overrides(self, job: AnimePipelineJob) -> None:
+        """Inject solo-intent markers and collision-block negatives into
+        ``job.vision_analysis``.
+
+        Positive tags:
+          * prepend ``solo`` when ``job.solo_intent`` is True.
+
+        Negative tags (``vision_analysis.suggested_negative``):
+          * append every entry in ``job.collision_blocks`` as a
+            comma-separated fragment.
+
+        Safe to call when ``vision_analysis`` is missing (e.g. the
+        vision stage failed) — logs and no-ops in that case.
+        Deterministic and idempotent (deduplicates on repeat calls).
+        """
+        va = job.vision_analysis
+        if va is None:
+            if job.solo_intent or job.collision_blocks:
+                logger.debug(
+                    "[AnimePipeline] Skipping identity overrides: "
+                    "vision_analysis not populated",
+                )
+            return
+
+        # Positive: solo marker. Use "solo" (danbooru convention) — we
+        # deliberately do not guess 1girl/1boy here because that requires
+        # gendered knowledge of the character; the research stage already
+        # injected character-specific tags upstream.
+        if job.solo_intent and "solo" not in va.anime_tags:
+            va.anime_tags.insert(0, "solo")
+
+        # Negative: merge collision_blocks into suggested_negative. Keep
+        # existing entries, deduplicate case-insensitively.
+        if job.collision_blocks:
+            existing = [
+                frag.strip()
+                for frag in (va.suggested_negative or "").split(",")
+                if frag.strip()
+            ]
+            seen_lower = {frag.lower() for frag in existing}
+            for block in job.collision_blocks:
+                key = block.strip().lower()
+                if key and key not in seen_lower:
+                    existing.append(block.strip())
+                    seen_lower.add(key)
+            va.suggested_negative = ", ".join(existing)
+
     def _run_character_research(
         self, job: AnimePipelineJob
     ) -> Generator[dict[str, Any], None, None]:
@@ -743,6 +799,44 @@ class AnimePipelineOrchestrator:
         })
 
         t0 = time.time()
+
+        # Parse structured identity from the user prompt BEFORE web research.
+        # Populates job.character_name / series_name / character_tag /
+        # series_tag / alias_source / solo_intent / collision_blocks so
+        # downstream stages (layer_planner, lora_manager) can use them
+        # regardless of whether web research succeeds.
+        try:
+            identity = parse_character_identity(job.user_prompt)
+            job.character_name = identity.character_name
+            job.series_name = identity.series_name
+            job.character_tag = identity.character_tag
+            job.series_tag = identity.series_tag
+            job.alias_source = identity.alias_source
+            job.solo_intent = identity.solo_intent
+            job.collision_blocks = list(identity.collision_blocks)
+            if identity.resolved:
+                logger.info(
+                    "[AnimePipeline] Identity parsed: %s (%s) via %s "
+                    "solo=%s homonym_collision=%s blocks=%d",
+                    identity.character_name,
+                    identity.series_name,
+                    identity.alias_source,
+                    identity.solo_intent,
+                    identity.homonym_collision,
+                    len(identity.collision_blocks),
+                )
+            elif identity.solo_intent:
+                logger.info(
+                    "[AnimePipeline] Solo intent detected with no named character; "
+                    "collision_blocks=%d",
+                    len(identity.collision_blocks),
+                )
+        except Exception as parse_err:
+            logger.warning(
+                "[AnimePipeline] Character parse failed (non-fatal): %s",
+                parse_err,
+            )
+
         try:
             result = research_character(
                 job.user_prompt,
@@ -760,6 +854,13 @@ class AnimePipelineOrchestrator:
                         "[AnimePipeline] Injected %d web reference images for %s",
                         len(job.reference_images_b64), result.display_name,
                     )
+
+                # Augment from local reference cache + attach identity detail.
+                # Safe-only: consults storage/character_refs/<tag>/ which is
+                # populated by character_research web downloads or by past
+                # high-score pipeline outputs (save_as_reference). Never
+                # scrapes new sources here.
+                self._augment_references_from_cache(job, result.danbooru_tag)
 
                 # Enrich vision analysis tags with researched identity
                 if job.vision_analysis and result.identity_tags:
@@ -844,6 +945,32 @@ class AnimePipelineOrchestrator:
         })
 
         t0 = time.time()
+
+        # Fall through to parser-only identity when web research failed but
+        # the character parser still produced a tag. This keeps LoRA search
+        # working on offline / rate-limited / search-disabled environments.
+        if not self._research and job.character_tag and job.series_tag:
+            logger.info(
+                "[AnimePipeline] LoRA stage running with parser-only identity: "
+                "%s (%s)",
+                job.character_name or job.character_tag,
+                job.series_name or job.series_tag,
+            )
+            self._research = CharacterResearchResult(
+                danbooru_tag=job.character_tag,
+                display_name=job.character_name or job.character_tag.replace("_", " "),
+                series_name=job.series_name or job.series_tag.replace("_", " "),
+                series_tag=job.series_tag,
+                appearance_summary="",
+                confidence=0.5,
+                cached=False,
+            )
+            # Record detection so _inject_character_lora and reference save
+            # use the parser tag when research never ran.
+            if not self._detected_character:
+                self._detected_character = job.character_tag
+            # Consult the local reference cache in offline mode too.
+            self._augment_references_from_cache(job, job.character_tag)
 
         if not self._research:
             latency = (time.time() - t0) * 1000
@@ -941,14 +1068,32 @@ class AnimePipelineOrchestrator:
         the character identity before the stylistic base LoRAs apply.
         Trigger words are also injected into each pass's positive_override or
         tracked via job metadata.
+
+        File-existence guard: if the cached ``lora_filename`` is no longer on
+        disk (e.g., user cleared the ComfyUI loras folder), skip injection
+        instead of letting ComfyUI error the whole pipeline.
         """
         if not self._verified_lora or not self._verified_lora.accepted:
             return
         if not job.layer_plan or not job.layer_plan.passes:
             return
 
+        lora_name = self._verified_lora.lora_filename
+        if not lora_file_exists(lora_name):
+            logger.warning(
+                "[AnimePipeline] Verified character LoRA '%s' missing on disk — skipping injection",
+                lora_name,
+            )
+            # Record the miss in metadata so downstream stages can react.
+            meta = job.metadata or {}
+            meta["character_lora_missing"] = lora_name
+            job.metadata = meta
+            # Disable the verified slot so subsequent helpers do not re-attempt.
+            self._verified_lora = None
+            return
+
         lora_dict = {
-            "name": self._verified_lora.lora_filename,
+            "name": lora_name,
             "strength_model": 0.85,
             "strength_clip": 0.85,
             "enabled": True,
@@ -973,15 +1118,46 @@ class AnimePipelineOrchestrator:
         )
 
     def _inject_user_loras(self, job: AnimePipelineJob) -> None:
-        """Inject user-specified LoRAs (from ``<lora:name:weight>`` tags) into all passes."""
+        """Inject user-specified LoRAs (from ``<lora:name:weight>`` tags) into all passes.
+
+        File-existence guard: drop user LoRAs whose ``.safetensors`` is not
+        actually present under ComfyUI/models/loras/. Missing files are
+        recorded on ``job.metadata['user_loras_missing']`` so the frontend
+        can warn the user, but the pipeline still runs with whatever survives.
+        """
         if not job.user_loras or not job.layer_plan or not job.layer_plan.passes:
             return
+
+        present: list[dict[str, Any]] = []
+        missing: list[str] = []
+        for ulora in job.user_loras:
+            name = ulora.get("name", "")
+            if lora_file_exists(name):
+                present.append(ulora)
+            else:
+                missing.append(name)
+
+        if missing:
+            logger.warning(
+                "[AnimePipeline] Skipping %d missing user LoRA(s): %s",
+                len(missing), missing,
+            )
+            meta = job.metadata or {}
+            meta["user_loras_missing"] = missing
+            job.metadata = meta
+
+        if not present:
+            return
+
+        # Replace job.user_loras with the filtered set so any later consumer
+        # (e.g., manifest) sees only the LoRAs that were actually injected.
+        job.user_loras = present
 
         injected = 0
         for pass_cfg in job.layer_plan.passes:
             existing = pass_cfg.lora_models or []
             existing_names = {lora.get("name", "") for lora in existing}
-            for ulora in job.user_loras:
+            for ulora in present:
                 if ulora["name"] not in existing_names:
                     existing.append(ulora)
                     existing_names.add(ulora["name"])
@@ -991,8 +1167,8 @@ class AnimePipelineOrchestrator:
         if injected:
             logger.info(
                 "[AnimePipeline] Injected %d user LoRAs into %d passes: %s",
-                len(job.user_loras), len(job.layer_plan.passes),
-                [l["name"] for l in job.user_loras],
+                len(present), len(job.layer_plan.passes),
+                [l["name"] for l in present],
             )
 
     def _run_stage(
@@ -1320,6 +1496,44 @@ class AnimePipelineOrchestrator:
                             saved, best_score)
         except Exception as e:
             logger.warning("[AnimePipeline] Could not save character reference: %s", e)
+
+    def _augment_references_from_cache(
+        self, job: AnimePipelineJob, danbooru_tag: str,
+    ) -> None:
+        """Safe-only reference augmentation from ``storage/character_refs/<tag>/``.
+
+        - Never downloads new images from the internet.
+        - Fills ``job.reference_images_b64`` only when empty.
+        - Always attaches ``eye_detail`` (if the character has a detailed
+          identity entry) to ``job.metadata['character_eye_detail']`` for
+          the critique and detection-inpaint stages to consume.
+        """
+        if not danbooru_tag:
+            return
+        try:
+            from .character_references import get_character_ref_set
+
+            ref_set = get_character_ref_set(danbooru_tag)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug(
+                "[AnimePipeline] character_refs cache lookup failed for %s: %s",
+                danbooru_tag, exc,
+            )
+            return
+
+        if ref_set.images_b64 and not job.reference_images_b64:
+            job.reference_images_b64 = ref_set.images_b64[:3]
+            logger.info(
+                "[AnimePipeline] Loaded %d cached reference(s) for %s",
+                len(job.reference_images_b64), danbooru_tag,
+            )
+
+        if ref_set.eye_detail:
+            meta = job.metadata or {}
+            meta["character_eye_detail"] = ref_set.eye_detail
+            if ref_set.series_tag and "character_series_tag" not in meta:
+                meta["character_series_tag"] = ref_set.series_tag
+            job.metadata = meta
 
     # ── Eye Emergency Inpaint ────────────────────────────────────────
 

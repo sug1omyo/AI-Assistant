@@ -589,6 +589,19 @@ class AnimePipelineJob:
     preset: str = "anime_quality"
     user_loras: list[dict[str, Any]] = field(default_factory=list)
 
+    # ── Character identity (populated by character_parser) ────────────
+    # See image_pipeline.anime_pipeline.character_parser.ParsedIdentity.
+    # Downstream stages (layer_planner, lora_manager, character_references)
+    # consume these fields for series-aware resolution and collision
+    # suppression. Empty strings / False / [] when no character detected.
+    character_name: str = ""
+    series_name: str = ""
+    character_tag: str = ""
+    series_tag: str = ""
+    alias_source: str = ""  # explicit_pattern | series_hint | alias_only | ""
+    solo_intent: bool = False
+    collision_blocks: list[str] = field(default_factory=list)
+
     # Thinking mode — when 'multi-thinking', enables 4-agent council reasoning
     thinking_mode: str = "instant"
     # Council pre-analysis output (populated when thinking_mode == 'multi-thinking')
@@ -634,6 +647,13 @@ class AnimePipelineJob:
             "style_hint": self.style_hint,
             "quality_hint": self.quality_hint,
             "preset": self.preset,
+            "character_name": self.character_name,
+            "series_name": self.series_name,
+            "character_tag": self.character_tag,
+            "series_tag": self.series_tag,
+            "alias_source": self.alias_source,
+            "solo_intent": self.solo_intent,
+            "collision_blocks": list(self.collision_blocks),
             "vision_analysis": self.vision_analysis.to_dict() if self.vision_analysis else None,
             "layer_plan": self.layer_plan.to_dict() if self.layer_plan else None,
             "critique_results": [c.to_dict() for c in self.critique_results],

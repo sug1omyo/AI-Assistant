@@ -528,14 +528,18 @@ class DetectionInpaintAgent:
                 layer_cfg.negative_suffix,
             )
 
-            # Region-specific LoRAs
-            region_loras = list(_REGION_LORA_MAP.get(region_type, []))
+            # Region-specific LoRAs (filtered to ones actually present on disk)
+            region_loras = self._filter_existing_loras(
+                list(_REGION_LORA_MAP.get(region_type, [])),
+                region_type=region_type,
+            )
             # Also include default LoRAs from config at reduced strength
             for lora in self._config.default_loras:
                 reduced = dict(lora)
                 reduced["strength_model"] = float(reduced.get("strength_model", reduced.get("strength", 0.5))) * 0.7
                 reduced["strength_clip"] = float(reduced.get("strength_clip", reduced.get("strength", 0.5))) * 0.7
                 region_loras.append(reduced)
+            region_loras = self._filter_existing_loras(region_loras, region_type=region_type)
 
             # Build PassConfig for this region
             seed = random.randint(1, 2**31 - 1)
@@ -653,6 +657,37 @@ class DetectionInpaintAgent:
                     tags.append(tag)
         return ", ".join(tags)
 
+    @staticmethod
+    def _filter_existing_loras(
+        loras: list[dict[str, Any]],
+        *,
+        region_type: str = "",
+    ) -> list[dict[str, Any]]:
+        """Drop region LoRAs whose .safetensors is not on disk.
+
+        Prevents ComfyUI from aborting an inpaint pass when the hardcoded
+        helper LoRAs (e.g., ``Anime_artistic_2.safetensors``) are missing.
+        The pass still runs with prompts only — no LoRAs is safer than a
+        dangling reference.
+        """
+        from ..lora_manager import lora_file_exists
+
+        kept: list[dict[str, Any]] = []
+        dropped: list[str] = []
+        for lora in loras:
+            name = lora.get("name", "") if isinstance(lora, dict) else ""
+            if name and lora_file_exists(name):
+                kept.append(lora)
+            elif name:
+                dropped.append(name)
+
+        if dropped:
+            logger.warning(
+                "[DetectionInpaint] Dropping missing LoRA(s) for region %r: %s",
+                region_type or "?", dropped,
+            )
+        return kept
+
     def _load_detection_config(self) -> list[DetectionModelConfig]:
         """Load detection layer configs from pipeline config or defaults."""
         yaml_layers = self._config.detection_inpaint_layers
@@ -768,7 +803,10 @@ class DetectionInpaintAgent:
                 " cross-eyed, lifeless eyes, flat eyes" + eye_negative_extra,
             )
 
-            region_loras = list(_REGION_LORA_MAP.get(region_type, []))
+            region_loras = self._filter_existing_loras(
+                list(_REGION_LORA_MAP.get(region_type, [])),
+                region_type=region_type,
+            )
 
             seed = random.randint(1, 2**31 - 1)
             pc = PassConfig(
