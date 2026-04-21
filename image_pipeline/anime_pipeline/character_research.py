@@ -487,8 +487,12 @@ def _image_search_character(
 
     import httpx
 
-    # Search with specific quality terms
+    # Series-first query order (spec §2): query the game/series catalog
+    # BEFORE the character, so Google Images pulls from series-curated
+    # results first, then character-specific art, then Danbooru tags.
     queries = [
+        f"{series_name} {display_name} official art",                 # series-first
+        f"{series_name} character {display_name} anime illustration", # series-first (alt)
         f"{display_name} {series_name} anime official art high quality",
         f"{danbooru_tag} anime illustration full body",
     ]
@@ -504,14 +508,14 @@ def _image_search_character(
                     "engine": "google_images",
                     "q": query,
                     "api_key": api_key,
-                    "num": 8,
+                    "num": 20,
                 },
                 timeout=15,
             )
             resp.raise_for_status()
             data = resp.json()
 
-            for item in data.get("images_results", [])[:6]:
+            for item in data.get("images_results", [])[:15]:
                 url = item.get("original", item.get("link", ""))
                 if url and url not in seen_urls:
                     seen_urls.add(url)
@@ -526,13 +530,37 @@ def _image_search_character(
         except Exception as e:
             logger.warning("[CharResearch] Image search failed for '%s': %s", query, e)
 
+    # ── Fallback chain: Gemini → OpenAI → Grok → StepFun (if NSFW) ──
+    # Spec §3b: supplement SerpAPI results up to 10 images via LLM
+    # web-search providers so we don't ship to the pipeline with <10 refs.
+    if len(all_images) < 10:
+        try:
+            from .image_url_fallback import fetch_image_urls_fallback
+            allow_sensitive = bool(os.getenv("CHAR_RESEARCH_ALLOW_SENSITIVE", "0") == "1")
+            extra = fetch_image_urls_fallback(
+                display_name=display_name,
+                series_name=series_name,
+                danbooru_tag=danbooru_tag,
+                already_found=all_images,
+                target_count=10,
+                allow_sensitive=allow_sensitive,
+            )
+            if extra:
+                logger.info(
+                    "[CharResearch] Fallback chain added %d image URLs "
+                    "(total %d)", len(extra), len(all_images) + len(extra),
+                )
+                all_images.extend(extra)
+        except Exception as e:
+            logger.warning("[CharResearch] Fallback chain failed: %s", e)
+
     return all_images
 
 
 def _download_reference_images(
     image_results: list[dict],
     danbooru_tag: str,
-    max_images: int = 3,
+    max_images: int = 10,
 ) -> list[str]:
     """Download reference images and return as base64 strings.
 
@@ -966,13 +994,13 @@ def research_character(
             cached.reference_images_b64 = _download_reference_images(
                 [{"url": u} for u in cached.reference_image_urls],
                 danbooru_tag,
-                max_images=3,
+                max_images=10,
             )
             # Add user references
             if user_reference_images:
                 cached.reference_images_b64 = (
                     user_reference_images[:2] + cached.reference_images_b64
-                )[:4]
+                )[:12]
             cached.research_time_ms = (time.time() - t0) * 1000
             return cached
 
@@ -983,12 +1011,12 @@ def research_character(
     # Step 4: Image search + download
     logger.info("[CharResearch] Searching for reference images...")
     image_results = _image_search_character(display_name, series_name, danbooru_tag)
-    ref_images = _download_reference_images(image_results, danbooru_tag, max_images=3)
+    ref_images = _download_reference_images(image_results, danbooru_tag, max_images=10)
 
     # Add user-uploaded references (highest priority)
     if user_reference_images:
         ref_images = user_reference_images[:2] + ref_images
-        ref_images = ref_images[:4]
+        ref_images = ref_images[:12]
 
     # Step 5: LLM extraction from web search
     appearance_data = _extract_appearance_from_search(

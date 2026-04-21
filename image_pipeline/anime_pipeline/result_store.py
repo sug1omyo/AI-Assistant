@@ -13,6 +13,8 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +37,49 @@ _HINT_FILE_NAMES = {
     "depth": "02_depth",
     "canny": "02_canny",
 }
+
+
+# ── Spec §7: canonical filename helper ───────────────────────────────
+# Format: <session>_<feature>_<char>_<series>_<ts>.<ext>
+#   session = first 8 chars of job.job_id  (short but unique per run)
+#   feature = stage / purpose tag (e.g. "final", "beauty", "composition",
+#             "ref", "plan", "manifest")
+#   char    = job.character_tag (danbooru) or "unknown"
+#   series  = job.series_tag             or "unknown"
+#   ts      = int(time.time())  (epoch seconds, monotonic within a run)
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _slug(value: str, *, fallback: str = "unknown") -> str:
+    if not value:
+        return fallback
+    s = _SLUG_RE.sub("_", value.lower()).strip("_")
+    return s or fallback
+
+
+def spec_filename(
+    job: AnimePipelineJob,
+    feature: str,
+    ext: str = "png",
+    *,
+    ts: int | None = None,
+) -> str:
+    """Build a spec-compliant filename for job artifacts.
+
+    Example::
+
+        a1b2c3d4_final_raiden_shogun_genshin_impact_1713912345.png
+    """
+    session = (getattr(job, "job_id", "") or "").replace("-", "")[:8] or "session"
+    feature_slug = _slug(feature, fallback="artifact")
+    char_slug = _slug(getattr(job, "character_tag", ""), fallback="unknown")
+    series_slug = _slug(getattr(job, "series_tag", ""), fallback="unknown")
+    stamp = ts if ts is not None else int(time.time())
+    clean_ext = ext.lstrip(".").lower() or "png"
+    return (
+        f"{session}_{feature_slug}_{char_slug}_{series_slug}_{stamp}.{clean_ext}"
+    )
 
 
 class ResultStore:
@@ -83,6 +128,23 @@ class ResultStore:
         filepath = job_dir / "final_output.png"
         self._write_b64(filepath, job.final_image_b64)
         job.final_image_path = str(filepath)
+
+        # Spec §7: also emit a spec-named copy so downstream consumers
+        # can attribute artifacts back to a (char, series) identity.
+        try:
+            spec_name = spec_filename(job, feature="final", ext="png")
+            spec_path = job_dir / spec_name
+            # Hard-link when possible (fast, same inode), else copy bytes.
+            if not spec_path.exists():
+                try:
+                    import os as _os
+                    _os.link(filepath, spec_path)
+                except Exception:
+                    spec_path.write_bytes(filepath.read_bytes())
+            job.final_image_spec_path = str(spec_path)
+        except Exception as e:
+            logger.warning("[ResultStore] Spec-named final copy failed: %s", e)
+
         return str(filepath)
 
     def save_manifest(self, job: AnimePipelineJob, rank_result: Any = None) -> str:

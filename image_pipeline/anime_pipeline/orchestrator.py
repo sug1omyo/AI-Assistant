@@ -41,6 +41,11 @@ from .agents.detection_inpaint import DetectionInpaintAgent
 from .agents.final_ranker import FinalRanker
 from .agents.output_manifest import build_output_manifest
 from .result_store import ResultStore
+from .layer_painter import (
+    EyeBBox,
+    EyeFXSpec,
+    apply_artistic_layers,
+)
 from .character_research import (
     research_character,
     CharacterResearchResult,
@@ -60,6 +65,33 @@ def _pipeline_enabled() -> bool:
     """Check IMAGE_PIPELINE_V2 feature flag."""
     flag = os.getenv("IMAGE_PIPELINE_V2", "").lower()
     return flag in ("1", "true", "yes", "on")
+
+
+def _eye_fx_from_meta(meta: Any) -> EyeFXSpec:
+    """Parse ``job.metadata['eye_fx']`` (dict) into a typed :class:`EyeFXSpec`.
+
+    ``meta`` may be ``None`` (no override) or a dict like::
+
+        {
+          "eye_rolling": True,
+          "rolling_direction": "up",
+          "rolling_strength": 0.55,
+          "bloodshot": True,
+          "bloodshot_intensity": 0.65,
+        }
+    """
+    if not isinstance(meta, dict):
+        return EyeFXSpec()
+    try:
+        return EyeFXSpec(
+            eye_rolling=bool(meta.get("eye_rolling", False)),
+            rolling_direction=str(meta.get("rolling_direction", "up")),
+            rolling_strength=float(meta.get("rolling_strength", 0.55)),
+            bloodshot=bool(meta.get("bloodshot", False)),
+            bloodshot_intensity=float(meta.get("bloodshot_intensity", 0.65)),
+        )
+    except Exception:
+        return EyeFXSpec()
 
 
 _LORA_TAG_RE = re.compile(r"<lora:([^:>]+):([0-9]*\.?[0-9]+)>")
@@ -254,7 +286,10 @@ class AnimePipelineOrchestrator:
                 # Save best image from attempt 1
                 self._attempt_1_best_image = self._pick_best_intermediate(job)
 
-                # Generate a semantically equivalent but freshly worded prompt
+                # Retry attempt 2 reuses the EXACT original user prompt (100% match,
+                # no paraphrase). This was changed from a 95%-similarity variant
+                # because attempt-1 outputs already drifted; rephrasing on retry
+                # made the second image less faithful to the user's text.
                 variant_prompt = self._generate_variant_prompt(job.user_prompt)
                 original_prompt = job.user_prompt
 
@@ -263,13 +298,14 @@ class AnimePipelineOrchestrator:
                     "reason": "4 consecutive beauty passes below quality threshold",
                     "original_prompt": original_prompt,
                     "variant_prompt": variant_prompt,
+                    "prompt_fidelity": "verbatim_100pct",
                     "attempt_1_best_score": max(
                         (c.overall_score for c in job.critique_results), default=0.0
                     ),
                 })
                 logger.info(
-                    "[AnimePipeline] Re-plan attempt 2: '%s' → '%s'",
-                    original_prompt[:60], variant_prompt[:60],
+                    "[AnimePipeline] Re-plan attempt 2 (verbatim prompt): '%s'",
+                    original_prompt[:80],
                 )
 
                 # Re-run layer planning + composition + structure from scratch
@@ -313,6 +349,12 @@ class AnimePipelineOrchestrator:
             yield from self._run_stage(
                 "upscale", self._upscale, job, stage_num=9, total=9,
             )
+
+            # Stage 9b: Artistic layer painter (spec §8/§9/§10/§11).
+            # Post-upscale PIL pass: shadow + highlight + optional eye FX
+            # + vision-based eye-state classifier. All side-effects are
+            # best-effort; missing PIL/keys skip the pass without failing.
+            yield from self._run_layer_painter(job)
 
             # Finalize
             job.status = AnimePipelineStatus.COMPLETED
@@ -734,6 +776,127 @@ class AnimePipelineOrchestrator:
             "latency_ms": latency,
             "regions_processed": "detection_inpaint" in job.stages_executed,
         })
+
+    def _run_layer_painter(
+        self, job: AnimePipelineJob
+    ) -> Generator[dict[str, Any], None, None]:
+        """Spec §8/§9/§10/§11 post-upscale artistic layer pass.
+
+        Runs Layer-2 shadow, Layer-3 highlight, optional Layer-4 eye FX
+        (eye-rolling + bloodshot), and Layer-5 vision-based eye-state
+        classifier. All sub-layers are best-effort; the final image is
+        only replaced when at least one pass succeeded.
+        """
+        t0 = time.time()
+        if not job.final_image_b64:
+            return
+
+        yield self._event("stage_start", {
+            "stage": "layer_painter",
+            "stage_num": 10,
+            "total_stages": 10,
+            "description": "Artistic layers (shadow/highlight/eye FX) + eye-state classifier",
+        })
+
+        # Harvest face + eye bboxes from the most recent detection results.
+        face_bbox = self._extract_face_bbox_for_layers(job)
+        eye_boxes = self._extract_eye_bboxes_for_layers(job)
+
+        # Read FX spec from job metadata (set upstream by prompt analyzer
+        # or user options). Missing metadata ⇒ no eye-FX.
+        fx_meta = (job.metadata or {}).get("eye_fx") if hasattr(job, "metadata") else None
+        eye_fx = _eye_fx_from_meta(fx_meta)
+
+        requested_state = (
+            (job.metadata or {}).get("requested_eye_state", "open")
+            if hasattr(job, "metadata") else "open"
+        )
+
+        try:
+            result = apply_artistic_layers(
+                job.final_image_b64,
+                face_bbox=face_bbox,
+                eye_boxes=eye_boxes,
+                eye_fx=eye_fx,
+                requested_eye_state=requested_state,
+                do_shadow=True,
+                do_highlight=True,
+                do_classify=True,
+            )
+        except Exception as e:
+            logger.warning("[AnimePipeline] Layer painter crashed (non-fatal): %s", e)
+            yield self._event("stage_error", {
+                "stage": "layer_painter",
+                "error": str(e),
+                "fatal": False,
+            })
+            return
+
+        # Only overwrite when at least one pass actually modified bytes.
+        any_change = (
+            result.shadow_applied or result.highlight_applied
+            or result.eye_rolling_applied or result.bloodshot_applied
+        )
+        if any_change:
+            job.final_image_b64 = result.final_b64
+
+        # Stash classifier output on the job for the manifest/UI.
+        if result.eye_state is not None and hasattr(job, "metadata"):
+            job.metadata = {**(job.metadata or {}),
+                            "eye_state_report": result.eye_state.to_dict()}
+
+        latency = (time.time() - t0) * 1000
+        job.stage_timings_ms["layer_painter"] = latency
+
+        yield self._event("stage_complete", {
+            "stage": "layer_painter",
+            "stage_num": 10,
+            "total_stages": 10,
+            "latency_ms": latency,
+            **result.to_dict(),
+        })
+
+    def _extract_face_bbox_for_layers(self, job: AnimePipelineJob) -> Optional[EyeBBox]:
+        """Pull the highest-confidence face bbox out of the detection agent.
+
+        Returns ``None`` if detection didn't run or no face was found.
+        """
+        try:
+            latest = getattr(self._detection_inpaint, "last_result", None)
+            if not latest:
+                return None
+            regions_map = getattr(latest, "regions", {}) or {}
+            # Try face first, then face_bbox.
+            for rtype in ("face", "face_bbox"):
+                candidates = regions_map.get(rtype) or []
+                if not candidates:
+                    continue
+                best = max(candidates, key=lambda r: getattr(r, "confidence", 0.0))
+                return EyeBBox(
+                    int(getattr(best, "x1", 0)), int(getattr(best, "y1", 0)),
+                    int(getattr(best, "x2", 0)), int(getattr(best, "y2", 0)),
+                )
+        except Exception as e:
+            logger.debug("[AnimePipeline] face bbox extract failed: %s", e)
+        return None
+
+    def _extract_eye_bboxes_for_layers(self, job: AnimePipelineJob) -> list[EyeBBox]:
+        """Pull every eye bbox (single or pair) out of the detection agent."""
+        out: list[EyeBBox] = []
+        try:
+            latest = getattr(self._detection_inpaint, "last_result", None)
+            if not latest:
+                return out
+            regions_map = getattr(latest, "regions", {}) or {}
+            for rtype in ("eyes", "full_eyes"):
+                for region in (regions_map.get(rtype) or []):
+                    out.append(EyeBBox(
+                        int(getattr(region, "x1", 0)), int(getattr(region, "y1", 0)),
+                        int(getattr(region, "x2", 0)), int(getattr(region, "y2", 0)),
+                    ))
+        except Exception as e:
+            logger.debug("[AnimePipeline] eye bbox extract failed: %s", e)
+        return out
 
     def _apply_identity_overrides(self, job: AnimePipelineJob) -> None:
         """Inject solo-intent markers and collision-block negatives into
@@ -1754,11 +1917,23 @@ class AnimePipelineOrchestrator:
         )
 
     def _generate_variant_prompt(self, original_prompt: str) -> str:
-        """Generate a semantically equivalent but freshly worded prompt (95% same meaning).
+        """Return the user's original prompt VERBATIM for retry attempt 2.
 
-        Uses GPT-4o-mini / Gemini to paraphrase while keeping all key elements.
-        Falls back to a simple enhancement if no API is available.
+        Previously this method called an LLM to paraphrase the prompt at
+        ~95% semantic similarity, which caused attempt-2 outputs to drift
+        away from the user's exact wording. The user explicitly requested
+        100% fidelity on retry — no rephrasing, no additions, no removals.
+
+        We keep the method name and signature so the orchestrator's
+        re-plan flow stays unchanged; only the behavior is now identity.
         """
+        logger.info(
+            "[AnimePipeline] Retry-2 prompt fidelity: returning original prompt verbatim (100%% match)."
+        )
+        return original_prompt
+
+    def _generate_variant_prompt_legacy_paraphrase(self, original_prompt: str) -> str:
+        """DEPRECATED: paraphrasing variant kept for reference only. Not called."""
         try:
             import os
             import httpx

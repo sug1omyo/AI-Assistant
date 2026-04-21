@@ -31,9 +31,14 @@ from .character_research import _CHARACTER_ALIASES, _SERIES_HINTS
 
 # ── Preposition tokens ──────────────────────────────────────────────────
 # Vietnamese + English. Order matters only for regex compile determinism.
-_PREP_WORDS: tuple[str, ...] = ("from", "of", "in", "trong", "của")
+# Word prepositions: require \b boundaries. Slash separator handled
+# separately because it has no word boundary semantics.
+_PREP_WORDS: tuple[str, ...] = (
+    "from", "of", "in", "at",            # English
+    "trong", "của", "tại",               # Vietnamese
+)
 _PREP_PATTERN = re.compile(
-    r"\b(?:" + "|".join(re.escape(p) for p in _PREP_WORDS) + r")\b",
+    r"(?:\b(?:" + "|".join(re.escape(p) for p in _PREP_WORDS) + r")\b|\s*/\s*)",
     re.IGNORECASE,
 )
 

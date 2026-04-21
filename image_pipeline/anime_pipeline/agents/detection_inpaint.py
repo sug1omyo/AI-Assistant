@@ -52,8 +52,14 @@ logger = logging.getLogger(__name__)
 REGION_PROCESSING_ORDER: list[str] = [
     # Tier 1: Core anatomy
     "face", "full_eyes", "eyes", "mouth", "hand",
+    # Tier 1b (spec §6a): fine-grained face sub-regions — run AFTER face so
+    # the layer painter has face bbox context to sub-mask from.
+    "eyebrows", "nose", "lips", "iris", "pupil", "sclera",
+    # Tier 1c: hand sub-region
+    "fingernails",
     # Tier 2: Body detail
-    "animal_ear", "hair", "torso", "armpit", "female_body", "person_female", "feet",
+    "animal_ear", "hair", "neck", "torso", "navel", "armpit",
+    "female_body", "person_female", "thigh", "leg", "feet",
     # Tier 3: Clothing and accessories
     "clothes", "underwear", "thighhigh", "swimsuit", "leotard",
     # Tier 4: Cleanup
@@ -146,6 +152,44 @@ _REGION_LORA_MAP: dict[str, list[dict[str, Any]]] = {
         {"name": "Anime_artistic_2.safetensors", "strength_model": 0.55, "strength_clip": 0.45},
     ],
     "hand_bbox": [],
+
+    # ── Spec §6a: fine-grained sub-regions ──────────────────────────
+    # These share YOLO detectors with their parent region but are
+    # applied by the layer painter with tighter sub-masks (PIL) so the
+    # prompt/LoRA strength can target a smaller area.
+    "eyebrows": [
+        {"name": "Eyes_for_Illustrious_Lora_Perfect_anime_eyes.safetensors", "strength_model": 0.35, "strength_clip": 0.30},
+    ],
+    "nose": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.35, "strength_clip": 0.25},
+    ],
+    "lips": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.40, "strength_clip": 0.30},
+    ],
+    "iris": [
+        {"name": "Eyes_for_Illustrious_Lora_Perfect_anime_eyes.safetensors", "strength_model": 0.70, "strength_clip": 0.60},
+    ],
+    "pupil": [
+        {"name": "Eyes_for_Illustrious_Lora_Perfect_anime_eyes.safetensors", "strength_model": 0.60, "strength_clip": 0.50},
+    ],
+    "sclera": [
+        {"name": "Eyes_for_Illustrious_Lora_Perfect_anime_eyes.safetensors", "strength_model": 0.45, "strength_clip": 0.35},
+    ],
+    "fingernails": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.35, "strength_clip": 0.25},
+    ],
+    "navel": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.30, "strength_clip": 0.20},
+    ],
+    "neck": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.30, "strength_clip": 0.20},
+    ],
+    "thigh": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.30, "strength_clip": 0.20},
+    ],
+    "leg": [
+        {"name": "Anime_artistic_2.safetensors", "strength_model": 0.30, "strength_clip": 0.20},
+    ],
 }
 
 # ── Quality tags per region ────────────────────────────────────────
@@ -305,6 +349,64 @@ _REGION_POSITIVE: dict[str, str] = {
         f"{_QUALITY_PREFIX}, "
         "detailed hands, correct fingers, well-drawn hands"
     ),
+
+    # ── Spec §6a: fine-grained sub-regions ──────────────────────────
+    "eyebrows": (
+        f"{_QUALITY_PREFIX}, "
+        "detailed eyebrows, clean brow shape, individual brow hairs, "
+        "matching eyebrow color, proper arch, natural eyebrow density"
+    ),
+    "nose": (
+        f"{_QUALITY_PREFIX}, "
+        "perfect nose shape, subtle nose bridge, detailed nostrils, "
+        "proportional nose, natural nose shading"
+    ),
+    "lips": (
+        f"{_QUALITY_PREFIX}, "
+        "beautiful detailed lips, soft lip shading, clean lip line, "
+        "natural lip color, glossy highlight, symmetric lip shape"
+    ),
+    "iris": (
+        f"{_QUALITY_PREFIX}, "
+        "ultra detailed iris, intricate iris texture, radial iris pattern, "
+        "clear limbal ring, vivid iris color, sharp iris definition, "
+        "matching iris color both eyes"
+    ),
+    "pupil": (
+        f"{_QUALITY_PREFIX}, "
+        "perfectly round pupils, matching pupil size, centered pupil, "
+        "deep black pupil, sharp pupil edge"
+    ),
+    "sclera": (
+        f"{_QUALITY_PREFIX}, "
+        "clean white sclera, smooth eye white, natural subtle shading, "
+        "no redness, bright sclera"
+    ),
+    "fingernails": (
+        f"{_QUALITY_PREFIX}, "
+        "detailed fingernails, natural nail shape, glossy nail polish, "
+        "clean nail edges, proper nail proportions, detailed nail color"
+    ),
+    "navel": (
+        f"{_QUALITY_PREFIX}, "
+        "detailed navel, proper navel shape, smooth skin around navel, "
+        "natural belly contour"
+    ),
+    "neck": (
+        f"{_QUALITY_PREFIX}, "
+        "smooth neck, detailed collarbone, proper neck proportions, "
+        "natural skin texture"
+    ),
+    "thigh": (
+        f"{_QUALITY_PREFIX}, "
+        "detailed thighs, smooth skin, proper thigh proportions, "
+        "natural muscle shading"
+    ),
+    "leg": (
+        f"{_QUALITY_PREFIX}, "
+        "detailed legs, smooth skin, proper leg anatomy, "
+        "natural calf shading, well-proportioned"
+    ),
 }
 
 _REGION_NEGATIVE: dict[str, str] = {
@@ -412,6 +514,47 @@ _REGION_NEGATIVE: dict[str, str] = {
     "hand_bbox": (
         "bad hands, extra fingers, deformed hands"
     ),
+
+    # ── Spec §6a: fine-grained sub-regions ──────────────────────────
+    "eyebrows": (
+        "deformed eyebrows, missing eyebrows, asymmetrical brows, "
+        "unibrow, bushy mess, wrong brow color"
+    ),
+    "nose": (
+        "deformed nose, missing nose, crooked nose, oversized nose"
+    ),
+    "lips": (
+        "deformed lips, asymmetric lips, bad lip shading, cracked lips, "
+        "off-color lips"
+    ),
+    "iris": (
+        "mismatched iris color, blurry iris, flat iris, "
+        "featureless iris, wrong eye color"
+    ),
+    "pupil": (
+        "uneven pupil size, off-center pupil, deformed pupil, "
+        "square pupil"
+    ),
+    "sclera": (
+        "red sclera, bloodshot, yellow sclera, dirty eye white, "
+        "veiny sclera"
+    ),
+    "fingernails": (
+        "bad nails, missing nails, deformed fingernails, "
+        "dirty nails"
+    ),
+    "navel": (
+        "deformed navel, missing navel, extra navel"
+    ),
+    "neck": (
+        "deformed neck, long neck, too-short neck, bad collarbone"
+    ),
+    "thigh": (
+        "deformed thighs, bad thigh anatomy, asymmetric thighs"
+    ),
+    "leg": (
+        "deformed legs, extra legs, missing leg, bad leg anatomy"
+    ),
 }
 
 
@@ -476,6 +619,9 @@ class DetectionInpaintAgent:
 
         # Run detection
         detection = self._detector.detect(current_image_b64)
+        # Spec §8/§9: expose the latest detection result to downstream
+        # consumers (layer_painter needs face + eye bboxes).
+        self.last_result = detection
         if detection.total_regions == 0:
             logger.info("[DetectionInpaint] No regions detected, skipping")
             job.stage_timings_ms["detection_inpaint"] = (time.time() - t0) * 1000

@@ -164,6 +164,37 @@ CHARACTER_ALIASES: dict[str, list[str]] = {
     "tape_spread": [
         "tape spread",
     ],
+    "taped_eyes_il": [
+        # English natural phrases
+        "taped eyes", "eyes taped", "eyes taped open", "taped eyes open",
+        "eyes forced open", "eyes held open", "forced eyes open",
+        "duct tape eyes", "tape on eyes", "eyelids taped",
+        "unconscious taped eyes",
+        # Vietnamese natural phrases
+        "mắt dán băng", "băng dán mắt", "dán băng mắt",
+        "mắt bị dán", "mắt bị buộc mở", "mắt bị giữ mở",
+        "mắt trợn dán băng", "bất tỉnh mắt dán",
+    ],
+    "sleeping_eyes_open_il": [
+        # English
+        "0utc0ld",
+        "unconscious eyes open", "sleeping with eyes open", "eyes open while sleeping",
+        "eyes open unconscious", "open eyes unconscious", "glazed open eyes",
+        # Vietnamese
+        "ngủ mở mắt", "mắt mở khi ngủ", "bất tỉnh mắt mở",
+        "mắt mở lúc ngủ", "ngủ mà mắt mở",
+    ],
+    "unconscious_taped_combo": [
+        # Vietnamese combo phrases — primary triggers
+        "ngủ mở mắt dán băng", "mắt mở dán băng",
+        "mắt bị dán khi ngủ", "bất tỉnh mắt dán băng",
+        "dán băng mắt khi ngủ", "mắt mở cố định băng dính",
+        "băng dính cố định mắt mở",
+        # English combo phrases
+        "sleeping eyes taped open", "unconscious taped eyes open",
+        "eyes forced open taped", "taped sleeping eyes",
+        "unconscious with taped open eyes", "sleep taped eyes",
+    ],
     "vibrator_thigh": [
         "vibrator thighhighs", "vibrator thigh highs",
     ],
@@ -198,6 +229,9 @@ CHARACTER_WEIGHTS: dict[str, float] = {
     "furina": 0.80,
     "raiden": 0.80,
     "detail_tweaker": 0.5,
+    # Eye effect LoRAs — preset handles actual stacking weights
+    "sleeping_eyes_open_il": 0.80,
+    "unconscious_taped_combo": 0.75,
 }
 DEFAULT_WEIGHT = 0.85
 
@@ -242,6 +276,8 @@ CHARACTER_PRESET_MAP: dict[str, str] = {
     "jingliu": "anime_hsr_jingliu",
     "firefly": "anime_hsr_firefly",
     "furina":  "anime_genshin_furina",
+    # Combo preset: sleeping-eyes-open + taped-eyes stacked
+    "unconscious_taped_combo": "anime_unconscious_taped_eyes",
 }
 
 

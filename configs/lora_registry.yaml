@@ -315,6 +315,35 @@ eyes:
   detection_regions: ["full_eyes", "eyes"]
   notes: "No trigger needed — removes eye highlights passively"
 
+- name: "taped_eyes_while_sleep.safetensors"
+  location: comfyui
+  description: "Taped eyes — eyelids forced open with duct tape / hands. Hostage-style restrained
+    eyes concept. High-strength concept LoRA; needs strong activation to render the tape and
+    forced-open eyelids correctly."
+  strength_model_range: [0.85, 1.15]
+  strength_clip_range: [0.75, 1.00]
+  recommended_model: 1.00
+  recommended_clip: 0.90
+  compatible_models: ["illustrious", "pony"]
+  tags: ["eyes", "effect", "taped", "restrained", "unconscious"]
+  detection_regions: ["full_eyes", "eyes", "face"]
+  trigger_words:
+    - "eyes taped open with hand"
+    - "duct tape forcing eyes wide open"
+    - "thick silver duct tape wrapped around head"
+    - "hands pressing tape on eyes"
+    - "fingers holding eyelids open"
+    - "taped eyes unable to blink"
+    - "bulging wide eyes"
+    - "bloodshot glassy eyes"
+    - "unconscious with taped eyes"
+  keywords: ["taped eyes", "duct tape", "forced open eyes", "eyelids held open", "restrained",
+    "unconscious"]
+  notes: "Strength must be HIGH — drop below 0.85 and the tape stops rendering. For detection
+    inpaint passes use 0.75–0.90; for full-image gen use 0.95–1.10. Pairs well with
+    sleeping_eyes_open_illustrious (0utc0ld) and bloodshot_eyes_v2 for the unconscious +
+    bloodshot look. Reduce each by ~30% when stacking."
+
 # ── Face Effects ─────────────────────────────────────────────────
 
 face:
@@ -2120,3 +2149,49 @@ character:
     XL version bundled on same page."
   civitai_version_id: 1051022
   civitai_filename: All_Characters_from_Youkoso_Sukebe_Elf_no_Mori_e_r1.safetensors
+
+# ── Newly added (from LORA/new_2/ — Apr 22 2026) ─────────────────
+
+- name: "genshin-char-model.safetensors"
+  location: comfyui
+  description: "Genshin Impact character pack (Illustrious base). Multi-character LoRA covering most female roster."
+  strength_model_range: [0.55, 0.85]
+  strength_clip_range: [0.45, 0.75]
+  recommended_model: 0.70
+  recommended_clip: 0.60
+  compatible_models: ["illustrious"]
+  tags: ["character", "genshin_impact", "all_in_one"]
+  notes: "Use danbooru-style character tag, e.g. 'raiden_shogun', 'hu_tao', 'ganyu'."
+
+- name: "GenshinStyleSXL.safetensors"
+  location: comfyui
+  description: "Genshin Impact in-game art style (SDXL/Illustrious). Mimics official splash art shading."
+  strength_model_range: [0.40, 0.70]
+  strength_clip_range: [0.30, 0.55]
+  recommended_model: 0.55
+  recommended_clip: 0.45
+  compatible_models: ["sdxl", "illustrious"]
+  tags: ["style", "genshin", "game_art"]
+  notes: "Style LoRA — pair with character LoRA for in-game look."
+
+- name: "midis_ExpressiveLanguageLovingit_V0.5[IL].safetensors"
+  location: comfyui
+  description: "Text / speech-bubble / expressive-language helper for Illustrious. Adds clear readable text overlays."
+  strength_model_range: [0.40, 0.80]
+  strength_clip_range: [0.30, 0.65]
+  recommended_model: 0.65
+  recommended_clip: 0.50
+  compatible_models: ["illustrious"]
+  tags: ["text", "speech_bubble", "expression", "helper"]
+  notes: "Use only when prompt explicitly contains text/speech-bubble. Avoid for clean portraits."
+
+- name: "WAI_NSFW-illustrious_NSFW-illustrious-SDXL_16.safetensors"
+  location: comfyui
+  description: "WAI NSFW Illustrious LoRA companion (rank 16). NSFW concept booster matching the WAI Illustrious base checkpoint user already has."
+  strength_model_range: [0.30, 0.60]
+  strength_clip_range: [0.25, 0.50]
+  recommended_model: 0.45
+  recommended_clip: 0.35
+  compatible_models: ["illustrious", "sdxl"]
+  tags: ["nsfw", "booster", "wai"]
+  notes: "Companion to WAI Illustrious base. Keep strength low to avoid style drift."

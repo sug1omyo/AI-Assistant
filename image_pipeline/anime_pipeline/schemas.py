@@ -618,6 +618,8 @@ class AnimePipelineJob:
     final_image_b64: Optional[str] = None
     final_image_url: Optional[str] = None
     final_image_path: Optional[str] = None
+    # Spec §7 canonical filename: <session>_<feature>_<char>_<series>_<ts>.<ext>
+    final_image_spec_path: Optional[str] = None
     # Secondary output: populated when re-plan attempt 1 also produced a usable image.
     # Both images are returned to the user when neither attempt passes quality.
     secondary_image_b64: Optional[str] = None

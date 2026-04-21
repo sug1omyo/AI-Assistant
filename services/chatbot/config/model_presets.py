@@ -59,6 +59,8 @@ LORA_CATALOG = {
     "xray_cum":               {"file": "X-ray_cum_inflation.safetensors",                                         "trigger": ["cum inflation", "xray inflation"],                                "category": "nsfw", "base": "sdxl"},
     "tape_gape":              {"file": "TapeGape-000037.safetensors",                                             "trigger": ["tape gape"],                                                      "category": "nsfw", "base": "sdxl"},
     "tape_spread":            {"file": "Tape_Spread-000023.safetensors",                                          "trigger": ["tape spread"],                                                    "category": "nsfw", "base": "sdxl"},
+    "taped_eyes_il":          {"file": "taped_eyes_while_sleep.safetensors",                                       "trigger": ["eyes taped open with hand", "duct tape forcing eyes wide open", "thick silver duct tape wrapped around head", "hands pressing tape on eyes", "fingers holding eyelids open", "taped eyes unable to blink", "bulging wide eyes", "bloodshot glassy eyes", "unconscious with taped eyes"], "weight": 1.0, "clip_weight": 0.9, "category": "nsfw", "base": "ilxl"},
+    "sleeping_eyes_open_il":   {"file": "Unconscious_with_eyes_open.safetensors",                                    "trigger": ["0utc0ld"],                                                                                                                                                                                                                                                                                                                                                                                                                                                       "weight": 0.80, "clip_weight": 0.70, "category": "nsfw", "base": "ilxl"},
     "vibrator_thigh":         {"file": "vibrator_in_thighhighs.safetensors",                                      "trigger": ["vibrator thighhighs", "vibrator thigh highs"],                   "category": "nsfw", "base": "sdxl"},
     "vibrator_underwear":     {"file": "Vibrator in underwear and legs spread.safetensors",                       "trigger": ["vibrator in underwear"],                                          "category": "nsfw", "base": "sdxl"},
     "cervix":                 {"file": "cervix.safetensors",                                                      "trigger": ["cervix view", "cervix"],                                          "category": "nsfw", "base": "sdxl"},
@@ -94,6 +96,28 @@ WORKFLOW_PRESETS = {
         "width": 832,
         "height": 1216,
         "category": "anime",
+        "hires_fix": False,
+    },
+
+    # -- Unconscious sleeping-eyes-open + taped-eyes combo (ILXL stacked) -
+    "anime_unconscious_taped_eyes": {
+        "name": "Unconscious Eyes — Taped Open (Combo)",
+        "description": "Stacks sleeping-eyes-open (0utc0ld) + taped-eyes LoRAs for an unconscious "
+                       "character whose eyelids are forced open by duct tape. Both LoRAs run at "
+                       "reduced stacking weights (~25% cut). All trigger phrases auto-injected.",
+        "checkpoint": "ChenkinNoob-XL-V0.2.safetensors",
+        "default_loras": [
+            {"key": "sleeping_eyes_open_il", "weight": 0.65},
+            {"key": "taped_eyes_il",         "weight": 0.75},
+        ],
+        "negative_prompt": "worst quality, low quality, blurry, bad anatomy, bad hands, watermark, "
+                           "text, signature, closed eyes, eyes shut, normal eyes, healthy eyes",
+        "cfg_scale": 5.5,
+        "steps": 28,
+        "sampler": "euler_ancestral",
+        "width": 832,
+        "height": 1216,
+        "category": "nsfw",
         "hires_fix": False,
     },
 
