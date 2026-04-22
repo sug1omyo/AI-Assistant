@@ -251,6 +251,41 @@ def chat_stream():
         memory_ids = data.get('memory_ids', [])
         mcp_selected_files = data.get('mcp_selected_files', [])
         history = data.get('history')
+        conversation_id = (data.get('conversation_id') or '').strip()[:64]
+        # Validate conversation_id format (alphanumeric + _ -, max 64 chars)
+        import re as _re_cid
+        if conversation_id and not _re_cid.fullmatch(r'[A-Za-z0-9_\-]{1,64}', conversation_id):
+            conversation_id = ''
+        if conversation_id:
+            logger.info(f"[SSE:{request_id}] conversation_id={conversation_id}")
+
+        # ── Image context from previously generated images in this conversation ──
+        # Frontend sends last N images with {url, prompt, provider, model, timestamp}
+        # We inject as system context so the LLM can reference them in follow-ups.
+        generated_images = data.get('generated_images', []) or []
+        if not isinstance(generated_images, list):
+            generated_images = []
+        # Cap and validate each item
+        _img_ctx_lines = []
+        for _img in generated_images[:5]:
+            if not isinstance(_img, dict):
+                continue
+            _prompt = str(_img.get('prompt', ''))[:200]
+            _url = str(_img.get('url', ''))[:500]
+            _provider = str(_img.get('provider', ''))[:50]
+            _model = str(_img.get('model', ''))[:50]
+            if _prompt or _url:
+                _img_ctx_lines.append(
+                    f"- Prompt: {_prompt}\n  URL: {_url}\n  Provider: {_provider}/{_model}"
+                )
+        if _img_ctx_lines:
+            _img_ctx = (
+                "\n\n[\u00c1nh \u0111\u00e3 \u0111\u01b0\u1ee3c t\u1ea1o trong cu\u1ed9c tr\u00f2 chuy\u1ec7n n\u00e0y]\n"
+                + "\n".join(_img_ctx_lines)
+                + "\n[B\u1ea1n c\u00f3 th\u1ec3 tham chi\u1ebfu c\u00e1c \u1ea3nh n\u00e0y khi ng\u01b0\u1eddi d\u00f9ng h\u1ecfi v\u1ec1 ch\u00fang.]\n"
+            )
+            message = (message or '') + _img_ctx
+            logger.info(f"[SSE:{request_id}] Injected {len(_img_ctx_lines)} image(s) into context")
 
         # ── Runtime Skill Resolution + Application ────────────────────
         skill_overrides = resolve_skill(

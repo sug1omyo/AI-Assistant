@@ -3,8 +3,8 @@
  * Initializes and connects all modules
  */
 
-import { ChatManager } from './modules/chat-manager.js';
-import { APIService } from './modules/api-service.js';
+import { ChatManager } from './modules/chat-manager.js?v=20260422';
+import { APIService } from './modules/api-service.js?v=20260422';
 import { UIUtils } from './modules/ui-utils.js';
 import { MessageRenderer } from './modules/message-renderer.js';
 import { FileHandler } from './modules/file-handler.js';
@@ -71,13 +71,33 @@ class ChatBotApp {
         window.addEventListener('chatListNeedsUpdate', () => {
             this.renderChatList();
         });
+
+        // ── ChatGPT-style URL navigation: handle browser back/forward ──
+        // chat-manager.js already syncs the URL on newChat/switchChat/delete.
+        window.addEventListener('popstate', (event) => {
+            const path = window.location.pathname;
+            const m = path.match(/^\/c\/([A-Za-z0-9_\-]{1,64})$/);
+            const targetId = (event.state && event.state.chatId) || (m ? m[1] : null);
+
+            if (targetId && this.chatManager.chatSessions[targetId]) {
+                if (targetId !== this.chatManager.currentChatId) {
+                    this.chatManager.currentChatId = targetId;
+                    localStorage.setItem('lastActiveChatId', targetId);
+                    this.loadCurrentChat();
+                    this.renderChatList();
+                }
+            } else if (path === '/' || path === '') {
+                // Root \u2014 keep current chat but ensure UI reflects state
+                this.renderChatList();
+            }
+        });
         
         // Initialize UI elements
         const elements = this.uiUtils.initElements();
         
         // Load chat sessions
         this.chatManager.loadSessions();
-        console.log('[DEBUG] After loadSessions: chatSessions=', Object.keys(this.chatManager.chatSessions), 'currentId=', this.chatManager.currentChatId);
+        window.CHATBOT_DEBUG && console.log('[DEBUG] After loadSessions: chatSessions=', Object.keys(this.chatManager.chatSessions), 'currentId=', this.chatManager.currentChatId);
         this.renderChatList();
         try {
             this.loadCurrentChat();
@@ -313,7 +333,7 @@ class ChatBotApp {
         });
         
         // Update UI
-        console.log('[DEBUG] init() renderChatList: chatSessions=', Object.keys(this.chatManager.chatSessions), 'currentId=', this.chatManager.currentChatId);
+        window.CHATBOT_DEBUG && console.log('[DEBUG] init() renderChatList: chatSessions=', Object.keys(this.chatManager.chatSessions), 'currentId=', this.chatManager.currentChatId);
         this.uiUtils.updateStorageDisplay(this.chatManager.getStorageInfo());
         this.uiUtils.renderChatList(
             this.chatManager.chatSessions,
@@ -334,7 +354,7 @@ class ChatBotApp {
         
         // Delayed re-render to catch any async timing issues
         setTimeout(() => {
-            console.log('[DEBUG] Delayed re-render: chatSessions=', Object.keys(this.chatManager.chatSessions));
+            window.CHATBOT_DEBUG && console.log('[DEBUG] Delayed re-render: chatSessions=', Object.keys(this.chatManager.chatSessions));
             this.renderChatList();
         }, 500);
         
@@ -899,6 +919,18 @@ class ChatBotApp {
                     lastAssistantMsg.dataset.igv2IsImage = 'true';
                 }
 
+                // ── Record into session for context-aware follow-ups ──
+                try {
+                    this.chatManager.addGeneratedImage({
+                        url: imgSrc,
+                        prompt: result.prompt_used || message,
+                        provider: result.provider,
+                        model: result.model,
+                    });
+                } catch (e) {
+                    console.warn('[App] addGeneratedImage failed:', e);
+                }
+
                 // ── 4-Agents Deep Thinking Analysis (when multi-thinking mode) ──
                 if (formValues.thinkingMode === 'multi-thinking' && result.success) {
                     const thinkingSection = this.messageRenderer.createThinkingSection(null, true);
@@ -1198,6 +1230,13 @@ class ChatBotApp {
             elements.chatContainer.appendChild(streamMsgDiv);
 
             try {
+                // ── Pull conversation context: id + recent generated images ──
+                const _currentSession = this.chatManager.getCurrentSession ? this.chatManager.getCurrentSession() : null;
+                const _conversationId = this.chatManager.currentChatId || '';
+                const _recentGenImages = (_currentSession && Array.isArray(_currentSession.generatedImages))
+                    ? _currentSession.generatedImages.slice(-3)  // last 3 images
+                    : [];
+
                 await this.apiService.sendStreamMessage(
                     {
                         message: message,
@@ -1211,6 +1250,8 @@ class ChatBotApp {
                         images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
                         tools: activeTools,
                         skill: window.skillManager ? window.skillManager.getActiveSkillId() : '',
+                        conversationId: _conversationId,
+                        generatedImages: _recentGenImages,
                         ...window.getAdvancedModelParams(),
                     },
                     this.currentAbortController.signal,
@@ -1801,23 +1842,38 @@ class ChatBotApp {
     }
 
     /**
-     * Build conversation history
+     * Build conversation history.
+     * Caps at MAX_HISTORY_MESSAGES recent turns to keep token usage and
+     * upload payload bounded for long conversations.
      */
     buildConversationHistory() {
+        const MAX_HISTORY_MESSAGES = 30;
+        const MAX_CONTENT_CHARS = 4000;  // per-message safety cap
         const elements = this.uiUtils.elements;
         const messages = Array.from(elements.chatContainer.children);
         const history = [];
-        
+
         messages.forEach(msgEl => {
+            // Skip the welcome screen and any non-message elements
+            if (msgEl.id === 'welcomeScreen') return;
             const isUser = msgEl.classList.contains('user');
-            const content = msgEl.querySelector('.message-text')?.textContent || '';
-            
+            const isAssistant = msgEl.classList.contains('assistant');
+            if (!isUser && !isAssistant) return;
+            let content = msgEl.querySelector('.message-text')?.textContent || '';
+            if (content.length > MAX_CONTENT_CHARS) {
+                content = content.slice(0, MAX_CONTENT_CHARS) + '\n…(truncated)';
+            }
+            if (!content.trim()) return;
             history.push({
                 role: isUser ? 'user' : 'assistant',
-                content: content
+                content: content,
             });
         });
-        
+
+        // Keep only the most recent N turns
+        if (history.length > MAX_HISTORY_MESSAGES) {
+            return history.slice(-MAX_HISTORY_MESSAGES);
+        }
         return history;
     }
 
@@ -1867,7 +1923,7 @@ class ChatBotApp {
         const messages = Array.from(elements.chatContainer.children)
             .filter(el => el.id !== 'welcomeScreen')
             .map(el => this._stripBase64ForStorage(el.outerHTML));
-        console.log('[DEBUG] saveCurrentSession: chatId=', this.chatManager.currentChatId, 'messages=', messages.length, 'updateTimestamp=', updateTimestamp);
+        window.CHATBOT_DEBUG && console.log('[DEBUG] saveCurrentSession: chatId=', this.chatManager.currentChatId, 'messages=', messages.length, 'updateTimestamp=', updateTimestamp);
         
         this.chatManager.updateCurrentSession(messages, updateTimestamp);
         await this.chatManager.saveSessions();

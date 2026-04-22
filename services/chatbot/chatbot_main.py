@@ -1317,6 +1317,37 @@ def index():
     return render_template('index.html', firebase_config=firebase_config)
 
 
+@app.route('/c/<conversation_id>')
+def index_with_conversation(conversation_id):
+    """SPA route — client-side JS reads conversation_id from URL and loads matching session.
+
+    The backend simply serves index.html; conversation restoration happens client-side
+    from localStorage (or via /conversations/<id> API for server-stored conversations).
+    Allows ChatGPT-style shareable URLs and browser back/forward navigation.
+    """
+    if not session.get('authenticated'):
+        return redirect('/login')
+    if 'session_id' not in session:
+        session['session_id'] = str(uuid.uuid4())
+
+    # Basic id validation: allow `chat_<digits>` (frontend format) and UUID-like ids.
+    # Reject anything else to prevent path-traversal / open-redirect noise in logs.
+    import re as _re
+    if not _re.fullmatch(r'[A-Za-z0-9_\-]{1,64}', conversation_id or ''):
+        return redirect('/')
+
+    firebase_config = json.dumps({
+        "apiKey": os.getenv("FIREBASE_API_KEY", ""),
+        "authDomain": os.getenv("FIREBASE_AUTH_DOMAIN", ""),
+        "projectId": os.getenv("FIREBASE_PROJECT_ID", ""),
+        "storageBucket": os.getenv("FIREBASE_STORAGE_BUCKET", ""),
+        "messagingSenderId": os.getenv("FIREBASE_MESSAGING_SENDER_ID", ""),
+        "appId": os.getenv("FIREBASE_APP_ID", ""),
+        "measurementId": os.getenv("FIREBASE_MEASUREMENT_ID", "")
+    })
+    return render_template('index.html', firebase_config=firebase_config)
+
+
 @app.route('/new')
 def index_new():
     """New Tailwind version (experimental)"""
