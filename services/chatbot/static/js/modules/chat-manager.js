@@ -19,6 +19,7 @@ export class ChatSession {
         this.conversationBranches = {}; // Branch snapshots: { messageId: { versionIndex: [messageHTML, ...] } }
         this.pinned = false;  // Pinned chats always appear at top
         this.order = null;    // Custom order (null = auto-sort by updatedAt)
+        this.generatedImages = []; // Track AI-generated images for context-aware follow-ups
         this.createdAt = new Date();
         this.updatedAt = new Date();
     }
@@ -65,6 +66,10 @@ export class ChatManager {
                     if (!Array.isArray(this.chatSessions[id].structuredMessages)) {
                         this.chatSessions[id].structuredMessages = [];
                     }
+                    // Ensure generatedImages exists (added for image context injection)
+                    if (!Array.isArray(this.chatSessions[id].generatedImages)) {
+                        this.chatSessions[id].generatedImages = [];
+                    }
                 });
                 console.log('[ChatManager] Loaded', Object.keys(this.chatSessions).length, 'sessions from localStorage');
             } catch (e) {
@@ -79,18 +84,34 @@ export class ChatManager {
             console.log('[ChatManager] No sessions found, creating new chat');
             this.newChat();
         } else {
-            // Restore last active chat (persisted across F5/reload)
-            const lastActive = localStorage.getItem('lastActiveChatId');
-            if (lastActive && this.chatSessions[lastActive]) {
-                this.currentChatId = lastActive;
-                console.log('[ChatManager] Restored last active chat:', this.currentChatId);
+            // 1. Prefer URL — /c/<id> takes precedence over localStorage
+            let urlChatId = null;
+            try {
+                const m = (typeof window !== 'undefined' ? window.location.pathname : '')
+                    .match(/^\/c\/([A-Za-z0-9_\-]{1,64})$/);
+                if (m) urlChatId = m[1];
+            } catch (_) { /* ignore */ }
+
+            if (urlChatId && this.chatSessions[urlChatId]) {
+                this.currentChatId = urlChatId;
+                localStorage.setItem('lastActiveChatId', urlChatId);
+                console.log('[ChatManager] Restored from URL:', urlChatId);
             } else {
-                // Fall back to most recently updated
-                const sortedIds = Object.keys(this.chatSessions).sort((a, b) =>
-                    this.chatSessions[b].updatedAt - this.chatSessions[a].updatedAt
-                );
-                this.currentChatId = sortedIds[0];
-                console.log('[ChatManager] Loaded most recent chat:', this.currentChatId);
+                // 2. Restore last active chat (persisted across F5/reload)
+                const lastActive = localStorage.getItem('lastActiveChatId');
+                if (lastActive && this.chatSessions[lastActive]) {
+                    this.currentChatId = lastActive;
+                    console.log('[ChatManager] Restored last active chat:', this.currentChatId);
+                } else {
+                    // 3. Fall back to most recently updated
+                    const sortedIds = Object.keys(this.chatSessions).sort((a, b) =>
+                        this.chatSessions[b].updatedAt - this.chatSessions[a].updatedAt
+                    );
+                    this.currentChatId = sortedIds[0];
+                    console.log('[ChatManager] Loaded most recent chat:', this.currentChatId);
+                }
+                // Sync URL to whatever we picked (replaceState — don't pollute history)
+                this._syncUrl(this.currentChatId, true);
             }
         }
     }
@@ -337,6 +358,25 @@ export class ChatManager {
     }
 
     /**
+     * Update browser URL to /c/<chatId> without reloading.
+     * No-op if chatId is falsy or History API is unavailable.
+     */
+    _syncUrl(chatId, replace = false) {
+        if (!chatId || typeof window === 'undefined' || !window.history) return;
+        const targetPath = `/c/${chatId}`;
+        if (window.location.pathname === targetPath) return;
+        try {
+            if (replace) {
+                window.history.replaceState({ chatId }, '', targetPath);
+            } else {
+                window.history.pushState({ chatId }, '', targetPath);
+            }
+        } catch (e) {
+            // Fail silent — URL routing is a UX nicety, not critical
+        }
+    }
+
+    /**
      * Create new chat session
      */
     newChat() {
@@ -346,6 +386,7 @@ export class ChatManager {
         this.currentChatId = id;
         this.chatHistory = [];
         localStorage.setItem('lastActiveChatId', id);
+        this._syncUrl(id);
         this.saveSessions();
         return id;
     }
@@ -358,6 +399,7 @@ export class ChatManager {
         
         this.currentChatId = chatId;
         localStorage.setItem('lastActiveChatId', chatId);
+        this._syncUrl(chatId);
         return true;
     }
 
@@ -376,6 +418,11 @@ export class ChatManager {
         // If deleting current chat, switch to the next available one (or none)
         if (chatId === this.currentChatId) {
             this.currentChatId = remainingIds.length > 0 ? remainingIds[0] : null;
+            if (this.currentChatId) {
+                this._syncUrl(this.currentChatId, true);
+            } else if (typeof window !== 'undefined' && window.history) {
+                try { window.history.replaceState({}, '', '/'); } catch (_) {}
+            }
         }
         // Keep persisted lastActiveChatId in sync
         if (localStorage.getItem('lastActiveChatId') === chatId) {
@@ -502,6 +549,37 @@ export class ChatManager {
      */
     getCurrentSession() {
         return this.chatSessions[this.currentChatId];
+    }
+
+    /**
+     * Record a generated image into the current session so future LLM turns
+     * can reference it. Bounded to last 10 entries to keep localStorage small.
+     * Skips base64 data URLs (too large to store) — only HTTP/relative URLs are kept.
+     */
+    addGeneratedImage(imageData) {
+        const session = this.getCurrentSession();
+        if (!session) return;
+        if (!Array.isArray(session.generatedImages)) session.generatedImages = [];
+
+        const url = String(imageData?.url || '');
+        // Drop base64 / data URLs and anything suspiciously long — would bloat localStorage
+        if (!url || url.startsWith('data:') || url.length > 500) {
+            console.warn('[ChatManager] addGeneratedImage: skipping non-URL image (base64 or oversized)');
+            return;
+        }
+
+        session.generatedImages.push({
+            url: url,
+            prompt: String(imageData?.prompt || '').slice(0, 500),
+            provider: String(imageData?.provider || '').slice(0, 50),
+            model: String(imageData?.model || '').slice(0, 50),
+            timestamp: Date.now(),
+        });
+        if (session.generatedImages.length > 10) {
+            session.generatedImages = session.generatedImages.slice(-10);
+        }
+        // Best-effort save (async, fire-and-forget)
+        this.saveSessions().catch(() => {});
     }
     
     /**

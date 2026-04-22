@@ -121,6 +121,8 @@ export class APIService {
             tools: params.tools || [],
             skill: params.skill || '',
             skill_auto_route: params.skillAutoRoute !== false ? 'true' : 'false',
+            conversation_id: params.conversationId || '',
+            generated_images: Array.isArray(params.generatedImages) ? params.generatedImages : [],
         };
 
         // Include images for vision models (base64 data URLs)
