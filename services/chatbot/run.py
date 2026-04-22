@@ -192,7 +192,7 @@ def _start_comfyui_if_needed() -> None:
         project_root / 'venv-image' / 'Scripts' / 'python.exe',
         project_root / 'venv-core' / 'Scripts' / 'python.exe',
     )
-    comfyui_args = ['main.py', '--listen', '0.0.0.0', '--port', str(port)]
+    comfyui_args = ['main.py', '--listen', '0.0.0.0', '--port', str(port)]  # nosec B104  # ComfyUI service binding
     comfyui_cpu_mode = os.getenv('COMFYUI_CPU_MODE', 'auto').lower()
     use_cpu = comfyui_cpu_mode == '1' or comfyui_cpu_mode == 'true'
     if comfyui_cpu_mode == 'auto' and not _python_has_cuda(python_exe):
@@ -298,7 +298,7 @@ if USE_FASTAPI:
         print(f">> Starting Chatbot (FastAPI) on port {port}")
         uvicorn.run(
             "run:app",
-            host=os.getenv('HOST', '0.0.0.0'),  # noqa: S104
+            host=os.getenv('HOST', '0.0.0.0'),  # nosec B104  # Intentional: service needs external access
             port=port,
             reload=reload,
             log_level='debug' if os.getenv('DEBUG', '0') == '1' else 'info',
@@ -326,7 +326,7 @@ elif USE_NEW_STRUCTURE:
         debug = os.getenv('FLASK_DEBUG', 'true').lower() == 'true'
 
         print(f">> Starting Chatbot (Flask New Structure) on port {port}")
-        app.run(host=os.getenv('HOST', '0.0.0.0'), port=port, debug=debug, threaded=True)  # noqa: S104
+        app.run(host=os.getenv('HOST', '0.0.0.0'), port=port, debug=debug, threaded=True)  # nosec B104  # Intentional: service needs external access
 
 else:
     # -- Legacy Flask monolith --

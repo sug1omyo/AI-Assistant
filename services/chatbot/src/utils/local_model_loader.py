@@ -58,17 +58,19 @@ class LocalModelLoader:
             
             # Load tokenizer with proper handling
             try:
-                tokenizer = AutoTokenizer.from_pretrained(
+                tokenizer = AutoTokenizer.from_pretrained(  # nosec B615  # local_files_only=True prevents remote downloads
                     model_path,
                     trust_remote_code=True,
-                    use_fast=False  # Use slow tokenizer for compatibility
+                    use_fast=False,  # Use slow tokenizer for compatibility
+                    local_files_only=True  # Security: only load from local path
                 )
             except Exception as e:
                 logger.warning(f"Failed to load AutoTokenizer, trying PreTrainedTokenizerFast: {e}")
                 from transformers import PreTrainedTokenizerFast
-                tokenizer = PreTrainedTokenizerFast.from_pretrained(
+                tokenizer = PreTrainedTokenizerFast.from_pretrained(  # nosec B615  # local_files_only=True prevents remote downloads
                     model_path,
-                    trust_remote_code=True
+                    trust_remote_code=True,
+                    local_files_only=True  # Security: only load from local path
                 )
             
             # Ensure pad token is set
@@ -97,29 +99,32 @@ class LocalModelLoader:
                     else:
                         max_memory = {0: "6GB", "cpu": "30GB"}
                     
-                    model = AutoModelForCausalLM.from_pretrained(
+                    model = AutoModelForCausalLM.from_pretrained(  # nosec B615  # local_files_only=True prevents remote downloads
                         model_path,
                         device_map="auto",
                         quantization_config=quantization_config,
                         trust_remote_code=True,
                         max_memory=max_memory,
-                        low_cpu_mem_usage=True  # Reduce CPU memory during loading
+                        low_cpu_mem_usage=True,  # Reduce CPU memory during loading
+                        local_files_only=True  # Security: only load from local path
                     )
                 else:
-                    model = AutoModelForCausalLM.from_pretrained(
+                    model = AutoModelForCausalLM.from_pretrained(  # nosec B615  # local_files_only=True prevents remote downloads
                         model_path,
                         device_map="auto",
                         torch_dtype=torch.float16,
                         trust_remote_code=True,
-                        low_cpu_mem_usage=True
+                        low_cpu_mem_usage=True,
+                        local_files_only=True  # Security: only load from local path
                     )
             else:
                 # CPU mode
                 logger.warning(f"No GPU detected, loading on CPU (will be slow)")
-                model = AutoModelForCausalLM.from_pretrained(
+                model = AutoModelForCausalLM.from_pretrained(  # nosec B615  # local_files_only=True prevents remote downloads
                     model_path,
                     device_map="cpu",
-                    trust_remote_code=True
+                    trust_remote_code=True,
+                    local_files_only=True  # Security: only load from local path
                 )
             
             self.models[model_key] = model

@@ -192,7 +192,7 @@ class MemoryManager:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
 
         with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(f"DELETE FROM memory_context {where}", params)
+            cursor = conn.execute(f"DELETE FROM memory_context {where}", params)  # nosec B608  # Uses parameterized query with params
             deleted = cursor.rowcount
             conn.commit()
 
@@ -908,25 +908,25 @@ class MemoryManager:
             placeholders = ",".join(["?"] * len(session_ids))
 
             cursor = conn.execute(
-                f"DELETE FROM tool_usage WHERE session_id IN ({placeholders})",
+                f"DELETE FROM tool_usage WHERE session_id IN ({placeholders})",  # nosec B608  # Uses parameterized query
                 session_ids
             )
             deleted_tool_usage = cursor.rowcount
 
             cursor = conn.execute(
-                f"DELETE FROM observations WHERE session_id IN ({placeholders})",
+                f"DELETE FROM observations WHERE session_id IN ({placeholders})",  # nosec B608  # Uses parameterized query
                 session_ids
             )
             deleted_observations = cursor.rowcount
 
             cursor = conn.execute(
-                f"DELETE FROM session_summaries WHERE session_id IN ({placeholders})",
+                f"DELETE FROM session_summaries WHERE session_id IN ({placeholders})",  # nosec B608  # Uses parameterized query
                 session_ids
             )
             deleted_summaries = cursor.rowcount
 
             cursor = conn.execute(
-                f"DELETE FROM sessions WHERE id IN ({placeholders})",
+                f"DELETE FROM sessions WHERE id IN ({placeholders})",  # nosec B608  # Uses parameterized query
                 session_ids
             )
             deleted_sessions = cursor.rowcount

@@ -209,7 +209,7 @@ class _RoundCache:
                 "tokens": t.tokens_used,
                 "insights": t.insights,
                 "conclusion": t.conclusion,
-                "content_hash": hashlib.md5(t.content.encode()).hexdigest()[:8],
+                "content_hash": hashlib.md5(t.content.encode(), usedforsecurity=False).hexdigest()[:8],
             }
             entries.append(entry)
             self.scores[t.id] = t.confidence
@@ -578,7 +578,7 @@ class ReasoningService:
             parts.append("**Insights (ranked):**")
             count = 0
             for score, persona, text in scored_insights:
-                h = hashlib.md5(text[:50].encode()).hexdigest()[:6]
+                h = hashlib.md5(text[:50].encode(), usedforsecurity=False).hexdigest()[:6]
                 if h in seen_hashes:
                     continue
                 seen_hashes.add(h)
@@ -775,7 +775,7 @@ class ReasoningService:
         """
         start_time = time.time()
         self._cache = _RoundCache()
-        self._cache.question_hash = hashlib.md5(message.encode()).hexdigest()[:12]
+        self._cache.question_hash = hashlib.md5(message.encode(), usedforsecurity=False).hexdigest()[:12]
 
         all_trajectories: List[ReasoningTrajectory] = []
         thinking_parts: List[str] = []
