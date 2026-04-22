@@ -240,7 +240,7 @@ def list_database_tables(db_path: str) -> Dict[str, Any]:
             columns = [{"name": col[1], "type": col[2]} for col in cursor.fetchall()]
 
             # Use parameterized query for SELECT, quote table name for safety
-            cursor.execute(f'SELECT COUNT(*) FROM "{table}"')
+            cursor.execute(f'SELECT COUNT(*) FROM "{table}"')  # nosec B608  # Table name validated above
             row_count = cursor.fetchone()[0]
 
             table_info.append({

@@ -5689,7 +5689,7 @@ def external_health():
 # Main entry point
 if __name__ == '__main__':
     debug_mode = os.getenv('DEBUG', '0') == '1'
-    host = os.getenv('HOST', '0.0.0.0')  # Default to 0.0.0.0 for external access
+    host = os.getenv('HOST', '0.0.0.0')  # nosec B104  # Intentional: service needs external access
     port = int(os.getenv('CHATBOT_PORT', '5000'))
     
     logger.info(f"ðŸš€ Starting ChatBot on {host}:{port} (debug={debug_mode})")

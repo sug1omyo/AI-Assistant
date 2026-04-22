@@ -316,7 +316,7 @@ SERVICE_VARS = [
     EnvVar(
         name="SERVICE_HOST",
         required=False,
-        default="0.0.0.0",
+        default="0.0.0.0",  # nosec B104  # Intentional: service needs external access
         description="Service host"
     ),
     EnvVar(
