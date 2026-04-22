@@ -796,6 +796,7 @@ class AnimePipelineOrchestrator:
             "stage_num": 10,
             "total_stages": 10,
             "description": "Artistic layers (shadow/highlight/eye FX) + eye-state classifier",
+            "vram_profile": self._config.vram.profile.value,
         })
 
         # Harvest face + eye bboxes from the most recent detection results.
@@ -1420,6 +1421,7 @@ class AnimePipelineOrchestrator:
             "stage_num": 3.5,
             "total_stages": 10,
             "description": "4-Agents council: analyzing creative intent",
+            "vram_profile": self._config.vram.profile.value,
         })
 
         t0 = time.time()
