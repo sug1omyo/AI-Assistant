@@ -232,12 +232,17 @@ def list_database_tables(db_path: str) -> Dict[str, Any]:
         # Get table info
         table_info = []
         for table in tables:
+            # Validate table name to prevent SQL injection (alphanumeric + underscore only)
+            if not table.replace('_', '').isalnum():
+                continue
+
             cursor.execute(f"PRAGMA table_info({table})")
             columns = [{"name": col[1], "type": col[2]} for col in cursor.fetchall()]
-            
-            cursor.execute(f"SELECT COUNT(*) FROM {table}")
+
+            # Use parameterized query for SELECT, quote table name for safety
+            cursor.execute(f'SELECT COUNT(*) FROM "{table}"')
             row_count = cursor.fetchone()[0]
-            
+
             table_info.append({
                 "name": table,
                 "columns": columns,

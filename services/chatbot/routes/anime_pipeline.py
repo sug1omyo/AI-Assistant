@@ -382,7 +382,7 @@ def upload_reference_images():
             ref_dir.mkdir(parents=True, exist_ok=True)
             for i, b64 in enumerate(refs_b64):
                 img_bytes = base64.b64decode(b64)
-                h = hashlib.md5(img_bytes).hexdigest()[:8]
+                h = hashlib.md5(img_bytes, usedforsecurity=False).hexdigest()[:8]
                 path = ref_dir / f"upload_{h}.png"
                 path.write_bytes(img_bytes)
                 logger.info("[anime_pipeline] Saved user ref: %s", path)

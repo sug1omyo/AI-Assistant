@@ -616,6 +616,12 @@ class MCPClient:
 
         for url in endpoints:
             try:
+                # Security: Validate URL scheme to prevent file:// or other unsafe schemes
+                from urllib.parse import urlparse
+                parsed_url = urlparse(url)
+                if parsed_url.scheme not in ('http', 'https'):
+                    continue
+
                 data = json.dumps(payload).encode("utf-8")
                 req = urllib.request.Request(
                     url,

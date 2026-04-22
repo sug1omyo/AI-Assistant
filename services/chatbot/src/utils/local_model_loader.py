@@ -61,14 +61,16 @@ class LocalModelLoader:
                 tokenizer = AutoTokenizer.from_pretrained(
                     model_path,
                     trust_remote_code=True,
-                    use_fast=False  # Use slow tokenizer for compatibility
+                    use_fast=False,  # Use slow tokenizer for compatibility
+                    local_files_only=True  # Security: only load from local path
                 )
             except Exception as e:
                 logger.warning(f"Failed to load AutoTokenizer, trying PreTrainedTokenizerFast: {e}")
                 from transformers import PreTrainedTokenizerFast
                 tokenizer = PreTrainedTokenizerFast.from_pretrained(
                     model_path,
-                    trust_remote_code=True
+                    trust_remote_code=True,
+                    local_files_only=True  # Security: only load from local path
                 )
             
             # Ensure pad token is set
@@ -103,7 +105,8 @@ class LocalModelLoader:
                         quantization_config=quantization_config,
                         trust_remote_code=True,
                         max_memory=max_memory,
-                        low_cpu_mem_usage=True  # Reduce CPU memory during loading
+                        low_cpu_mem_usage=True,  # Reduce CPU memory during loading
+                        local_files_only=True  # Security: only load from local path
                     )
                 else:
                     model = AutoModelForCausalLM.from_pretrained(
@@ -111,7 +114,8 @@ class LocalModelLoader:
                         device_map="auto",
                         torch_dtype=torch.float16,
                         trust_remote_code=True,
-                        low_cpu_mem_usage=True
+                        low_cpu_mem_usage=True,
+                        local_files_only=True  # Security: only load from local path
                     )
             else:
                 # CPU mode
@@ -119,7 +123,8 @@ class LocalModelLoader:
                 model = AutoModelForCausalLM.from_pretrained(
                     model_path,
                     device_map="cpu",
-                    trust_remote_code=True
+                    trust_remote_code=True,
+                    local_files_only=True  # Security: only load from local path
                 )
             
             self.models[model_key] = model

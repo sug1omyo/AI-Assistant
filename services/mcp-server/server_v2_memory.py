@@ -1012,10 +1012,17 @@ def http_request(
     import urllib.error
     import urllib.parse
 
-    # Security: only allow localhost
+    # Security: only allow localhost and http/https schemes
     allowed_hosts = ('localhost', '127.0.0.1', '0.0.0.0')
     try:
         parsed = urllib.parse.urlparse(url)
+        # Validate URL scheme
+        if parsed.scheme not in ('http', 'https'):
+            return _error_response(
+                "INVALID_SCHEME",
+                f"Only http and https schemes are allowed. Got: {parsed.scheme}",
+                {"scheme": parsed.scheme}
+            )
         if parsed.hostname not in allowed_hosts:
             return _error_response(
                 "HOST_NOT_ALLOWED",
